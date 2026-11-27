@@ -56,7 +56,7 @@ Roles reply to the boss with `send_message` to the boss session ID above.
 | `js/duel.js` (to write) | ball physics, hitting, ownership, KOs, lives, respawn, hit-freeze timing, bots | arena look, ball glow and trail, swing ring, KO effects, camera shake |
 | `js/main.js` (to write) | match flow and config | menu, results and rematch screens |
 | `js/hud.js`, `index.html` | — | owns these |
-| `js/arena.js` (to write, if Reece agrees) | — | arena meshes and lighting |
+| `js/arena.js` (to write) | — | arena meshes and lighting |
 | `../shared/` (all of it) | — (ask the boss, who asks the Director) | — (ask the boss, who asks the Director) |
 | `../tools/deflect-duel-*.js` | — (QC owns) | — (QC owns) |
 
@@ -90,3 +90,12 @@ check that Turbo Party still passes after any change to `../shared/`:
 - 2026-11-27 (via the Director): **Free assets and tools only** (see `../TEAMS.md`). Every
   third-party asset needs a line in `../CREDITS.md` before the boss merges it; assets made in
   code are exempt.
+- 2026-11-27: **Reece approved the build plan** and said "Director can approve for me": from
+  now on the Director's approvals count as Reece's for this team. Answers (logged by the Director):
+  the ball never KOs its owner; double KO → last hitter wins; stalemate = 12 s reset only (no
+  speed decay); neutral serve anyone can take; aim bend about 25° (tune after first playtest);
+  two round pillars, on by default behind one config flag; `js/arena.js` belongs to Art and UI;
+  car tuning via `TP.modeTuning({ pivot: 0.8 })`; one bot difficulty for v1 (random skill per bot);
+  ball stays flat at bumper height.
+- **First playable** = launch from the hub, pick 2–4 seats and 3/5 lives, play to a winner,
+  results + rematch, an all-bot match finishes with no errors, QC's smoke test passes.
