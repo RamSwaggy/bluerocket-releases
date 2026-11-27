@@ -39,8 +39,7 @@ Several files mix rules and visuals. Split them by **function**, not by file.
 | `js/game.js` | match flow, payouts, bonus trophies | card layouts and wording |
 | `js/arena.js` | physics loop, countdown/timer logic | camera, HUD hookup, hints |
 | `js/ui.js`, `js/main.js`, `index.html` | — | owns all of these (menu, HUD, cards, CSS) |
-| `../shared/js/car.js`, `input.js`, `util.js` | owns (car handling, controls) | car **model** (`buildCarMesh`) |
-| `../shared/js/fx.js`, `sfx.js` | — | owns (particles, sounds, music) |
+| `../shared/*` (car, input, util, fx, sfx, rumble) | **Director owns.** Ask the boss, who asks the Director. Mode tuning only through `TP.modeTuning` | same: request through the boss |
 | `../tools/*` and any tests | — (QC owns) | — (QC owns) |
 
 **Adding a minigame:** Gameplay writes the rules and bots, Art and UI does its arena look,
