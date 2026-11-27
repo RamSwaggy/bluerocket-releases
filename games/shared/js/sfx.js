@@ -48,20 +48,133 @@
     ko: () => { tone(900, 60, 0.5, "sawtooth", 0.16); tone(300, 40, 0.6, "square", 0.1, 0.05); },
   };
 
+  /* =====================================================================
+     Background music — a little chiptune loop generated on the fly.
+
+     Four chords (C → G → Am → F, one bar each) played as:
+       • kick drum on beats 1 and 3
+       • hi-hat ticks on the off-beats
+       • a bouncing bassline
+       • an arpeggio (chord notes played one at a time) on top
+     Notes are scheduled slightly ahead of time with the audio clock,
+     which keeps the rhythm steady even if a frame stutters.
+     ===================================================================== */
+  let musicGain = null;
+  let musicTimer = null;
+  let nextTime = 0;     // audio-clock time of the next 16th note
+  let step = 0;         // which 16th note we're on (0..63 = 4 bars)
+  let bpm = 116;
+  let muted = false;
+
+  // MIDI note number → frequency in Hz.
+  const hz = (n) => 440 * Math.pow(2, (n - 69) / 12);
+  // Chord roots + the three chord notes (as MIDI numbers).
+  const CHORDS = [
+    { root: 48, notes: [60, 64, 67] }, // C
+    { root: 43, notes: [59, 62, 67] }, // G
+    { root: 45, notes: [57, 60, 64] }, // Am
+    { root: 41, notes: [57, 60, 65] }, // F
+  ];
+  const ARP = [0, 1, 2, 1, 0, 2, 1, 2]; // order the chord notes are played in
+
+  // Same as tone() but at an exact audio-clock time, into the music bus.
+  function noteAt(t, f0, f1, dur, type, vol) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(musicGain);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  // Short burst of white noise through a high-pass filter = hi-hat.
+  let noiseBuf = null;
+  function hatAt(t, vol) {
+    if (!noiseBuf) {
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.05, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 7000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    src.connect(hp).connect(g).connect(musicGain);
+    src.start(t);
+  }
+
+  // Schedule everything that happens on one 16th-note step.
+  function playStep(s, t) {
+    const chord = CHORDS[Math.floor(s / 16) % 4];
+    const inBar = s % 16;
+    const len = 60 / bpm / 4; // one 16th note, in seconds
+
+    if (inBar % 8 === 0) noteAt(t, 150, 40, 0.18, "sine", 0.5);              // kick
+    if (inBar % 4 === 2) hatAt(t, 0.12);                                      // hat
+    if (inBar % 4 === 0) noteAt(t, hz(chord.root), hz(chord.root), len * 1.8, "triangle", 0.28);       // bass
+    if (inBar % 4 === 3) noteAt(t, hz(chord.root + 12), hz(chord.root + 12), len * 0.9, "triangle", 0.18);
+    if (inBar % 2 === 0) {                                                    // arpeggio
+      const n = chord.notes[ARP[(inBar / 2) % ARP.length]] + 12;
+      noteAt(t, hz(n), hz(n), len * 1.6, "square", 0.045);
+    }
+  }
+
+  function scheduler() {
+    // Look 150 ms ahead and schedule any notes that fall in that window.
+    while (nextTime < ctx.currentTime + 0.15) {
+      playStep(step, nextTime);
+      nextTime += 60 / bpm / 4;
+      step = (step + 1) % 64;
+    }
+  }
+
   TP.sfx = {
     unlock() {
-      if (ctx) return;
+      if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
       try {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
         master = ctx.createGain();
         master.gain.value = 0.8;
         master.connect(ctx.destination);
+        musicGain = ctx.createGain();
+        musicGain.gain.value = 0.35;
+        musicGain.connect(master);
       } catch (e) {
         ctx = null; // No audio support — game still works silently.
       }
     },
     play(name, arg) {
       try { if (effects[name]) effects[name](arg); } catch (e) { /* ignore audio errors */ }
+    },
+
+    // Start/stop the background loop.
+    music(on) {
+      if (!ctx) return;
+      if (on && !musicTimer) {
+        nextTime = ctx.currentTime + 0.1;
+        musicTimer = setInterval(scheduler, 25);
+      } else if (!on && musicTimer) {
+        clearInterval(musicTimer);
+        musicTimer = null;
+      }
+    },
+    // Faster for minigames, calmer on the board.
+    setTempo(newBpm) { bpm = newBpm; },
+
+    // Mute/unmute everything (bound to the M key). Returns the new state.
+    toggleMute() {
+      muted = !muted;
+      if (master) master.gain.value = muted ? 0 : 0.8;
+      return muted;
     },
   };
 })();

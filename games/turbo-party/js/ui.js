@@ -23,7 +23,8 @@
              style="border-color:${i === activeIndex ? p.css : "var(--line)"}">
           <div class="name" style="color:${p.css}">${esc(p.name)}</div>
           <div class="ctrl">${esc(TP.CONTROLLER_LABELS[p.controller])}</div>
-          <div class="stats"><span>🏆 ${p.trophies}</span><span>🪙 ${p.coins}</span></div>
+          <div class="stats"><span>🏆 ${p.trophies}</span><span>🪙 ${p.coins}</span>
+            <span title="Items">${(p.items || []).map((id) => TP.ITEMS[id].icon).join("")}</span></div>
         </div>`).join("");
     },
     showPlayers(show) { $("hud-players").style.display = show ? "flex" : "none"; },
@@ -48,14 +49,6 @@
 
     /* ---------- Hint bar. Accepts trusted HTML (we build it ourselves). ---------- */
     hint(html) { $("hint").innerHTML = html || ""; },
-
-    /* ---------- Dice box. null hides it. ---------- */
-    die(value) {
-      const el = $("die");
-      if (value == null) { el.classList.remove("show"); return; }
-      el.textContent = value;
-      el.classList.add("show");
-    },
 
     /* ---------- Left/right choice prompt ---------- */
     choice(title, options, selected) {
@@ -88,7 +81,6 @@
     /* Clear everything transient (used between phases). */
     clearTransient() {
       UI.center("");
-      UI.die(null);
       UI.choice(null);
       UI.hint("");
     },

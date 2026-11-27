@@ -180,6 +180,7 @@
         TP.UI.toast(`Own goal, ${this.players[owner].name}!`);
       }
       TP.sfx.play("goal");
+      this.fx.explosion(this.ball.pos.clone(), TP.PLAYER_COLORS[scorer !== null && scorer !== owner ? scorer : owner]);
       // Freeze the ball out of sight, then re-drop it.
       this.ball.pos.set(0, -50, 0);
       this.ball.vel.set(0, 0, 0);

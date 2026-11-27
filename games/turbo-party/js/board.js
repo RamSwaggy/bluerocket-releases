@@ -1,24 +1,34 @@
 /* =====================================================================
-   board.js — the party board: a looping track of spaces your car drives
-   around, a trophy to buy, dice rolls and space effects.
+   board.js — the party board: a looping track your car drives around,
+   a risky shortcut across the middle, shops, a trophy to buy, dice rolls
+   and space effects.
+
+   The board is a small graph: every space lists the space(s) that come
+   after it in `next`. Most spaces have one way forward. The fork space
+   has two — the main road (passes the start line for a lap bonus) or the
+   Risky Shortcut straight across the middle (much shorter, but full of
+   red and event spaces).
 
    Space types:
      start  — where everyone begins. Passing it gives a +5 lap bonus.
      blue   — +3 coins
      red    — −3 coins
      boost  — zoom 3 more spaces
-     event  — a random surprise (see EVENTS below)
+     event  — a random surprise (see runEvent)
+     shop   — buy an item to use at the start of a later turn
    The trophy sits on one space. Drive onto or past it with 20+ coins
-   and you can buy it; then it moves somewhere else on the board.
+   and you can buy it; then it moves somewhere else.
    ===================================================================== */
 (function () {
   "use strict";
-  const { pick, randInt, shuffle } = TP.util;
+  const { pick, randInt, shuffle, rand } = TP.util;
 
-  const SPACE_COUNT = 30;
+  const LOOP_COUNT = 30;      // spaces on the main loop
+  const SHORTCUT_COUNT = 8;   // spaces on the risky shortcut
   const TROPHY_COST = 20;
-  const TOKEN_SCALE = 0.55;  // cars are shrunk down on the board
-  const STEP_TIME = 0.3;     // seconds to hop one space
+  const TOKEN_SCALE = 0.55;   // cars are shrunk down on the board
+  const STEP_TIME = 0.3;      // seconds to hop one space
+  const MAX_ITEMS = 2;
 
   const SPACE_STYLE = {
     start: { color: 0xffffff, emissive: 0x666666 },
@@ -26,7 +36,18 @@
     red: { color: 0xff3b3b, emissive: 0x6b0d0d },
     boost: { color: 0xffb020, emissive: 0x6b4300 },
     event: { color: 0x22d3a6, emissive: 0x0b5c48 },
+    shop: { color: 0xa855f7, emissive: 0x3d1466 },
   };
+
+  /* ---------- Items sold at shops ----------
+     Each is used at the start of a turn, before rolling. */
+  const ITEMS = {
+    double: { id: "double", name: "Double Dice", icon: "🎲", price: 5, desc: "Roll two dice and add them" },
+    turbo: { id: "turbo", name: "Turbo Dice", icon: "⚡", price: 4, desc: "Roll is always 6–10" },
+    steal: { id: "steal", name: "Pickpocket", icon: "🧲", price: 7, desc: "Steal 8 coins from the richest rival" },
+    warp: { id: "warp", name: "Trophy Warp", icon: "🌀", price: 14, desc: "Teleport right next to the trophy" },
+  };
+  TP.ITEMS = ITEMS;
 
   // Where each player's car parks on a shared space (so they don't overlap).
   const PARK_OFFSETS = [[-0.85, -0.85], [0.85, -0.85], [-0.85, 0.85], [0.85, 0.85]];
@@ -40,16 +61,18 @@
       this.scene.background = new THREE.Color(0x0b1226);
       this.scene.fog = new THREE.Fog(0x0b1226, 90, 220);
       TP.addStadiumLights(this.scene, 45);
+      this.fx = new TP.FX(this.scene);
 
       this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
       this.camFocus = new THREE.Vector3(0, 0, 0);       // where the camera looks
       this.camOffset = new THREE.Vector3(0, 62, 48);    // camera position relative to focus
       this.camera.position.copy(this.camFocus).add(this.camOffset);
-      this.orbit = false; // menu background slowly circles the board
+      this.orbit = false; // menu background / intro slowly circles the board
 
       this.buildTrack();
       this.buildDecor();
       this.buildTrophy();
+      this.buildDie();
 
       // One car token per player, all parked on the start space.
       this.tokens = this.players.map((p) => {
@@ -73,82 +96,129 @@
         ctrl.push(new THREE.Vector3(Math.cos(a) * 36 * r, 0, Math.sin(a) * 24 * r));
       }
       this.curve = new THREE.CatmullRomCurve3(ctrl, true);
+      this.addRoad(this.curve, true);
 
-      // The road ribbon underneath the spaces (a squashed tube).
+      /* ---------- Main loop space types ----------
+         Start first, then a shuffled bag so the mix is fair but the
+         order is different every game. */
+      const n = LOOP_COUNT - 1;
+      const counts = { shop: 2, boost: 4, event: 5, red: 6 };
+      counts.blue = n - counts.shop - counts.boost - counts.event - counts.red;
+      const bag = [];
+      for (const [type, c] of Object.entries(counts)) for (let i = 0; i < c; i++) bag.push(type);
+      const types = ["start", ...shuffle(bag)];
+      // Tidy-ups: no boost right after a boost, and keep the two shops apart.
+      for (let i = 1; i < types.length; i++) {
+        const nx = types[(i + 1) % types.length];
+        if (types[i] === "boost" && nx === "boost") types[i] = "blue";
+        if (types[i] === "shop" && (nx === "shop" || types[i - 1] === "shop")) types[i] = "blue";
+      }
+
+      this.spaces = [];
+      for (let i = 0; i < LOOP_COUNT; i++) {
+        const t = i / LOOP_COUNT;
+        this.addSpace(types[i], this.curve.getPointAt(t), this.curve.getTangentAt(t), [(i + 1) % LOOP_COUNT]);
+      }
+
+      /* ---------- The Risky Shortcut ----------
+         Runs straight across the middle, from the loop's southern-most
+         space (the fork) to its northern-most space (the merge). It
+         skips about half the loop — including the start line's lap bonus. */
+      const loop = this.spaces.slice(0, LOOP_COUNT);
+      const fork = loop.reduce((a, b) => (b.pos.z < a.pos.z ? b : a));
+      const merge = loop.reduce((a, b) => (b.pos.z > a.pos.z ? b : a));
+      this.forkIndex = fork.index;
+      this.mergeIndex = merge.index;
+
+      const scCurve = new THREE.CatmullRomCurve3([
+        fork.pos.clone(),
+        new THREE.Vector3(fork.pos.x * 0.4, 0, fork.pos.z * 0.55),
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(merge.pos.x * 0.4, 0, merge.pos.z * 0.55),
+        merge.pos.clone(),
+      ]);
+      this.addRoad(scCurve, false, 0x4a2333);
+
+      const scTypes = ["red", "event", "red", "blue", "event", "red", "event", "red"];
+      const firstSc = this.spaces.length;
+      for (let k = 0; k < SHORTCUT_COUNT; k++) {
+        const u = (k + 1) / (SHORTCUT_COUNT + 1);
+        const last = k === SHORTCUT_COUNT - 1;
+        this.addSpace(scTypes[k], scCurve.getPointAt(u), scCurve.getTangentAt(u), [last ? merge.index : firstSc + k + 1]);
+        this.spaces[this.spaces.length - 1].shortcut = true;
+      }
+      // The fork now has two ways forward: [main road, shortcut].
+      fork.next.push(firstSc);
+      this.shortcutFirst = firstSc;
+
+      // A sign post at the fork so people notice it.
+      const sign = new THREE.Mesh(
+        new THREE.BoxGeometry(2.6, 1.2, 0.2),
+        new THREE.MeshBasicMaterial({ color: 0xff3b3b })
+      );
+      sign.position.set(fork.pos.x * 0.85, 2.4, fork.pos.z * 0.85);
+      sign.lookAt(0, 2.4, 0);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+      post.position.set(sign.position.x, 1.2, sign.position.z);
+      this.scene.add(sign, post);
+    }
+
+    // Road ribbon underneath a row of spaces (a squashed tube).
+    addRoad(curve, closed, color = 0x2a2f45) {
       const road = new THREE.Mesh(
-        new THREE.TubeGeometry(this.curve, 400, 1.1, 8, true),
-        new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.9 })
+        new THREE.TubeGeometry(curve, closed ? 400 : 120, 1.1, 8, closed),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
       );
       road.scale.y = 0.12;
       road.receiveShadow = true;
       this.scene.add(road);
+    }
 
-      // Choose space types: start first, then a shuffled bag so the mix
-      // is fair but the order is different every game.
-      const bag = [];
-      const n = SPACE_COUNT - 1;
-      const counts = { blue: Math.round(n * 0.48), red: Math.round(n * 0.2), boost: Math.round(n * 0.14) };
-      counts.event = n - counts.blue - counts.red - counts.boost;
-      for (const [type, c] of Object.entries(counts)) for (let i = 0; i < c; i++) bag.push(type);
-      const types = ["start", ...shuffle(bag)];
+    addSpace(type, pos, tangent, next) {
+      if (!this.discGeo) this.discGeo = new THREE.CylinderGeometry(1.9, 1.9, 0.35, 32);
+      const style = SPACE_STYLE[type];
+      const mesh = new THREE.Mesh(this.discGeo, new THREE.MeshStandardMaterial({
+        color: style.color, emissive: style.emissive, emissiveIntensity: 0.8, roughness: 0.5,
+      }));
+      mesh.position.set(pos.x, 0.18, pos.z);
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
 
-      // No two boost spaces back-to-back (it would chain forever-ish).
-      for (let i = 1; i < types.length; i++) {
-        if (types[i] === "boost" && types[(i + 1) % types.length] === "boost") types[i] = "blue";
-      }
+      // Small icon on top so spaces are readable without colour alone.
+      const icon = this.makeIcon(type, tangent);
+      if (icon) { icon.position.set(pos.x, 0, pos.z); this.scene.add(icon); }
 
-      this.spaces = [];
-      const discGeo = new THREE.CylinderGeometry(1.9, 1.9, 0.35, 32);
-      for (let i = 0; i < SPACE_COUNT; i++) {
-        const t = i / SPACE_COUNT;
-        const pos = this.curve.getPointAt(t);
-        const tangent = this.curve.getTangentAt(t);
-        const type = types[i];
-        const style = SPACE_STYLE[type];
-
-        const mesh = new THREE.Mesh(discGeo, new THREE.MeshStandardMaterial({
-          color: style.color, emissive: style.emissive, emissiveIntensity: 0.8, roughness: 0.5,
-        }));
-        mesh.position.copy(pos);
-        mesh.position.y = 0.18;
-        mesh.receiveShadow = true;
-        this.scene.add(mesh);
-
-        // Small icon on top so spaces are readable without colour alone.
-        const icon = this.makeIcon(type, tangent);
-        if (icon) { icon.position.copy(pos); this.scene.add(icon); }
-
-        this.spaces.push({ index: i, type, pos, tangent, mesh, icon });
-      }
+      const space = { index: this.spaces.length, type, pos: pos.clone(), tangent: tangent.clone(), mesh, icon, next };
+      this.spaces.push(space);
+      return space;
     }
 
     // A simple 3D symbol per space type.
     makeIcon(type, tangent) {
       const white = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const g = new THREE.Group();
       if (type === "boost") {
-        // Flat arrow chevron pointing along the track.
-        const g = new THREE.Group();
+        // Flat arrow pointing along the track.
         const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.8, 1.4, 3), white);
         arrow.rotation.x = Math.PI / 2;
         arrow.scale.y = 0.25;
+        arrow.position.y = 0.45;
         g.add(arrow);
         g.rotation.y = Math.atan2(tangent.x, tangent.z);
-        g.position.y = 0.45;
-        g.children[0].position.y = 0.45;
-        return g;
-      }
-      if (type === "event") {
+      } else if (type === "event") {
         // Spinning diamond hovering above.
         const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.55), white);
         m.userData.spin = true;
-        const g = new THREE.Group();
         m.position.y = 1.1;
         g.add(m);
-        return g;
-      }
-      if (type === "start") {
-        // Checkered flag-ish stripe.
-        const g = new THREE.Group();
+      } else if (type === "shop") {
+        // Little shopping crate with a lid.
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.7), white);
+        box.position.y = 0.75;
+        box.userData.spin = true;
+        g.add(box);
+      } else if (type === "start") {
+        // Checkered stripe.
         for (let k = 0; k < 4; k++) {
           const sq = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 0.6),
             new THREE.MeshBasicMaterial({ color: k % 2 ? 0x111111 : 0xffffff }));
@@ -156,11 +226,8 @@
           g.add(sq);
         }
         g.rotation.y = Math.atan2(tangent.x, tangent.z) + Math.PI / 2;
-        return g;
-      }
-      if (type === "blue" || type === "red") {
+      } else if (type === "blue" || type === "red") {
         // Plus or minus sign.
-        const g = new THREE.Group();
         const bar = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 0.22), white);
         bar.position.y = 0.38;
         g.add(bar);
@@ -169,9 +236,10 @@
           bar2.rotation.y = Math.PI / 2;
           g.add(bar2);
         }
-        return g;
+      } else {
+        return null;
       }
-      return null;
+      return g;
     }
 
     buildDecor() {
@@ -184,15 +252,18 @@
       ground.receiveShadow = true;
       this.scene.add(ground);
 
-      // Giant ball sculpture in the middle of the loop.
-      const ball = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(6, 1),
-        new THREE.MeshStandardMaterial({ color: 0xdde4ff, flatShading: true, roughness: 0.4, emissive: 0x111833 })
-      );
-      ball.position.set(0, 6, 0);
-      ball.castShadow = true;
-      this.scene.add(ball);
-      this.bigBall = ball;
+      // Two ball sculptures inside the loop, either side of the shortcut.
+      this.balls = [];
+      for (const x of [-18, 18]) {
+        const ball = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(4, 1),
+          new THREE.MeshStandardMaterial({ color: 0xdde4ff, flatShading: true, roughness: 0.4, emissive: 0x111833 })
+        );
+        ball.position.set(x, 4, 0);
+        ball.castShadow = true;
+        this.scene.add(ball);
+        this.balls.push(ball);
+      }
 
       // Floodlight towers around the outside.
       const poleMat = new THREE.MeshStandardMaterial({ color: 0x5b6585 });
@@ -215,9 +286,8 @@
       for (let k = 0; k < 40; k++) {
         const a = Math.random() * Math.PI * 2;
         const r = 1.35 + Math.random() * 0.5;
-        const x = Math.cos(a) * 38 * r, z = Math.sin(a) * 27 * r;
         const tree = new THREE.Mesh(new THREE.ConeGeometry(1.4, 4 + Math.random() * 2, 6), treeMat);
-        tree.position.set(x, 2.5, z);
+        tree.position.set(Math.cos(a) * 38 * r, 2.5, Math.sin(a) * 27 * r);
         tree.castShadow = true;
         this.scene.add(tree);
       }
@@ -251,7 +321,7 @@
       g.traverse((o) => { if (o.isMesh && o !== beam) o.castShadow = true; });
       this.trophy = g;
       this.scene.add(g);
-      this.placeTrophy(randInt(8, SPACE_COUNT - 8));
+      this.placeTrophy(this.randomTrophySpot(this.spaces[0].pos));
     }
 
     placeTrophy(index) {
@@ -260,22 +330,67 @@
       this.trophy.position.set(p.x, 2.2, p.z);
     }
 
+    // A good new spot for the trophy: far from `awayFrom`, never on the
+    // start or a shop.
+    randomTrophySpot(awayFrom) {
+      const ok = this.spaces.filter((s) => s.type !== "start" && s.type !== "shop" &&
+        s.pos.distanceTo(awayFrom) > 20);
+      return pick(ok.length ? ok : this.spaces.slice(1)).index;
+    }
+
+    /* ---------- The 3D die: a cube that floats above the active car ----------
+       All six faces show the same number (drawn onto a canvas texture),
+       so it reads clearly however it's spinning. */
+    buildDie() {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 128;
+      this.dieCanvas = canvas;
+      this.dieTex = new THREE.CanvasTexture(canvas);
+      this.dieTex.colorSpace = THREE.SRGBColorSpace;
+      this.die = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshStandardMaterial({ map: this.dieTex, roughness: 0.35, emissive: 0x222222 })
+      );
+      this.die.castShadow = true;
+      this.die.visible = false;
+      this.scene.add(this.die);
+      this.dieSpin = 0;
+      this.setDie(1);
+    }
+
+    setDie(value, color = "#111") {
+      const c = this.dieCanvas.getContext("2d");
+      c.fillStyle = "#ffffff";
+      c.fillRect(0, 0, 128, 128);
+      c.strokeStyle = "#c9d1ea";
+      c.lineWidth = 10;
+      c.strokeRect(5, 5, 118, 118);
+      c.fillStyle = color;
+      c.font = "bold 84px Segoe UI, system-ui, sans-serif";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillText(String(value), 64, 70);
+      this.dieTex.needsUpdate = true;
+      this.dieValue = value;
+    }
+
     /* ------------------------------------------------------------------
-       Per-frame update: camera, spinning things
+       Per-frame update: camera, spinning things, particles
        ------------------------------------------------------------------ */
     update(dt) {
       if (this.orbit) {
-        // Slow circle for the title-screen background.
+        // Slow circle for the title-screen background and the intro.
         const t = performance.now() * 0.00008;
         this.camera.position.set(Math.sin(t) * 70, 46, Math.cos(t) * 70);
         this.camera.lookAt(0, 0, 0);
+        this._look = null;
       } else {
         // Smoothly glide toward the focus point.
         const target = this.camFocus.clone().add(this.camOffset);
         this.camera.position.x = TP.util.damp(this.camera.position.x, target.x, 3, dt);
         this.camera.position.y = TP.util.damp(this.camera.position.y, target.y, 3, dt);
         this.camera.position.z = TP.util.damp(this.camera.position.z, target.z, 3, dt);
-        this._look = this._look || this.camFocus.clone();
+        this._look = this._look || new THREE.Vector3(0, 0, 0);
         this._look.x = TP.util.damp(this._look.x, this.camFocus.x, 3, dt);
         this._look.y = TP.util.damp(this._look.y, this.camFocus.y, 3, dt);
         this._look.z = TP.util.damp(this._look.z, this.camFocus.z, 3, dt);
@@ -283,11 +398,26 @@
       }
 
       this.trophy.rotation.y += dt * 1.2;
-      this.bigBall.rotation.y += dt * 0.15;
+      this.balls.forEach((b, i) => { b.rotation.y += dt * (i ? 0.15 : -0.15); });
       for (const s of this.spaces) {
         if (s.icon) s.icon.traverse((o) => { if (o.userData.spin) o.rotation.y += dt * 2; });
       }
+
+      // Die floats above whoever owns it and tumbles while rolling.
+      if (this.die.visible && this.dieOwner) {
+        const p = this.tokens[this.dieOwner.index].pos;
+        this.die.position.set(p.x, p.y + 4 + Math.sin(performance.now() * 0.004) * 0.2, p.z);
+        this.die.rotation.x += this.dieSpin * dt;
+        this.die.rotation.y += this.dieSpin * 1.3 * dt;
+        // When it stops spinning, ease it to face the camera squarely.
+        if (this.dieSpin === 0) {
+          this.die.rotation.x = TP.util.damp(this.die.rotation.x, Math.round(this.die.rotation.x / (Math.PI / 2)) * (Math.PI / 2) - 0.35, 10, dt);
+          this.die.rotation.y = TP.util.damp(this.die.rotation.y, Math.round(this.die.rotation.y / (Math.PI / 2)) * (Math.PI / 2), 10, dt);
+        }
+      }
+
       this.tokens.forEach((t) => t.syncMesh(dt));
+      this.fx.update(dt);
     }
 
     // Close-up camera on a player, or the whole-board view.
@@ -315,11 +445,31 @@
       t.syncMesh(0);
     }
 
+    // Which space comes next? At the fork, the player decides.
+    async pickNext(player) {
+      const s = this.spaces[player.space];
+      if (s.next.length === 1) return s.next[0];
+      const choice = await this.choose(player, "Which way?", ["Main road", "Risky shortcut!"], this.botForkChoice(player));
+      return s.next[choice];
+    }
+
+    /* Bots take the shortcut when the trophy is on it (or just past it)
+       and they can afford it; avoid it when they're broke (red spaces
+       hurt); otherwise it's a coin flip with a lean toward the main road. */
+    botForkChoice(player) {
+      const t = this.spaces[this.trophyIndex];
+      const trophyOnShortcut = t.shortcut;
+      const trophyNearMerge = t.pos.distanceTo(this.spaces[this.mergeIndex].pos) < 18 && !t.shortcut;
+      if ((trophyOnShortcut || trophyNearMerge) && player.coins >= TROPHY_COST - 3) return 1;
+      if (player.coins < 8) return 0;
+      return Math.random() < 0.35 ? 1 : 0;
+    }
+
     // Hop one space forward with a little jump arc.
     async stepForward(player, fast = false) {
       const tok = this.tokens[player.index];
       const from = tok.pos.clone();
-      const next = (player.space + 1) % SPACE_COUNT;
+      const next = await this.pickNext(player);
       const to = this.spaces[next].pos.clone();
       to.y = 0.36;
       tok.heading = Math.atan2(to.x - from.x, to.z - from.z);
@@ -331,6 +481,7 @@
         this.camFocus.set(tok.pos.x, 0, tok.pos.z);
       });
       player.space = next;
+      player.stats.spacesMoved++;
 
       // Passing the start line pays a lap bonus.
       if (next === 0) {
@@ -342,7 +493,7 @@
     }
 
     /* ------------------------------------------------------------------
-       One player's whole turn: roll → move → land
+       One player's whole turn: (item) → roll → move → land
        ------------------------------------------------------------------ */
     async takeTurn(player) {
       const ui = TP.UI;
@@ -353,36 +504,35 @@
       await TP.sched.wait(0.9);
       ui.center("");
 
-      /* ---------- Roll the die (1–10) ---------- */
-      let value = randInt(1, 10);
-      let flick = 0;
-      ui.die(value);
-      if (human) ui.hint(`<span style="color:${player.css}">${ui.esc(player.name)}</span>: press <kbd>${TP.keyNames(player.controller).confirm}</kbd> to stop the die`);
-      let elapsed = 0;
-      await TP.sched.run((dt) => {
-        elapsed += dt;
-        flick += dt;
-        if (flick > 0.06) {         // change the number ~16 times a second
-          flick = 0;
-          value = (value % 10) + 1;
-          ui.die(value);
-          TP.sfx.play("tick");
+      /* ---------- Use an item? ---------- */
+      let rollMode = "normal";
+      if (player.items.length) {
+        const labels = ["Just roll", ...player.items.map((id) => `${ITEMS[id].icon} ${ITEMS[id].name}`)];
+        const pickIdx = await this.choose(player, "Use an item?", labels, this.botItemChoice(player));
+        if (pickIdx > 0) {
+          const id = player.items.splice(pickIdx - 1, 1)[0];
+          ui.setPlayers(this.players, player.index);
+          rollMode = await this.useItem(player, id);
         }
-        return human ? TP.Input.get(player.controller).confirmPressed : elapsed > 1.0;
-      });
-      // Final roll is random, not whatever was showing, so you can't time it.
-      value = randInt(1, 10);
-      ui.die(value);
-      ui.hint("");
-      TP.sfx.play("coin");
-      await TP.sched.wait(0.6);
+      }
+
+      /* ---------- Roll ---------- */
+      let total = await this.rollDie(player, human, rollMode === "turbo" ? 6 : 1);
+      if (rollMode === "double") {
+        ui.toast(`First die: ${total}. Roll again!`);
+        await TP.sched.wait(0.5);
+        total += await this.rollDie(player, human, 1);
+        ui.toast(`Total: ${total}!`);
+        this.setDie(total, "#d97706");
+        await TP.sched.wait(0.6);
+      }
 
       /* ---------- Move ---------- */
-      for (let left = value; left > 0; left--) {
+      for (let left = total; left > 0; left--) {
         await this.stepForward(player);
-        ui.die(left - 1 > 0 ? left - 1 : null);
+        this.setDie(left - 1);
       }
-      ui.die(null);
+      this.die.visible = false;
 
       /* ---------- Land ---------- */
       await this.landOn(player);
@@ -391,20 +541,114 @@
       await TP.sched.wait(0.5);
     }
 
+    /* Spin the die above the car until the player (or bot) stops it.
+       Returns the result. `min` lets Turbo Dice skip the low numbers. */
+    async rollDie(player, human, min) {
+      const ui = TP.UI;
+      this.dieOwner = player;
+      this.die.visible = true;
+      this.dieSpin = 9;
+      let value = randInt(min, 10);
+      let flick = 0, elapsed = 0;
+      if (human) ui.hint(`<span style="color:${player.css}">${ui.esc(player.name)}</span>: press <kbd>${TP.keyNames(player.controller).confirm}</kbd> to hit the die`);
+      await TP.sched.run((dt) => {
+        elapsed += dt;
+        flick += dt;
+        if (flick > 0.07) {
+          flick = 0;
+          value = value >= 10 ? min : value + 1;
+          this.setDie(value);
+          TP.sfx.play("tick");
+        }
+        return human ? TP.Input.get(player.controller).confirmPressed : elapsed > 1.0;
+      });
+      ui.hint("");
+
+      // The car hops up and bonks the die. The result is random, not
+      // whatever was showing, so you can't time it.
+      const tok = this.tokens[player.index];
+      const y0 = tok.pos.y;
+      await TP.sched.tween(0.22, (k) => { tok.pos.y = y0 + Math.sin(k * Math.PI) * 2.2; });
+      tok.pos.y = y0;
+      value = randInt(min, 10);
+      this.dieSpin = 0;
+      this.setDie(value, "#2f6bff");
+      this.fx.burst(this.die.position, [0xffffff, 0xffcc33, player.color], { count: 18, speed: 7, up: 1, gravity: 10 });
+      TP.sfx.play("coin");
+      await TP.sched.wait(0.6);
+      return value;
+    }
+
+    // Bots: warp if they can afford the trophy, otherwise use whatever they have.
+    botItemChoice(player) {
+      const i = player.items.indexOf("warp");
+      if (i >= 0 && player.coins >= TROPHY_COST) return i + 1;
+      const other = player.items.findIndex((id) => id !== "warp");
+      return other >= 0 ? other + 1 : 0;
+    }
+
+    // Apply an item. Returns a roll mode for the dice ("normal"/"double"/"turbo").
+    async useItem(player, id) {
+      const ui = TP.UI;
+      const item = ITEMS[id];
+      ui.center(`${item.icon} ${item.name}!`, item.desc, "#a855f7");
+      TP.sfx.play("boost");
+      await TP.sched.wait(1.1);
+      ui.center("");
+      if (id === "double" || id === "turbo") return id;
+
+      if (id === "steal") {
+        const rich = this.players.filter((p) => p !== player).sort((a, b) => b.coins - a.coins)[0];
+        const amt = Math.min(8, rich.coins);
+        rich.coins -= amt;
+        player.coins += amt;
+        player.stats.coinsEarned += amt;
+        ui.toast(`Pickpocketed ${amt} coins from ${rich.name}!`);
+        this.fx.burst(this.tokens[rich.index].pos, 0xffcc33, { count: amt * 2 });
+        TP.sfx.play("coin");
+        ui.setPlayers(this.players, player.index);
+        await TP.sched.wait(1);
+      }
+
+      if (id === "warp") {
+        // Fly up, jump to the space just before the trophy, drop back down.
+        const tok = this.tokens[player.index];
+        const before = this.spaces.find((s) => s.next.includes(this.trophyIndex));
+        const y0 = 0.36;
+        this.fx.burst(tok.pos, 0xa855f7, { count: 24 });
+        await TP.sched.tween(0.5, (k) => { tok.pos.y = y0 + k * 25; });
+        player.space = before.index;
+        this.parkToken(player.index);
+        tok.pos.y = 25;
+        this.focusOn(player);
+        await TP.sched.wait(0.4);
+        await TP.sched.tween(0.5, (k) => { tok.pos.y = 25 - TP.ease.outCubic(k) * (25 - y0); });
+        this.fx.burst(tok.pos, 0xa855f7, { count: 24 });
+        TP.sfx.play("bump");
+        await TP.sched.wait(0.4);
+      }
+      return "normal";
+    }
+
     addCoins(player, amount, label) {
       const before = player.coins;
       player.coins = Math.max(0, player.coins + amount);
+      const change = player.coins - before;
+      if (change > 0) player.stats.coinsEarned += change;
       TP.UI.toast(label || (amount >= 0 ? `+${amount} coins` : `${amount} coins`));
       TP.sfx.play(amount >= 0 ? "coin" : "lose");
+      const pos = this.tokens[player.index].pos;
+      if (amount > 0) this.fx.burst(pos, 0xffcc33, { count: 6 + amount, speed: 6 });
       TP.UI.setPlayers(this.players, player.index);
-      return player.coins - before;
+      return change;
     }
 
     async landOn(player, fromBoost = false) {
       const s = this.spaces[player.space];
-      // Flash the landed space.
+      // Flash the landed space and spray particles in its colour.
       s.mesh.material.emissiveIntensity = 2.5;
       TP.sched.wait(0.5).then(() => { s.mesh.material.emissiveIntensity = 0.8; });
+      this.fx.burst(s.pos, SPACE_STYLE[s.type].color, { count: 14, speed: 5, size: 0.22 });
 
       switch (s.type) {
         case "start":
@@ -412,6 +656,7 @@
           this.addCoins(player, 3, "Blue space! +3 coins");
           break;
         case "red":
+          player.stats.redSpaces++;
           this.addCoins(player, -3, "Red space! −3 coins");
           break;
         case "boost":
@@ -424,6 +669,9 @@
           return;
         case "event":
           await this.runEvent(player);
+          break;
+        case "shop":
+          await this.runShop(player);
           break;
       }
       await TP.sched.wait(0.9);
@@ -443,6 +691,8 @@
             [player.space, other.space] = [other.space, player.space];
             this.parkToken(other.index);
             this.parkToken(player.index);
+            this.fx.burst(this.tokens[player.index].pos, 0x22d3a6, { count: 16 });
+            this.fx.burst(this.tokens[other.index].pos, 0x22d3a6, { count: 16 });
             TP.UI.toast(`Swapped places with ${other.name}!`);
             TP.sfx.play("boost");
           },
@@ -455,6 +705,7 @@
             const amt = Math.min(5, rich.coins);
             rich.coins -= amt;
             player.coins += amt;
+            player.stats.coinsEarned += amt;
             TP.UI.toast(`Took ${amt} coins from ${rich.name}!`);
             TP.sfx.play("coin");
             TP.UI.setPlayers(this.players, player.index);
@@ -466,6 +717,45 @@
       await TP.sched.wait(1.1);
       TP.UI.center("");
       ev.run();
+    }
+
+    /* ---------- Shop: buy one item ---------- */
+    async runShop(player) {
+      const ui = TP.UI;
+      if (player.items.length >= MAX_ITEMS) {
+        ui.toast(`Shop: your item slots are full (${MAX_ITEMS} max)`);
+        return;
+      }
+      const stock = Object.values(ITEMS);
+      const labels = ["Leave", ...stock.map((it) => `${it.icon} ${it.name} · ${it.price}🪙`)];
+      ui.center("SHOP", "Items are used at the start of your turn", "#a855f7");
+      const choice = await this.choose(player, `Buy something? You have ${player.coins} coins`, labels, this.botShopChoice(player, stock));
+      ui.center("");
+      if (choice === 0) return;
+      const item = stock[choice - 1];
+      if (player.coins < item.price) {
+        ui.toast(`Not enough coins for ${item.name}`);
+        TP.sfx.play("lose");
+        return;
+      }
+      player.coins -= item.price;
+      player.items.push(item.id);
+      ui.toast(`Bought ${item.icon} ${item.name}!`);
+      TP.sfx.play("coin");
+      ui.setPlayers(this.players, player.index);
+    }
+
+    /* Bots save up for the trophy first, then shop sensibly. */
+    botShopChoice(player, stock) {
+      const spare = player.coins - TROPHY_COST;
+      const want = ["warp", "double", "steal", "turbo"];
+      for (const id of want) {
+        const i = stock.findIndex((it) => it.id === id);
+        const price = stock[i].price;
+        // Warp is worth spending trophy money on only if you can do both.
+        if (id === "warp" ? player.coins >= price + TROPHY_COST : (spare >= price || player.coins >= price + 12)) return i + 1;
+      }
+      return 0;
     }
 
     /* ---------- Trophy purchase ---------- */
@@ -481,21 +771,18 @@
       player.coins -= TROPHY_COST;
       player.trophies += 1;
       TP.sfx.play("trophy");
+      this.fx.confetti(this.trophy.position);
       TP.UI.center("🏆 TROPHY!", `${player.name} has ${player.trophies}`, "#ffcc33");
       TP.UI.setPlayers(this.players, player.index);
       await TP.sched.wait(1.6);
       TP.UI.center("");
 
-      // Move the trophy at least 8 spaces away from where it was bought.
-      const options = [];
-      for (let i = 1; i < SPACE_COUNT; i++) {
-        const d = Math.abs(i - player.space);
-        if (Math.min(d, SPACE_COUNT - d) >= 8) options.push(i);
-      }
-      this.placeTrophy(pick(options));
+      // Move the trophy somewhere far away, and show where it went.
+      this.placeTrophy(this.randomTrophySpot(this.spaces[player.space].pos));
       TP.UI.toast("The trophy moved!");
       const cam = this.camFocus.clone();
       this.camFocus.set(this.trophy.position.x, 0, this.trophy.position.z);
+      this.fx.burst(this.trophy.position, 0xffcc33, { count: 20 });
       await TP.sched.wait(1.4);
       this.camFocus.copy(cam);
       await TP.sched.wait(0.4);
@@ -507,10 +794,10 @@
       let sel = 0;
       TP.UI.choice(title, options, sel);
       if (player.controller === "bot") {
-        await TP.sched.wait(0.9);
+        await TP.sched.wait(0.8);
         sel = botPick;
         TP.UI.choice(title, options, sel);
-        await TP.sched.wait(0.4);
+        await TP.sched.wait(0.5);
       } else {
         const k = TP.keyNames(player.controller);
         TP.UI.hint(`<kbd>${k.steer}</kbd> choose · <kbd>${k.confirm}</kbd> confirm`);
@@ -527,7 +814,10 @@
       return sel;
     }
 
-    dispose() { TP.disposeScene(this.scene); }
+    dispose() {
+      this.fx.dispose();
+      TP.disposeScene(this.scene);
+    }
   }
 
   TP.Board = Board;

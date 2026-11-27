@@ -91,6 +91,10 @@
           car.out = true;
           car.hide();
           this.outOrder.push(car.index);
+          // Puff of the player's colour at the spot they went over the edge.
+          const edge = car.pos.clone().setY(0);
+          edge.setLength(Math.min(edge.length(), this.radius));
+          this.fx.burst(edge, car.player.color, { count: 24, speed: 9 });
           TP.sfx.play("fall");
           TP.UI.toast(`${car.player.name} is out!`);
         }

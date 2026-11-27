@@ -78,6 +78,33 @@
       body.add(post);
     }
 
+    // Racing stripe down the middle, in white.
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 3.02), stripeMat);
+    stripe.position.set(0, 0.905, 0);
+    body.add(stripe);
+
+    // Headlights (glowing, front) and tail lights (red, back).
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff6d5 });
+    const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+    for (const sx of [-0.6, 0.6]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.16, 0.06), headMat);
+      head.position.set(sx, 0.62, 1.99);
+      body.add(head);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.06), tailMat);
+      tail.position.set(sx, 0.7, -1.52);
+      body.add(tail);
+    }
+
+    // Rocket nozzle at the back — the boost flame comes out of here.
+    const nozzle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.26, 0.36, 0.5, 14, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x9aa3b8, metalness: 0.8, roughness: 0.3, side: THREE.DoubleSide })
+    );
+    nozzle.rotation.x = Math.PI / 2;
+    nozzle.position.set(0, 0.65, -1.7);
+    body.add(nozzle);
+
     // Four wheels.
     const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.36, 16);
     wheelGeo.rotateZ(Math.PI / 2); // cylinders stand upright by default; lay them on their side

@@ -30,6 +30,7 @@
       this.scene.background = new THREE.Color(0x0d1430);
       this.scene.fog = new THREE.Fog(0x0d1430, 70, 160);
       TP.addStadiumLights(this.scene, opts.size || 25);
+      this.fx = new TP.FX(this.scene); // particle effects for this arena
 
       // One fixed camera showing the whole arena — best for couch play,
       // since everyone shares the screen.
@@ -93,6 +94,15 @@
       const steps = Math.max(1, Math.ceil(dt / (1 / 60)));
       for (let i = 0; i < steps; i++) this.step(dt / steps);
       this.animate(dt);
+
+      // Boost trail: a puff of flame-coloured particles behind boosting cars.
+      for (const car of this.cars) {
+        if (car.out || !car.boosting || Math.random() > 0.6) continue;
+        const back = car.forward().multiplyScalar(-2.3).add(car.pos);
+        back.y += 0.65;
+        this.fx.burst(back, [0xffa62b, 0xffe14d, 0x888888], { count: 1, speed: 1.5, up: 0.5, life: 0.35, size: 0.3, gravity: -2 });
+      }
+      this.fx.update(dt);
       this._updateHud();
     }
 
@@ -120,7 +130,13 @@
         // 2) Bumps between cars.
         const hits = TP.Car.collideAll(this.cars, this.tuning);
         for (const h of hits) {
-          if (h.impact > 6) TP.sfx.play("bump");
+          if (h.impact > 6) {
+            TP.sfx.play("bump");
+            // Sparks where the two cars met.
+            const mid = h.a.pos.clone().add(h.b.pos).multiplyScalar(0.5);
+            mid.y += 0.8;
+            this.fx.burst(mid, [0xffffff, 0xffcc33], { count: Math.min(20, Math.round(h.impact)), speed: 6, size: 0.18 });
+          }
           this.onBump(h);
         }
 
@@ -173,7 +189,10 @@
       return this.players.map((p, i) => ({ name: p.name, css: p.css, value: s[i] }));
     }
 
-    dispose() { TP.disposeScene(this.scene); }
+    dispose() {
+      this.fx.dispose();
+      TP.disposeScene(this.scene);
+    }
 
     /* ---------- Helpers subclasses commonly use ---------- */
 

@@ -84,25 +84,16 @@
       border-bottom: 2px solid #0a0f22;
     }
 
-    /* ---------- Dice box ---------- */
-    #die {
-      top: 22%; left: 50%; transform: translateX(-50%);
-      width: 110px; height: 110px; border-radius: 22px;
-      background: #fff; color: #111; font-size: 64px; font-weight: 900;
-      display: none; align-items: center; justify-content: center;
-      box-shadow: 0 8px 0 #b8c0d8, 0 14px 30px rgba(0,0,0,.5);
-    }
-    #die.show { display: flex; }
-
     /* ---------- Yes/No style choice prompt ---------- */
     #choice {
       top: 58%; left: 50%; transform: translateX(-50%);
+      width: max-content; max-width: calc(100vw - 32px);
       padding: 16px 20px; border-radius: 16px; background: var(--panel-solid);
       border: 2px solid var(--line); text-align: center; display: none;
     }
     #choice.show { display: block; }
     #choice .title { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
-    #choice .opts { display: flex; gap: 12px; justify-content: center; }
+    #choice .opts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
     #choice .opt {
       padding: 10px 22px; border-radius: 10px; background: #26305a;
       font-size: 18px; font-weight: 700; border: 2px solid transparent;
@@ -121,7 +112,7 @@
     }
     #mg-hud .score {
       padding: 6px 12px; border-radius: 10px; background: var(--panel);
-      font-size: 18px; font-weight: 700; border-bottom: 4px solid;
+      font-size: 18px; font-weight: 700; border-bottom: 4px solid; white-space: nowrap;
     }
     #mg-hud .score.out { opacity: .35; text-decoration: line-through; }
 
@@ -185,7 +176,6 @@
   <div id="turn-label" class="layer"></div>
   <div id="mg-hud" class="layer"></div>
   <div id="center-msg" class="layer"></div>
-  <div id="die" class="layer"></div>
   <div id="choice" class="layer"></div>
   <div id="toast" class="layer"></div>
   <div id="hint" class="layer"></div>
@@ -202,10 +192,14 @@
   <script src="../shared/js/input.js"></script>
   <script src="js/ui.js"></script>
   <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
   <script src="js/arena.js"></script>
   <script src="js/minigames/coin-rush.js"></script>
   <script src="js/minigames/sumo-ring.js"></script>
   <script src="js/minigames/goal-frenzy.js"></script>
+  <script src="js/minigames/bomb-tag.js"></script>
+  <script src="js/minigames/king-of-the-hill.js"></script>
+  <script src="js/minigames/ring-race.js"></script>
   <script src="js/board.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>

@@ -111,8 +111,14 @@
           <option value="10" selected>10</option>
           <option value="15">15</option>
         </select>
-        <span class="muted" id="padinfo"></span>
+        <label class="muted" for="bonuses">Bonus trophies</label>
+        <select id="bonuses">
+          <option value="on" selected>On</option>
+          <option value="off">Off</option>
+        </select>
       </div>
+      <div class="row"><span class="muted" id="padinfo"></span>
+        <span class="muted">· Press <kbd>M</kbd> to mute</span></div>
 
       <table class="controls-table">
         <tr><td>Keyboard 1</td><td>Drive <kbd>W</kbd><kbd>S</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Jump/confirm <kbd>Space</kbd> · Boost <kbd>Shift</kbd></td></tr>
@@ -144,9 +150,20 @@
         if (used.has(s.controller)) s.controller = "bot";
         used.add(s.controller);
       }
-      startGame({ turns: Number(card.querySelector("#turns").value), slots });
+      startGame({
+        turns: Number(card.querySelector("#turns").value),
+        bonuses: card.querySelector("#bonuses").value === "on",
+        slots,
+      });
     });
   }
+
+  /* ---------- M = mute / unmute everything ---------- */
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "KeyM" || (e.target && e.target.tagName === "INPUT")) return;
+    const muted = TP.sfx.toggleMute();
+    TP.UI.toast(muted ? "🔇 Sound off" : "🔊 Sound on", 1.2);
+  });
 
   /* ---------- Go ---------- */
   if (params.has("demo")) {

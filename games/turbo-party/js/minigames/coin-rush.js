@@ -89,6 +89,7 @@
         for (const car of this.cars) {
           if (car.pos.y < 2.2 && dist2D(car.pos.x, car.pos.z, c.x, c.z) < 1.8) {
             this.score[car.index]++;
+            this.fx.burst(c.mesh.position, 0xffcc33, { count: 8, speed: 5, size: 0.2 });
             this.scene.remove(c.mesh);
             this.coins.splice(i, 1);
             if (car.player.controller !== "bot") TP.sfx.play("coin");

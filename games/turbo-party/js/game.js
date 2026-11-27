@@ -2,9 +2,10 @@
    game.js — the overall flow of one match.
 
      for each turn:
-        every player takes a board turn (roll, move, land)
+        every player takes a board turn (item → roll → move → land)
         everyone plays one minigame → coins paid out by finishing place
-     after the last turn: most trophies wins (coins break ties)
+     after the last turn: bonus trophies are handed out, then
+     most trophies wins (coins break ties)
 
    `view` is whatever is on screen right now — the board or a minigame
    arena. main.js renders `game.view.scene` with `game.view.camera`.
@@ -17,10 +18,23 @@
   const PAYOUT = [10, 6, 3, 0];
   const PLACE_NAMES = ["1st", "2nd", "3rd", "4th"];
 
+  // Music speed per phase (beats per minute).
+  const BOARD_BPM = 112;
+  const MINIGAME_BPM = 138;
+
+  /* End-of-game bonus trophies. Each goes to whoever has the highest
+     stat (ties all get one). Skipped if nobody scored anything. */
+  const BONUSES = [
+    { stat: "minigameWins", title: "Minigame Ace", desc: "Most minigame wins" },
+    { stat: "coinsEarned", title: "Coin Collector", desc: "Most coins earned" },
+    { stat: "spacesMoved", title: "Road Tripper", desc: "Most spaces driven" },
+  ];
+
   class Game {
-    /* config = { turns, slots: [{ name, controller }, ×4] } */
+    /* config = { turns, bonuses, slots: [{ name, controller }, ×4] } */
     constructor(config) {
       this.turns = config.turns;
+      this.bonuses = config.bonuses !== false;
       this.players = config.slots.map((s, i) => ({
         index: i,
         name: s.name || TP.DEFAULT_NAMES[i],
@@ -30,11 +44,13 @@
         coins: 10,
         trophies: 0,
         space: 0,
+        items: [],   // item ids from TP.ITEMS (max 2)
+        stats: { minigameWins: 0, coinsEarned: 0, spacesMoved: 0, redSpaces: 0 },
       }));
       this.humans = this.players.filter((p) => p.controller !== "bot");
       this.board = new TP.Board(this);
       this.view = this.board;
-      this.lastMinigame = null;
+      this.lastMinigames = []; // recently played ids, to avoid repeats
     }
 
     update(dt) {
@@ -72,11 +88,18 @@
       const ui = TP.UI;
       ui.showPlayers(true);
       ui.setPlayers(this.players);
-      this.board.focusOverview();
+      TP.sfx.setTempo(BOARD_BPM);
+      TP.sfx.music(true);
 
+      // Intro: swoop around the board, then settle on the overview.
+      this.board.orbit = true;
       ui.center("TURBO PARTY", `Most trophies after ${this.turns} turns wins · trophies cost ${TP.TROPHY_COST} coins`, "#ffcc33");
       await TP.sched.wait(2.6);
       ui.center("");
+      this.board.orbit = false;
+      this.board.focusOverview();
+      ui.toast("Tip: the red sign marks a risky shortcut across the middle!", 2.6);
+      await TP.sched.wait(1.6);
 
       for (let turn = 1; turn <= this.turns; turn++) {
         ui.turnLabel(`TURN ${turn} / ${this.turns}`);
@@ -99,10 +122,11 @@
        ------------------------------------------------------------------ */
     async minigameRound() {
       const ui = TP.UI;
-      // Pick a minigame, avoiding an immediate repeat.
-      const choices = TP.MINIGAMES.filter((m) => m.id !== this.lastMinigame) ;
+      // Pick a minigame not played in the last couple of rounds.
+      const recent = this.lastMinigames.slice(-Math.min(2, TP.MINIGAMES.length - 1));
+      const choices = TP.MINIGAMES.filter((m) => !recent.includes(m.id));
       const def = pick(choices.length ? choices : TP.MINIGAMES);
-      this.lastMinigame = def.id;
+      this.lastMinigames.push(def.id);
 
       ui.setPlayers(this.players);
       ui.card(`
@@ -115,11 +139,13 @@
       ui.hideCard();
 
       // Swap the screen over to the arena and play it.
+      TP.sfx.setTempo(MINIGAME_BPM);
       const arena = new def.cls(this);
       this.view = arena;
       const ranking = await arena.run();
       this.view = this.board;
       arena.dispose();
+      TP.sfx.setTempo(BOARD_BPM);
 
       // Pay out by place. Tied players all get the higher place's reward.
       const rows = [];
@@ -129,6 +155,8 @@
           const p = this.players[i];
           const gain = PAYOUT[place];
           p.coins += gain;
+          p.stats.coinsEarned += gain;
+          if (place === 0) p.stats.minigameWins++;
           rows.push({ p, place, gain });
         }
         place += group.length;
@@ -161,12 +189,32 @@
     }
 
     /* ------------------------------------------------------------------
-       End of match
+       End of match: bonus trophies, then the winner
        ------------------------------------------------------------------ */
     async finale() {
       const ui = TP.UI;
       ui.turnLabel("");
       this.board.focusOverview();
+
+      if (this.bonuses) {
+        ui.center("BONUS TROPHIES", "", "#ffcc33");
+        await TP.sched.wait(1.8);
+        for (const b of BONUSES) {
+          const best = Math.max(...this.players.map((p) => p.stats[b.stat]));
+          if (best <= 0) continue;
+          const winners = this.players.filter((p) => p.stats[b.stat] === best);
+          winners.forEach((p) => {
+            p.trophies++;
+            this.board.fx.confetti(this.board.tokens[p.index].pos, { count: 30 });
+          });
+          TP.sfx.play("trophy");
+          ui.center(`🏆 ${b.title}`, `${winners.map((p) => p.name).join(" & ")} — ${b.desc} (${best})`, winners[0].css);
+          ui.setPlayers(this.players);
+          await TP.sched.wait(2.6);
+        }
+        ui.center("");
+      }
+
       // Rank: trophies first, coins break ties.
       const ranked = this.players.slice().sort((a, b) => b.trophies - a.trophies || b.coins - a.coins);
       const winner = ranked[0];
@@ -175,6 +223,7 @@
       TP.sfx.play("trophy");
       ui.center(tie ? "IT'S A TIE!" : `${winner.name} WINS!`, "", tie ? "#ffcc33" : winner.css);
       this.board.focusOn(winner);
+      this.board.fx.confetti(this.board.tokens[winner.index].pos, { count: 90 });
       await TP.sched.wait(2.5);
       ui.center("");
 
@@ -186,6 +235,9 @@
             <span class="place">${PLACE_NAMES[i]}</span>
             <span class="who" style="color:${p.css}">${ui.esc(p.name)}</span>
             <span>🏆 ${p.trophies} &nbsp; 🪙 ${p.coins}</span>
+          </div>
+          <div class="muted" style="font-size:13px;margin:-2px 0 6px 18px">
+            ${p.stats.minigameWins} minigame wins · ${p.stats.coinsEarned} coins earned · ${p.stats.spacesMoved} spaces driven
           </div>`).join("")}
         <div class="row" style="margin-top:18px"><button class="btn" id="again">Play again</button></div>`);
       card.querySelector("#again").addEventListener("click", () => location.reload());
