@@ -40,12 +40,14 @@ characters, art, music or levels.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Deflect Duel (boss) | `team/deflect-duel` |
-| Deflect Duel · Gameplay (systems and feel) | `team/deflect-duel-gameplay` |
-| Deflect Duel · Art and UI (look and screens) | `team/deflect-duel-art` |
-| Deflect Duel · QC (playtest and checks) | `team/deflect-duel-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Deflect Duel (boss) | `session_01GHNBrrDAhFP7gZXs4Ap9TK` | `team/deflect-duel` |
+| Deflect Duel · Gameplay (systems and feel) | `session_01GHNBrpQgRcR4wuJEviMDGG` | `team/deflect-duel-gameplay` |
+| Deflect Duel · Art and UI (look and screens) | `session_01GHNBrqgetkZbzAJt8h3dPM` | `team/deflect-duel-art` |
+| Deflect Duel · QC (playtest and checks) | `session_01GHNBrouPoebhNMp9PjrRtH` | `team/deflect-duel-qc` |
+
+Roles reply to the boss with `send_message` to the boss session ID above.
 
 ## Who owns what
 
