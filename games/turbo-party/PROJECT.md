@@ -105,9 +105,9 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 
 | # | Job | Who | Status |
 |---|---|---|---|
-| 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | sent |
+| 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | **merged** (ba264be) |
 | A | 20-match 6-turn balance baseline + reusable balance tool | QC | sent |
-| 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | after job 1 |
+| 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | sent |
 | 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | after A |
 | 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | sent |
 | 4b | Small bugs: can choose items you can't afford, others found by job 3 | Gameplay / Art and UI | after job 3 |
