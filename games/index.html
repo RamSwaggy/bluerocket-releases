@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rocket Rumble</title>
+  <style>
+    /* ------------------------------------------------------------------
+       Rocket Rumble hub. Colour tokens shared in spirit with every mode.
+       ------------------------------------------------------------------ */
+    :root {
+      --bg: #070b1a;
+      --panel: rgba(12, 17, 38, 0.88);
+      --panel-2: #18204a;
+      --line: rgba(255, 255, 255, 0.14);
+      --text: #f2f5ff;
+      --muted: #9aa6c8;
+      --accent: #ffcc33;
+      --hot: #ff5a3c;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    /* 3D showroom fills the window behind everything. */
+    #showroom { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    .wrap {
+      position: relative; max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px;
+      display: grid; grid-template-columns: 380px 1fr; gap: 22px; align-items: start;
+    }
+    header { grid-column: 1 / -1; text-align: center; margin-bottom: 4px; }
+    h1 {
+      margin: 0; font-size: clamp(44px, 8vw, 88px); font-style: italic; font-weight: 900;
+      letter-spacing: .01em; line-height: 1;
+      text-shadow: 0 6px 0 rgba(0,0,0,.4), 0 0 40px rgba(255,90,60,.35);
+    }
+    h1 .a { color: var(--accent); }
+    h1 .b { color: var(--hot); }
+    header p { color: var(--muted); margin: 10px 0 0; font-size: 17px; }
+
+    .panel {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+      padding: 18px; backdrop-filter: blur(6px);
+    }
+    .panel h2 { margin: 0 0 4px; font-size: 20px; }
+    .panel .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+
+    /* ---------- Player setup ---------- */
+    .slot {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center;
+      padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--panel-2);
+      border-left: 6px solid;
+    }
+    .slot label { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+    .slot input, .slot select {
+      width: 100%; font: inherit; font-size: 15px; padding: 7px 8px; border-radius: 8px;
+      border: 1px solid var(--line); background: #0d1330; color: var(--text);
+    }
+    .slot.off { opacity: .5; }
+    .pads { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .keys { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+    .keys td { padding: 5px 4px; border-top: 1px solid var(--line); color: var(--muted); vertical-align: top; }
+    .keys td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    kbd {
+      display: inline-block; padding: 0 6px; border-radius: 5px; background: #26305a;
+      color: var(--text); font-family: inherit; font-size: 12px; border-bottom: 2px solid #0a0f22;
+    }
+
+    /* ---------- Mode cards ---------- */
+    .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .mode {
+      position: relative; padding: 18px; border-radius: 18px; background: var(--panel);
+      border: 1px solid var(--line); border-top: 5px solid; display: flex; flex-direction: column;
+      min-height: 210px; backdrop-filter: blur(6px);
+    }
+    .mode .tag { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+    .mode h3 { margin: 4px 0 8px; font-size: 28px; font-style: italic; }
+    .mode p { color: var(--muted); margin: 0 0 14px; line-height: 1.45; flex: 1; }
+    .mode .meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .badge {
+      font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+      background: #26305a; color: var(--muted);
+    }
+    .badge.play { background: rgba(52, 211, 153, .18); color: #6ee7b7; }
+    .btn {
+      margin-left: auto; font: inherit; font-size: 18px; font-weight: 800; cursor: pointer;
+      padding: 10px 22px; border-radius: 12px; border: none; color: #1a1300;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn[disabled] { cursor: not-allowed; filter: grayscale(1) brightness(.6); }
+    .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; text-align: center; }
+
+    @media (max-width: 880px) {
+      .wrap { grid-template-columns: 1fr; }
+      .modes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="showroom"></canvas>
+
+  <div class="wrap">
+    <header>
+      <h1><span class="a">ROCKET</span> <span class="b">RUMBLE</span></h1>
+      <p>One rocket car. A pile of ways to play.</p>
+    </header>
+
+    <!-- Left: set up players once; every mode uses this. -->
+    <section class="panel" aria-labelledby="ph">
+      <h2 id="ph">Players</h2>
+      <p class="sub">Set these once; every mode starts with them. Empty seats are filled by bots where a mode allows.</p>
+      <div id="slots"></div>
+      <div class="pads" id="pads"></div>
+      <table class="keys">
+        <tr><td>Keyboard 1</td><td>Drive <kbd>W</kbd><kbd>S</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Jump <kbd>Space</kbd> · Boost <kbd>Shift</kbd> · Hit <kbd>E</kbd></td></tr>
+        <tr><td>Keyboard 2</td><td>Drive <kbd>↑</kbd><kbd>↓</kbd> · Steer <kbd>←</kbd><kbd>→</kbd> · Jump <kbd>Enter</kbd> · Boost <kbd>R-Shift</kbd> · Hit <kbd>.</kbd></td></tr>
+        <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Jump <kbd>A</kbd> · Boost <kbd>B</kbd> · Hit <kbd>X</kbd></td></tr>
+      </table>
+    </section>
+
+    <!-- Right: pick a mode. -->
+    <section aria-label="Game modes">
+      <div class="modes" id="modes"></div>
+    </section>
+
+    <p class="note">Same car, same controls, same feel in every mode. Only the objective changes.</p>
+  </div>
+
+  <!-- Shared engine (car model, controller list, mode list). -->
+  <script src="shared/vendor/three.min.js"></script>
+  <script src="shared/js/util.js"></script>
+  <script src="shared/js/input.js"></script>
+  <script src="shared/js/car.js"></script>
+  <script src="shared/js/rumble.js"></script>
+  <script>
+  /* ===================================================================
+     Hub logic: player setup, mode cards, and the 3D showroom backdrop.
+     =================================================================== */
+  (function () {
+    "use strict";
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    /* ---------- Player setup ---------- */
+    const setup = TP.Rumble.loadSetup();
+    // The hub adds an "Off" choice: that seat is empty (or a bot, where the mode needs 4).
+    const CONTROLLERS = ["off", ...TP.CONTROLLER_IDS];
+    const LABEL = (id) => (id === "off" ? "Empty seat" : TP.CONTROLLER_LABELS[id]);
+
+    function renderSlots() {
+      document.getElementById("slots").innerHTML = setup.slots.map((s, i) => `
+        <div class="slot ${s.controller === "off" ? "off" : ""}" style="border-color:${TP.PLAYER_CSS[i]}">
+          <label for="n${i}">Player ${i + 1}</label>
+          <input id="n${i}" data-i="${i}" maxlength="12" value="${esc(s.name)}" aria-label="Player ${i + 1} name" />
+          <select id="c${i}" data-i="${i}" aria-label="Player ${i + 1} controller">
+            ${CONTROLLERS.map((id) => `<option value="${id}" ${id === s.controller ? "selected" : ""}>${LABEL(id)}</option>`).join("")}
+          </select>
+        </div>`).join("");
+    }
+
+    // Save on every change so the setup survives switching modes.
+    document.getElementById("slots").addEventListener("input", (e) => {
+      const i = Number(e.target.dataset.i);
+      if (Number.isNaN(i)) return;
+      if (e.target.tagName === "INPUT") setup.slots[i].name = e.target.value.trim() || TP.DEFAULT_NAMES[i];
+      else {
+        setup.slots[i].controller = e.target.value;
+        e.target.closest(".slot").classList.toggle("off", e.target.value === "off");
+      }
+      TP.Rumble.saveSetup(setup.slots);
+    });
+    renderSlots();
+
+    // Gamepad hint.
+    const pads = document.getElementById("pads");
+    const refreshPads = () => {
+      const n = (navigator.getGamepads ? [...navigator.getGamepads()] : []).filter(Boolean).length;
+      pads.textContent = n ? `🎮 ${n} gamepad(s) connected` : "🎮 Press a button on a gamepad to connect it";
+    };
+    refreshPads();
+    addEventListener("gamepadconnected", refreshPads);
+    addEventListener("gamepaddisconnected", refreshPads);
+
+    /* ---------- Mode cards ---------- */
+    const STATUS = { play: "Playable", dev: "In development", plan: "Coming soon" };
+    document.getElementById("modes").innerHTML = TP.Rumble.MODES.map((m) => `
+      <article class="mode" style="border-top-color:${m.color}">
+        <span class="tag">${esc(m.tag)}</span>
+        <h3 style="color:${m.color}">${esc(m.name)}</h3>
+        <p>${esc(m.blurb)}</p>
+        <div class="meta">
+          <span class="badge ${m.status === "play" ? "play" : ""}">${STATUS[m.status]}</span>
+          <span class="badge">${m.players[0] === m.players[1] ? m.players[0] : m.players.join("–")} players</span>
+          <button class="btn" data-id="${m.id}" style="background:${m.color}" ${m.status === "play" ? "" : "disabled"}>
+            ${m.status === "play" ? "Play" : "Soon"}</button>
+        </div>
+      </article>`).join("");
+
+    document.getElementById("modes").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-id]");
+      if (!btn || btn.disabled) return;
+      const mode = TP.Rumble.MODES.find((m) => m.id === btn.dataset.id);
+      TP.Rumble.saveSetup(setup.slots);
+      location.href = mode.path;
+    });
+
+    /* ---------- 3D showroom: the four cars on a turntable ---------- */
+    const canvas = document.getElementById("showroom");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x070b1a);
+    scene.fog = new THREE.Fog(0x070b1a, 30, 80);
+    TP.addStadiumLights(scene, 14);
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+    // Turntable disc with a glowing rim.
+    const table = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.4, 0.6, 64),
+      new THREE.MeshStandardMaterial({ color: 0x1a2148, metalness: 0.4, roughness: 0.5 }));
+    disc.position.y = -0.3;
+    disc.receiveShadow = true;
+    table.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(9.1, 0.12, 8, 96), new THREE.MeshBasicMaterial({ color: 0xff5a3c }));
+    rim.rotation.x = Math.PI / 2;
+    table.add(rim);
+    // One car per player colour, facing outward like a showroom display.
+    TP.PLAYER_COLORS.forEach((color, i) => {
+      const car = TP.buildCarMesh(color);
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      car.position.set(Math.sin(a) * 5, 0, Math.cos(a) * 5);
+      car.rotation.y = a;
+      car.userData.marker.visible = false;
+      table.add(car);
+    });
+    scene.add(table);
+
+    function resize() {
+      const w = innerWidth, h = innerHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    addEventListener("resize", resize);
+    resize();
+
+    // Respect people who prefer less motion: keep the turntable still.
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let last = performance.now();
+    (function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      if (!still) table.rotation.y += dt * 0.25;
+      // Camera sits low and to the side so cars show through the UI.
+      camera.position.set(0, 7, 20);
+      camera.lookAt(0, 1, 0);
+      renderer.render(scene, camera);
+      requestAnimationFrame(frame);
+    })(last);
+  })();
+  </script>
+</body>
+</html>

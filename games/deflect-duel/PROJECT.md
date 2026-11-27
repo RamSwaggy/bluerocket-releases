@@ -83,3 +83,7 @@ check that Turbo Party still passes after any change to `../shared/`:
 - 2026-11-27: Deflect Duel was started, then parked as work in progress so Turbo Party could
   come first.
 - 2026-11-27: Set up this team, using RocketBonk's structure.
+- 2026-11-27: This is now a mode of **Rocket Rumble** (one umbrella game). It uses the shared car
+  feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
+  and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
+  The Director owns `shared/` and the hub.
