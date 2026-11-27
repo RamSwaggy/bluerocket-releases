@@ -84,12 +84,20 @@
     /* ---------- Hint bar. Accepts trusted HTML (we build it ourselves). ---------- */
     hint(html) { $("hint").innerHTML = html || ""; },
 
-    /* ---------- Left/right choice prompt ---------- */
+    /* ---------- Left/right choice prompt ----------
+       Options are plain strings, or { label, disabled } where `disabled` is
+       a short reason. Disabled ones are greyed out with the reason in small
+       text underneath (e.g. "need 14🪙"). */
     choice(title, options, selected) {
       const el = $("choice");
       if (!title) { el.classList.remove("show"); return; }
       el.innerHTML = `<div class="title">${esc(title)}</div>
-        <div class="opts">${options.map((o, i) => `<div class="opt ${i === selected ? "sel" : ""}">${esc(o)}</div>`).join("")}</div>`;
+        <div class="opts">${options.map((o, i) => {
+          const label = typeof o === "object" ? o.label : o;
+          const why = typeof o === "object" ? o.disabled : "";
+          const cls = ["opt", i === selected ? "sel" : "", why ? "off" : ""].join(" ");
+          return `<div class="${cls}">${esc(label)}${why ? `<span class="why">${esc(why)}</span>` : ""}</div>`;
+        }).join("")}</div>`;
       el.classList.add("show");
     },
 
