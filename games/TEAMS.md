@@ -89,3 +89,16 @@ Run these from the `games` folder. Playwright is pre-installed in cloud sessions
 
 Each new game should get its own `tools/<game>-smoke.js` as soon as it can run.
 That job belongs to QC.
+
+## Roster (session IDs, for `send_message`)
+
+Created 2026-11-27. All are cloud sessions tagged `team:<game>` plus `role:<role>`.
+
+| Game | Boss | Gameplay | Art and UI | QC |
+|---|---|---|---|---|
+| Turbo Party | `session_01GHNBrt23mSuiGTyLcdpmqK` | `session_01GHNBrrE9ipBPBwoUZ5Axrt` | `session_01GHNBrrfMnRLjVS95iDUFgw` | `session_01GHNBrqhaxQit2X1D5DYyad` |
+| Deflect Duel | `session_01GHNBrrDAhFP7gZXs4Ap9TK` | `session_01GHNBrpQgRcR4wuJEviMDGG` | `session_01GHNBrqgetkZbzAJt8h3dPM` | `session_01GHNBrouPoebhNMp9PjrRtH` |
+| Boost Runner | `session_01GHNBrsk3LnQA2PCCCRSzxD` | `session_01GHNBrsNjSm8NLsDts3nDdU` | `session_01GHNBrowW48d38MRxz3z9U7` | `session_01GHNBrrLjMJWrWEvKiCzLJn` |
+| Car Fighter | `session_01GHNBrsKZCF3ywtyYiG3aDC` | `session_01GHNBrpqsFPkZtFWPbeSe24` | `session_01GHNBrs22k4u4qavTiP35oE` | `session_01GHNBrsHShaTu6YTArUzwUG` |
+
+Bosses who need to coordinate a `games/shared/` change can message each other with the IDs above.
