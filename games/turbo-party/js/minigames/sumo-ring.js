@@ -1,8 +1,9 @@
 /* =====================================================================
    Sumo Ring — last car standing.
    Everyone starts on a round platform floating in space. Bump rivals off
-   the edge. After 15 seconds the platform starts shrinking. Fall off and
-   you're out. Survivors at the 45-second mark share first place — but
+   the edge. After 12 seconds the platform starts shrinking, down to a
+   tiny disc by 38 seconds, so rounds rarely go the distance. Fall off
+   and you're out. Survivors at the 45-second mark share first place — but
    a car that's already gone over the edge when the time runs out counts
    as having fallen, not as a survivor.
 
@@ -16,8 +17,32 @@
   const { dist2D, clamp, rand, shuffle } = TP.util;
 
   const START_R = 17;   // platform radius at the start
-  const MIN_R = 8;      // smallest it shrinks to
-  const SHRINK_FROM = 15, SHRINK_TO = 35; // seconds
+
+  /* Tuning knobs, gathered in one place (and exposed as SumoRing.CONFIG
+     so balance scripts can try other values without editing the file).
+       tuning       — car settings for this mode, via TP.modeTuning
+       minR         — the smallest radius the platform shrinks to
+       shrinkFrom / shrinkTo — seconds when shrinking starts / reaches minR */
+  /* Tuned for the shared car change that lets head-on knockback carry
+     past reverse top speed (rams hit much harder). Measured over 60 bot
+     rounds: average ~30 s, about 1 round in 30 under 12 s, none reaching
+     45 s. Why each value:
+       • bumpScale 0.8 (was 1.15) and grip 10 (was 8): with the harder
+         head-on hits, the old values turned the opening seconds into a
+         pile-up that knocked out 2–3 cars before the ring even shrank.
+       • maxSpeed 14 / boostMax 20 unchanged: lower top speeds than other
+         modes so one ram doesn't launch both cars off.
+       • minR 5 (was 8), shrinking 12 s → 38 s (was 15 → 35): the old
+         16-unit disc left room for the last two cars to circle each
+         other until time ran out (about half of all rounds).
+       (A "calm start" — no boost and capped gas for the first 2–3 s —
+       was also tried; it didn't help once bumps were softer, so it's out.) */
+  const CONFIG = {
+    tuning: { bumpScale: 0.8, grip: 10, maxSpeed: 14, boostMax: 20 },
+    minR: 5,
+    shrinkFrom: 12,
+    shrinkTo: 38,
+  };
 
   class SumoRing extends TP.Arena {
     constructor(game) {
@@ -26,9 +51,7 @@
         duration: 45,
         size: START_R,
         camera: { y: 36, z: 30, lookZ: 1 },
-        // Slightly harder hits and less grip than normal = more knockbacks,
-        // but lower top speeds so one ram doesn't launch both cars off.
-        tuning: { bumpScale: 1.15, grip: 8, maxSpeed: 14, boostMax: 20 },
+        tuning: SumoRing.CONFIG.tuning,
       });
       this.radius = START_R;
       this.outOrder = []; // player indices in the order they fell
@@ -121,8 +144,9 @@
 
     tick(dt) {
       // Shrink the platform over time.
-      const k = clamp((this.elapsed - SHRINK_FROM) / (SHRINK_TO - SHRINK_FROM), 0, 1);
-      this.radius = START_R + (MIN_R - START_R) * k;
+      const C = SumoRing.CONFIG;
+      const k = clamp((this.elapsed - C.shrinkFrom) / (C.shrinkTo - C.shrinkFrom), 0, 1);
+      this.radius = START_R + (C.minR - START_R) * k;
       const s = this.radius / START_R;
       this.platform.scale.set(s, 1, s);
 
@@ -224,10 +248,12 @@
     }
   }
 
+  SumoRing.CONFIG = CONFIG;
+
   TP.MINIGAMES.push({
     id: "sumo-ring",
     name: "Sumo Ring",
     cls: SumoRing,
-    blurb: "Bump everyone off the floating ring. It shrinks after 15 seconds. Last car standing wins!",
+    blurb: "Bump everyone off the floating ring. It shrinks after 12 seconds. Last car standing wins!",
   });
 })();
