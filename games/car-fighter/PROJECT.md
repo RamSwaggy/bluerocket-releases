@@ -67,7 +67,8 @@ In the browser: `car-fighter/index.html?demo&speed=4&seed=1`. Any change that to
 - Shared changes made by the Director for us:
   - the **Heavy** button in `input.js` (`heavy` / `heavyPressed`: kb1 R, kb2 comma, pad Y)
   - `car.manualBodyPose` in `car.js`, which lets us pose the car body ourselves
-  - Check that they're on `claude/eager-tesla-vdhyd9` before relying on them.
+  - per-mode music tracks: `TP.sfx.defineTrack("car-fighter", {...})`, then `TP.sfx.music(true, "car-fighter")`
+  - All three are merged into `team/car-fighter` from `claude/eager-tesla-vdhyd9` at `0923873`.
 
 ## Decisions (from Reece)
 
