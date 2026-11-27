@@ -35,7 +35,8 @@
     blue: { color: 0x2f6bff, emissive: 0x0d2a7a },
     red: { color: 0xff3b3b, emissive: 0x6b0d0d },
     boost: { color: 0xffb020, emissive: 0x6b4300 },
-    event: { color: 0x22d3a6, emissive: 0x0b5c48 },
+    // Event is lime, not teal: from the overview camera teal read as "another blue".
+    event: { color: 0x9be22d, emissive: 0x3a5c0a },
     shop: { color: 0xa855f7, emissive: 0x3d1466 },
   };
 
@@ -206,17 +207,13 @@
         g.add(arrow);
         g.rotation.y = Math.atan2(tangent.x, tangent.z);
       } else if (type === "event") {
-        // Spinning diamond hovering above.
-        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.55), white);
-        m.userData.spin = true;
-        m.position.y = 1.1;
-        g.add(m);
+        // A big "?" painted flat on the disc, readable from the overview camera.
+        // (A floating 3D symbol was tried, but from above it stacks on top of
+        // the decal and makes the space harder to read, not easier.)
+        g.add(this.flatDecal(this.decalTexture("event")));
       } else if (type === "shop") {
-        // Little shopping crate with a lid.
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.7), white);
-        box.position.y = 0.75;
-        box.userData.spin = true;
-        g.add(box);
+        // Same idea with a shopping bag, so shops never look like events.
+        g.add(this.flatDecal(this.decalTexture("shop")));
       } else if (type === "start") {
         // Checkered stripe.
         for (let k = 0; k < 4; k++) {
@@ -240,6 +237,54 @@
         return null;
       }
       return g;
+    }
+
+    /* ---------- Space decals ----------
+       Event and shop symbols are drawn onto a small canvas once per board
+       and shared by every space of that type. A flat picture on the disc
+       reads far better from the high overview camera than a tiny 3D shape. */
+    decalTexture(kind) {
+      this._decals = this._decals || {};
+      if (this._decals[kind]) return this._decals[kind];
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const g = c.getContext("2d");
+      g.fillStyle = "#ffffff";
+      g.strokeStyle = "#ffffff";
+      g.lineJoin = "round";
+      if (kind === "event") {
+        // A chunky question mark.
+        g.font = "900 112px Segoe UI, system-ui, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText("?", 64, 70);
+      } else {
+        // Shopping bag: a rounded body with a loop handle on top.
+        g.lineWidth = 10;
+        g.beginPath();
+        g.arc(64, 44, 20, Math.PI, 0);      // handle
+        g.stroke();
+        g.beginPath();
+        g.moveTo(28, 44); g.lineTo(100, 44); // body: wider at the bottom
+        g.lineTo(108, 112); g.lineTo(20, 112);
+        g.closePath();
+        g.fill();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this._decals[kind] = tex;
+      return tex;
+    }
+
+    // The decal lying flat on top of a space disc.
+    flatDecal(tex) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.4, 2.4),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.37; // just above the disc's top face (0.355)
+      return m;
     }
 
     buildDecor() {
@@ -652,6 +697,9 @@
 
       switch (s.type) {
         case "start":
+          // Same payout as a blue space, but its own wording.
+          this.addCoins(player, 3, "Start line! +3 coins");
+          break;
         case "blue":
           this.addCoins(player, 3, "Blue space! +3 coins");
           break;
@@ -691,8 +739,8 @@
             [player.space, other.space] = [other.space, player.space];
             this.parkToken(other.index);
             this.parkToken(player.index);
-            this.fx.burst(this.tokens[player.index].pos, 0x22d3a6, { count: 16 });
-            this.fx.burst(this.tokens[other.index].pos, 0x22d3a6, { count: 16 });
+            this.fx.burst(this.tokens[player.index].pos, SPACE_STYLE.event.color, { count: 16 });
+            this.fx.burst(this.tokens[other.index].pos, SPACE_STYLE.event.color, { count: 16 });
             TP.UI.toast(`Swapped places with ${other.name}!`);
             TP.sfx.play("boost");
           },
@@ -713,7 +761,7 @@
         },
       ];
       const ev = pick(events);
-      TP.UI.center("? EVENT ?", ev.title, "#22d3a6");
+      TP.UI.center("? EVENT ?", ev.title, "#9be22d");
       await TP.sched.wait(1.1);
       TP.UI.center("");
       ev.run();
