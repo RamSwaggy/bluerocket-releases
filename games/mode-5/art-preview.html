@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mode 5 · art preview</title>
+  <style>
+    /* Art & UI test page. NOT the game: it fakes a paint grid, four cars and
+       the Gameplay events so world.js / vfx.js / hud.js / audio.js can be
+       built and checked on their own. */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #04050d; }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    #keys { position: fixed; left: 8px; bottom: 8px; z-index: 30; color: #9aa6c8; font: 12px system-ui, sans-serif;
+      background: rgba(0,0,0,.55); padding: 6px 8px; border-radius: 8px; }
+    body.shot #keys { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="keys">Space: sound on · 1 fill · 2 pop · 3 splat · O overdrive · C countdown · R round end · M match end · H hint</div>
+
+  <script src="../shared/vendor/three.min.js"></script>
+  <script src="../shared/js/util.js"></script>
+  <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
+  <script src="../shared/js/sfx.js"></script>
+  <script>
+    /* ---------- Stand-in for Gameplay's events.js (preview only) ---------- */
+    TP.M5 = TP.M5 || {};
+    (function () {
+      const subs = {};
+      TP.M5.on = (name, fn) => { (subs[name] = subs[name] || []).push(fn); };
+      TP.M5.emit = (name, data) => { (subs[name] || []).forEach((fn) => fn(data || {})); };
+    })();
+  </script>
+  <script src="js/world.js"></script>
+  <script src="js/vfx.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/hud.js"></script>
+  <script>
+  /* =====================================================================
+     Fake match: a paint grid, four "cars" that drive loops out of their
+     home turf and back, simple versions of fill / pop / splat, and a timer.
+     URL options:
+       ?warp=40   fast-forward the fake match 40 s before showing it
+       ?od        start in overdrive        ?card=round | match   show a card
+       ?shot      hide the key list (for screenshots)
+     ===================================================================== */
+  (function () {
+    "use strict";
+    const q = new URLSearchParams(location.search);
+    if (q.has("shot")) document.body.classList.add("shot");
+
+    // Seeded random for the simulation so screenshots are repeatable.
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+    /* ---------- Arena (same shape Gameplay will provide) ---------- */
+    const arena = {
+      name: "Plaza",
+      size: 96,
+      obstacles: [{ x: 0, z: 0, w: 6, d: 6, h: 7 }],
+      ramps: [
+        { x: -22, z: -22, w: 7, d: 10, h: 2.4, dir: Math.PI * 0.25 },
+        { x: 22, z: -22, w: 7, d: 10, h: 2.4, dir: -Math.PI * 0.25 },
+        { x: -22, z: 22, w: 7, d: 10, h: 2.4, dir: Math.PI * 0.75 },
+        { x: 22, z: 22, w: 7, d: 10, h: 2.4, dir: -Math.PI * 0.75 },
+      ],
+      pads: [{ x: -36, z: -36, heading: 0.78 }, { x: 36, z: -36, heading: -0.78 },
+             { x: -36, z: 36, heading: 2.36 }, { x: 36, z: 36, heading: -2.36 }],
+    };
+
+    /* ---------- Paint grid ---------- */
+    const N = 72, CELL = arena.size / N, HALF = arena.size / 2;
+    const grid = { n: N, owner: new Uint8Array(N * N), wet: new Uint8Array(N * N), blocked: new Uint8Array(N * N), dirty: true };
+    for (const o of arena.obstacles) {
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const x = -HALF + (i + 0.5) * CELL, z = -HALF + (j + 0.5) * CELL;
+        if (Math.abs(x - o.x) < o.w / 2 && Math.abs(z - o.z) < o.d / 2) grid.blocked[j * N + i] = 1;
+      }
+    }
+    const cellOf = (x, z) => [Math.floor((x + HALF) / CELL), Math.floor((z + HALF) / CELL)];
+    function paintCircle(x, z, r, owner, wet) {
+      const [ci, cj] = cellOf(x, z), R = Math.ceil(r);
+      const touched = [];
+      for (let j = cj - R; j <= cj + R; j++) for (let i = ci - R; i <= ci + R; i++) {
+        if (i < 0 || j < 0 || i >= N || j >= N) continue;
+        if ((i - ci) ** 2 + (j - cj) ** 2 > r * r) continue;
+        const k = j * N + i;
+        if (grid.blocked[k]) continue;
+        touched.push(k);
+        if (grid.owner[k] === owner && !wet) continue;
+        if (grid.owner[k] === owner && grid.wet[k] === 0 && wet) continue; // already dry turf
+        grid.owner[k] = owner;
+        grid.wet[k] = wet ? 1 : 0;
+        grid.dirty = true;
+      }
+      return touched;
+    }
+    // Loop fill: anything this owner encloses (not reachable from the border without crossing them).
+    function floodFill(owner) {
+      const seen = new Uint8Array(N * N), stack = [];
+      for (let k = 0; k < N; k++) for (const c of [k, (N - 1) * N + k, k * N, k * N + N - 1]) {
+        if (grid.owner[c] !== owner && !seen[c]) { seen[c] = 1; stack.push(c); }
+      }
+      while (stack.length) {
+        const c = stack.pop(), i = c % N, j = (c / N) | 0;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const a = i + di, b = j + dj;
+          if (a < 0 || b < 0 || a >= N || b >= N) continue;
+          const k = b * N + a;
+          if (!seen[k] && grid.owner[k] !== owner) { seen[k] = 1; stack.push(k); }
+        }
+      }
+      const cells = [];
+      for (let k = 0; k < N * N; k++) if (!seen[k] && grid.owner[k] !== owner && !grid.blocked[k]) cells.push(k);
+      return cells;
+    }
+
+    /* ---------- Renderer, scene, our four modules ---------- */
+    const canvas = document.getElementById("game");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const scene = new THREE.Scene();
+    const world = new TP.M5.World(scene, arena, grid);
+    const vfx = new TP.M5.Vfx(scene, world);
+    TP.M5.Audio.init();
+    const players = TP.DEFAULT_NAMES.map((name, index) => ({ name, index }));
+    const hud = new TP.M5.Hud({ camera: world.camera, players });
+    hud.setPlayers(players);
+
+    function resize() {
+      renderer.setSize(innerWidth, innerHeight, false);
+      world.setAspect(innerWidth / innerHeight);
+    }
+    addEventListener("resize", resize);
+    resize();
+
+    /* ---------- Fake cars ---------- */
+    const cars = arena.pads.map((p, index) => {
+      const mesh = TP.buildCarMesh(TP.PLAYER_COLORS[index]);
+      scene.add(mesh);
+      paintCircle(p.x, p.z, 3.2, index + 1, false);
+      return { index, mesh, pos: new THREE.Vector3(p.x, 0, p.z), vel: new THREE.Vector3(), heading: p.heading,
+               onGround: true, boosting: false, vy: 0, air: 0, plan: [], wetCount: 0, stunned: 0, home: p };
+    });
+
+    // Plan a loop: out from home in some direction, sideways, and back.
+    function planLoop(car) {
+      const out = 10 + rnd() * 22, side = 8 + rnd() * 16;
+      const a = Math.atan2(-car.home.x, -car.home.z) + (rnd() - 0.5) * 1.6;
+      const fx = Math.sin(a), fz = Math.cos(a), sx = fz, sz = -fx, sgn = rnd() < 0.5 ? -1 : 1;
+      const p0 = car.pos;
+      const P = (f, s) => new THREE.Vector3(
+        Math.max(-44, Math.min(44, p0.x + fx * f + sx * s * sgn)), 0,
+        Math.max(-44, Math.min(44, p0.z + fz * f + sz * s * sgn)));
+      car.plan = [P(out, 0), P(out, side), P(0, side), new THREE.Vector3(car.home.x, 0, car.home.z)];
+    }
+
+    let timeLeft = 120, overdrive = false;
+    const roundWins = [1, 0, 0, 1];
+
+    function simStep(dt) {
+      timeLeft = Math.max(0, timeLeft - dt);
+      if (!overdrive && timeLeft <= 20) { overdrive = true; TP.M5.emit("overdrive"); }
+      for (const car of cars) {
+        if (car.stunned > 0) { car.stunned -= dt; car.heading += dt * 12; car.vel.multiplyScalar(0.9); continue; }
+        if (!car.plan.length) planLoop(car);
+        const tgt = car.plan[0];
+        const dx = tgt.x - car.pos.x, dz = tgt.z - car.pos.z;
+        if (Math.hypot(dx, dz) < 3) { car.plan.shift(); continue; }
+        // Steer toward the waypoint.
+        let want = Math.atan2(dx, dz) - car.heading;
+        want = Math.atan2(Math.sin(want), Math.cos(want));
+        car.heading += Math.max(-2.6 * dt, Math.min(2.6 * dt, want));
+        car.boosting = Math.abs(want) < 0.3 && rnd() < 0.02 ? true : car.boosting && rnd() > 0.03;
+        const speed = car.boosting ? 20 : 14;
+        car.vel.set(Math.sin(car.heading) * speed, 0, Math.cos(car.heading) * speed);
+        car.pos.addScaledVector(car.vel, dt);
+        // Stay off the pillar and inside the walls.
+        if (Math.abs(car.pos.x) < 4.5 && Math.abs(car.pos.z) < 4.5) car.pos.addScaledVector(car.vel, -dt * 1.2);
+        car.pos.x = Math.max(-46, Math.min(46, car.pos.x));
+        car.pos.z = Math.max(-46, Math.min(46, car.pos.z));
+
+        // Random little hops: no paint in the air, splat on landing.
+        if (car.onGround && rnd() < dt * 0.15) { car.onGround = false; car.vy = 9; car.air = 0; }
+        if (!car.onGround) {
+          car.air += dt; car.vy -= 25 * dt; car.pos.y += car.vy * dt;
+          if (car.pos.y <= 0) {
+            car.pos.y = 0; car.onGround = true;
+            const r = 2 + car.air * 3;
+            paintCircle(car.pos.x, car.pos.z, r, car.index + 1, false);
+            TP.M5.emit("land", { player: car.index, airtime: car.air });
+            TP.M5.emit("splat", { player: car.index, x: car.pos.x, z: car.pos.z, r });
+          }
+          continue;
+        }
+
+        // Paint. Outside our dry turf → wet trail.
+        const [ci, cj] = cellOf(car.pos.x, car.pos.z);
+        const k = cj * N + ci;
+        const onOwnDry = grid.owner[k] === car.index + 1 && !grid.wet[k];
+        // Ran over someone else's wet trail → pop it.
+        const victimOwner = grid.wet[k] ? grid.owner[k] : 0;
+        if (victimOwner && victimOwner !== car.index + 1) {
+          const v = cars[victimOwner - 1];
+          for (let c = 0; c < N * N; c++) if (grid.wet[c] && grid.owner[c] === victimOwner) { grid.owner[c] = car.index + 1; grid.wet[c] = 0; }
+          grid.dirty = true;
+          v.stunned = 1.0; v.wetCount = 0; v.plan = [];
+          TP.M5.emit("pop", { victim: v.index, by: car.index, x: car.pos.x, z: car.pos.z });
+        }
+        if (onOwnDry && car.wetCount > 0) {
+          // Back home with a trail: dry it and fill what it encloses.
+          for (let c = 0; c < N * N; c++) if (grid.wet[c] && grid.owner[c] === car.index + 1) grid.wet[c] = 0;
+          const cells = floodFill(car.index + 1);
+          let sx = 0, sz = 0;
+          for (const c of cells) { grid.owner[c] = car.index + 1; sx += c % N; sz += (c / N) | 0; }
+          grid.dirty = true;
+          car.wetCount = 0;
+          if (cells.length) {
+            const cx = -HALF + (sx / cells.length + 0.5) * CELL, cz = -HALF + (sz / cells.length + 0.5) * CELL;
+            TP.M5.emit("fill", { player: car.index, cells: cells.length, pct: (cells.length / (N * N)) * 100, cx, cz, cellsList: cells });
+          }
+        } else if (!onOwnDry) {
+          if (car.wetCount === 0) TP.M5.emit("trailStart", { player: car.index });
+          car.wetCount++;
+        }
+        paintCircle(car.pos.x, car.pos.z, (car.boosting ? 1.8 : 1.1) * (overdrive ? 1.35 : 1), car.index + 1, !onOwnDry);
+      }
+    }
+
+    function scores() {
+      const c = [0, 0, 0, 0];
+      let paintable = 0;
+      for (let k = 0; k < N * N; k++) { if (grid.blocked[k]) continue; paintable++; if (grid.owner[k]) c[grid.owner[k] - 1]++; }
+      return c.map((v) => (v / paintable) * 100);
+    }
+
+    function syncMeshes() {
+      for (const car of cars) {
+        car.mesh.position.copy(car.pos);
+        car.mesh.rotation.y = car.heading;
+        car.mesh.userData.flame.visible = car.boosting;
+      }
+    }
+
+    // Fast-forward (no effects drawn) for screenshots.
+    const warp = Number(q.get("warp")) || 0;
+    for (let t = 0; t < warp; t += 1 / 60) simStep(1 / 60);
+    if (q.has("od")) { timeLeft = Math.min(timeLeft, 19); }
+
+    TP.M5.match = { phase: "play", timeLeft, scores: scores(), players, roundWins, round: 2, rounds: 3, cars };
+
+    /* ---------- Main loop ---------- */
+    let last = performance.now();
+    let paused = q.has("card");
+    (function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      if (!paused) simStep(dt);
+      syncMeshes();
+      Object.assign(TP.M5.match, { timeLeft, scores: scores() });
+      world.frame(cars, dt);
+      world.update(dt);
+      vfx.update(dt, cars);
+      hud.update(dt, TP.M5.match);
+      renderer.render(scene, world.camera);
+      requestAnimationFrame(frame);
+    })(last);
+
+    /* ---------- Manual triggers ---------- */
+    const c0 = () => cars[(rnd() * 4) | 0];
+    addEventListener("keydown", (e) => {
+      const k = e.key.toLowerCase();
+      if (k === " ") { TP.sfx.unlock(); TP.M5.Audio.startMusic(); }
+      if (k === "1") { const c = c0(); TP.M5.emit("fill", { player: c.index, pct: 9, cx: c.pos.x, cz: c.pos.z }); }
+      if (k === "2") { const c = c0(); TP.M5.emit("pop", { victim: c.index, by: (c.index + 1) % 4, x: c.pos.x, z: c.pos.z }); }
+      if (k === "3") { const c = c0(); TP.M5.emit("splat", { player: c.index, x: c.pos.x, z: c.pos.z, r: 5 }); }
+      if (k === "o") { timeLeft = 20.5; }
+      if (k === "c") { TP.M5.emit("roundCountdown", { round: 2, arena }); setTimeout(() => TP.M5.emit("roundStart"), 3000); }
+      if (k === "r") { paused = true; TP.M5.emit("roundEnd", { scores: scores(), winner: scores().indexOf(Math.max(...scores())) }); }
+      if (k === "m") {
+        paused = true;
+        TP.M5.emit("matchEnd", { standings: [3, 0, 1, 2], roundWins: [1, 0, 0, 2],
+          stats: [0, 1, 2, 3].map((i) => ({ bestFill: 6 + i * 2.5, pops: i, painted: 20 + i * 3, distance: 1500 + i * 210 })) });
+      }
+      if (k === "h") TP.M5.emit("hint", { text: "Drive out and back into your turf to **FILL**" });
+    });
+
+    // Card screenshots: freeze and show the card straight away.
+    if (q.get("card") === "round") TP.M5.emit("roundEnd", { scores: scores(), winner: 3 });
+    if (q.get("card") === "match") TP.M5.emit("matchEnd", { standings: [3, 0, 1, 2], roundWins: [1, 0, 0, 2],
+      stats: [0, 1, 2, 3].map((i) => ({ bestFill: 6 + i * 2.5, pops: i, painted: 20 + i * 3, distance: 1500 + i * 210 })) });
+    if (q.has("banner")) TP.M5.emit("overdrive");
+    TP.M5.preview = { world, vfx, hud, grid, cars };
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+/* =====================================================================
+   hud.js — Mode 5 on-screen display: score bar, timer, banners, floating
+   numbers, hints, round and match cards.
+
+   Art & UI owns this file. The 3D scene never draws text; it all lives in
+   HTML layered over the canvas. This file builds its own elements and its
+   own stylesheet, so it works on any page that loads it.
+
+   Usage:
+     const hud = new TP.M5.Hud({ camera: world.camera });
+     hud.setPlayers([{ name: "Blue", index: 0 }, ...]);   // or read from state.players
+     hud.update(dt, TP.M5.match);                          // every frame (game time)
+
+   State it reads each frame (all optional, read-only):
+     state.timeLeft   seconds left in the round
+     state.scores     per player: percent (0..100) or fraction (0..1) of the floor
+     state.players    [{ name, index }] if setPlayers() wasn't called
+     state.roundWins  per player: rounds won so far (shows pips)
+     state.round / state.rounds   current round number / rounds in the match
+
+   Events it reacts to (TP.M5.on):
+     roundCountdown → "ROUND N" + 3-2-1 countdown (with beeps)   roundStart → GO!
+     overdrive → OVERDRIVE banner    fill → "FILL +X%" pops up where it happened
+     pop → "POPPED!" over the spot   hint → hint pill   roundEnd → round card
+     matchEnd → match results card
+   ===================================================================== */
+(function () {
+  "use strict";
+  TP.M5 = TP.M5 || {};
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const CSS = () => TP.M5.NEON_CSS || TP.PLAYER_CSS;
+
+  /* ---------- The stylesheet (injected once) ----------
+     Sizes use clamp() so the same HUD reads on a 390 px phone and a 1920 px
+     monitor. Colours follow the Rocket Rumble tokens, pushed a bit neon. */
+  const STYLE = `
+  #m5-hud { position: fixed; inset: 0; pointer-events: none; z-index: 20;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: #f2f5ff;
+    --m5-panel: rgba(8, 10, 26, 0.78); --m5-line: rgba(255,255,255,0.16); --m5-hot: #ff3d9a; --m5-gold: #ffd23f; }
+  #m5-hud * { box-sizing: border-box; }
+
+  /* ----- Top: timer + stacked score bar + player chips ----- */
+  .m5-top { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 0; right: 0;
+    display: flex; flex-direction: column; align-items: center; gap: clamp(4px, 0.8vw, 8px); }
+  .m5-timer { font-weight: 900; font-style: italic; font-variant-numeric: tabular-nums;
+    font-size: clamp(22px, 4.2vw, 40px); line-height: 1; padding: 4px 16px 5px; border-radius: 12px;
+    background: var(--m5-panel); border: 1px solid var(--m5-line); letter-spacing: .02em;
+    text-shadow: 0 2px 0 rgba(0,0,0,.5); }
+  .m5-timer.warn { color: #fff; animation: m5-pulse 1s infinite; border-color: #ff5a6e; }
+  .m5-timer.od { background: linear-gradient(90deg, #7a1550, #a3123f); border-color: var(--m5-hot);
+    box-shadow: 0 0 22px rgba(255,61,154,.55); }
+  @keyframes m5-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.14); color: #ffd1d8; } }
+
+  .m5-bar { position: relative; width: min(94vw, 860px); height: clamp(16px, 2.4vw, 24px);
+    border-radius: 999px; background: rgba(10, 12, 30, .85); border: 2px solid var(--m5-line);
+    overflow: hidden; display: flex; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+  .m5-seg { height: 100%; transition: width .35s ease-out; position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; min-width: 0;
+    font-weight: 800; font-size: clamp(10px, 1.4vw, 14px); color: rgba(0,0,0,.75); white-space: nowrap; }
+  .m5-seg::after { content: ""; position: absolute; inset: 0 0 50% 0; background: rgba(255,255,255,.22); }
+  .m5-seg.lead { animation: m5-shine 1.6s linear infinite; }
+  @keyframes m5-shine { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+  .m5-half { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: rgba(255,255,255,.4); }
+
+  .m5-chips { display: flex; gap: clamp(4px, 1vw, 10px); flex-wrap: wrap; justify-content: center; max-width: 96vw; }
+  .m5-chip { display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 6px; border-radius: 999px;
+    background: var(--m5-panel); border: 1px solid var(--m5-line); font-size: clamp(11px, 1.4vw, 14px);
+    font-weight: 700; white-space: nowrap; }
+  .m5-chip .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; background: currentColor; }
+  .m5-chip .pct { font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+  .m5-chip .pips { display: inline-flex; gap: 3px; }
+  .m5-chip .pip { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid currentColor; }
+  .m5-chip .pip.on { background: currentColor; }
+  @media (max-width: 520px) { .m5-chip .nm { display: none; } .m5-chip { padding: 2px 7px 2px 4px; gap: 4px; }
+    .m5-chip .pct { min-width: 2.4em; } .m5-chip .pips { gap: 2px; } .m5-chip .pip { width: 6px; height: 6px; } }
+
+  /* ----- Big centre banner ----- */
+  .m5-banner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; transform: translateY(-50%); }
+  .m5-banner .big { display: inline-block; font-weight: 900; font-style: italic; line-height: .95;
+    font-size: clamp(54px, 13vw, 150px); letter-spacing: .01em;
+    -webkit-text-stroke: clamp(1px, .25vw, 3px) rgba(0,0,0,.55);
+    text-shadow: 0 6px 0 rgba(0,0,0,.45), 0 0 30px var(--glow, #fff), 0 0 70px var(--glow, #fff); }
+  .m5-banner .sub { display: block; margin-top: 8px; font-weight: 800; font-size: clamp(16px, 3vw, 28px);
+    letter-spacing: .14em; text-transform: uppercase; text-shadow: 0 2px 0 rgba(0,0,0,.6); }
+  .m5-banner.in .big { animation: m5-slam .45s cubic-bezier(.2, 1.6, .4, 1) both; }
+  .m5-banner.in .sub { animation: m5-fade .4s .1s both; }
+  .m5-banner.out { animation: m5-fadeout .3s both; }
+  @keyframes m5-slam { 0% { transform: scale(2.4) rotate(-6deg); opacity: 0; } 100% { transform: scale(1) rotate(-3deg); opacity: 1; } }
+  @keyframes m5-fade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes m5-fadeout { to { opacity: 0; transform: translateY(-50%) scale(.9); } }
+
+  /* ----- Floating numbers over the arena ----- */
+  .m5-float { position: absolute; transform: translate(-50%, -50%); font-weight: 900; font-style: italic;
+    white-space: nowrap; text-shadow: 0 3px 0 rgba(0,0,0,.6), 0 0 18px currentColor;
+    -webkit-text-stroke: 1px rgba(0,0,0,.5); animation: m5-rise 1.3s ease-out both; }
+  @keyframes m5-rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.5); }
+    15% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+    30% { transform: translate(-50%, -55%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -140%) scale(1); } }
+
+  /* ----- Hint pill at the bottom ----- */
+  .m5-hint { position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    max-width: 92vw; padding: 10px 18px; border-radius: 999px; background: var(--m5-panel);
+    border: 1px solid var(--m5-line); font-size: clamp(14px, 2.2vw, 20px); font-weight: 700; text-align: center;
+    opacity: 0; transition: opacity .3s, transform .3s; }
+  .m5-hint.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .m5-hint b { color: var(--m5-gold); }
+
+  /* ----- Round / match cards ----- */
+  .m5-card-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: radial-gradient(ellipse at center, rgba(4,5,14,.35), rgba(4,5,14,.75)); opacity: 0;
+    transition: opacity .35s; }
+  .m5-card-wrap.show { opacity: 1; }
+  .m5-card { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: clamp(16px, 3vw, 28px);
+    border-radius: 22px; background: rgba(12, 15, 36, .94); border: 2px solid var(--m5-line);
+    box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset; transform: translateY(14px);
+    transition: transform .35s; }
+  .m5-card-wrap.show .m5-card { transform: none; }
+  .m5-card .kicker { font-size: 13px; letter-spacing: .18em; color: #9aa6c8; text-transform: uppercase; }
+  .m5-card h2 { margin: 2px 0 14px; font-size: clamp(28px, 6vw, 44px); font-style: italic; font-weight: 900; line-height: 1;
+    text-shadow: 0 0 24px var(--glow, transparent); }
+  .m5-row { display: grid; grid-template-columns: minmax(70px, 7em) 1fr 3.6em; gap: 10px; align-items: center; margin: 8px 0; }
+  .m5-row .nm { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m5-row .track { height: 18px; border-radius: 999px; background: #1a2042; overflow: hidden; }
+  .m5-row .fill { display: block; height: 100%; width: 0; border-radius: 999px; transition: width 1.1s cubic-bezier(.2,.8,.2,1);
+    box-shadow: 0 0 14px currentColor; background: currentColor; }
+  .m5-row .val { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .m5-row.win .nm::after { content: " ★"; color: var(--m5-gold); }
+  .m5-stats { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  .m5-stats th { text-align: right; color: #9aa6c8; font-weight: 600; padding: 4px 6px; font-size: 12px; }
+  .m5-stats td { text-align: right; padding: 6px; border-top: 1px solid var(--m5-line); font-variant-numeric: tabular-nums; }
+  .m5-stats th:first-child, .m5-stats td:first-child { text-align: left; }
+  .m5-card .foot { margin-top: 14px; color: #9aa6c8; font-size: 14px; text-align: center; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .m5-timer.warn, .m5-seg.lead { animation: none; }
+    .m5-banner.in .big { animation: m5-fade .2s both; }
+  }`;
+
+  function el(tag, cls, parent) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  // Score values may arrive as fractions (0..1) or percents (0..100).
+  function toPercents(scores) {
+    if (!scores) return null;
+    const arr = Array.from(scores, (v) => Number(v) || 0);
+    const sum = arr.reduce((a, b) => a + b, 0);
+    return sum <= 1.0001 && arr.every((v) => v <= 1) ? arr.map((v) => v * 100) : arr;
+  }
+  const fmtTime = (s) => {
+    s = Math.max(0, Math.ceil(s));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  class Hud {
+    constructor(opts = {}) {
+      this.camera = opts.camera || null;
+      this.players = opts.players || null;
+      this.time = 0;
+      this.countdownLeft = 0;      // seconds left in the 3-2-1 (game time)
+      this.lastCount = 0;
+      this.bannerTimer = 0;
+      this.hintTimer = 0;
+      this.overdrive = false;
+
+      if (!document.getElementById("m5-hud-style")) {
+        const st = el("style");
+        st.id = "m5-hud-style";
+        st.textContent = STYLE;
+        document.head.appendChild(st);
+      }
+      const root = el("div", "", document.body);
+      root.id = "m5-hud";
+      this.root = root;
+
+      const top = el("div", "m5-top", root);
+      this.timerEl = el("div", "m5-timer", top);
+      this.barEl = el("div", "m5-bar", top);
+      this.chipsEl = el("div", "m5-chips", top);
+      this.bannerEl = el("div", "m5-banner", root);
+      this.floatLayer = el("div", "", root);
+      this.hintEl = el("div", "m5-hint", root);
+      this.cardWrap = el("div", "m5-card-wrap", root);
+      this.timerEl.textContent = "2:00";
+      this.segs = [];
+      this.listen();
+    }
+
+    setCamera(camera) { this.camera = camera; }
+    setPlayers(players) { this.players = players; this.buildBar(); }
+    show(on) { this.root.style.display = on ? "" : "none"; }
+    showTop(on) { this.root.querySelector(".m5-top").style.visibility = on ? "" : "hidden"; }
+
+    // One segment + one chip per player. Built once; update() only resizes.
+    buildBar() {
+      const ps = this.players || [];
+      this.barEl.innerHTML = "";
+      this.chipsEl.innerHTML = "";
+      this.segs = ps.map((p) => {
+        const i = p.index ?? 0;
+        const seg = el("div", "m5-seg", this.barEl);
+        seg.style.background = CSS()[i % 4];
+        seg.style.width = "0%";
+        const chip = el("div", "m5-chip", this.chipsEl);
+        chip.style.color = CSS()[i % 4];
+        chip.innerHTML = `<span class="dot"></span><span class="nm" style="color:#f2f5ff">${esc(p.name)}</span>
+          <span class="pct" style="color:#f2f5ff">0%</span><span class="pips"></span>`;
+        return { seg, chip, pct: chip.querySelector(".pct"), pips: chip.querySelector(".pips"), last: -1, lastWins: "" };
+      });
+      el("div", "m5-half", this.barEl);  // halfway marker: own more than this and you've basically won
+    }
+
+    /* ---------- Per frame ---------- */
+    update(dt, state) {
+      this.time += dt;
+      state = state || TP.M5.match || {};
+      if (!this.players && state.players) this.setPlayers(state.players.map((p, i) => ({ name: p.name, index: p.index ?? i })));
+
+      // Timer.
+      if (typeof state.timeLeft === "number") {
+        const txt = fmtTime(state.timeLeft);
+        if (txt !== this.timerEl.textContent) this.timerEl.textContent = txt;
+        const live = !state.phase || state.phase === "play" || state.phase === "playing";
+        this.timerEl.classList.toggle("warn", live && state.timeLeft <= 10 && state.timeLeft > 0);
+        this.timerEl.classList.toggle("od", this.overdrive);
+      }
+
+      // Score bar + chips (only touch the DOM when a value changes).
+      const pcts = toPercents(state.scores);
+      if (pcts && this.segs.length) {
+        const lead = Math.max(...pcts);
+        this.segs.forEach((s, k) => {
+          const i = this.players[k].index ?? k;
+          const v = pcts[i] || 0;
+          const shown = Math.round(v);
+          if (shown !== s.last) {
+            s.last = shown;
+            s.seg.style.width = v.toFixed(2) + "%";
+            s.seg.textContent = v >= 7 ? shown + "%" : "";
+            s.pct.textContent = shown + "%";
+          }
+          s.seg.classList.toggle("lead", v > 0 && v === lead);
+          const wins = state.roundWins ? state.roundWins[i] || 0 : null;
+          const need = state.rounds ? Math.ceil(state.rounds / 2) : 0;
+          const key = wins + "/" + need;
+          if (wins != null && need > 1 && key !== s.lastWins) {
+            s.lastWins = key;
+            s.pips.innerHTML = Array.from({ length: need }, (_, n) => `<span class="pip ${n < wins ? "on" : ""}"></span>`).join("");
+          }
+        });
+      }
+
+      // Countdown: 3, 2, 1 on game time, with a beep for each number.
+      if (this.countdownLeft > 0) {
+        this.countdownLeft -= dt;
+        const n = Math.ceil(this.countdownLeft);
+        if (n !== this.lastCount && n > 0) {
+          this.lastCount = n;
+          this.banner(String(n), { sub: this.countSub, color: "#ffffff", glow: "#7dd3fc", hold: 0.9 });
+          if (TP.M5.Audio) TP.M5.Audio.play("count");
+        }
+      }
+      // Banner and hint timers.
+      if (this.bannerTimer > 0) {
+        this.bannerTimer -= dt;
+        if (this.bannerTimer <= 0) { this.bannerEl.classList.remove("in"); this.bannerEl.classList.add("out"); }
+      }
+      if (this.hintTimer > 0) {
+        this.hintTimer -= dt;
+        if (this.hintTimer <= 0) this.hintEl.classList.remove("show");
+      }
+    }
+
+    /* ---------- Big centre banner ----------
+       opts: sub (smaller line), color (text), glow (halo colour), hold (seconds) */
+    banner(text, opts = {}) {
+      const b = this.bannerEl;
+      b.style.setProperty("--glow", opts.glow || opts.color || "#ffffff");
+      b.innerHTML = `<span class="big" style="color:${opts.color || "#fff"}">${esc(text)}</span>` +
+        (opts.sub ? `<span class="sub">${esc(opts.sub)}</span>` : "");
+      b.classList.remove("in", "out");
+      void b.offsetWidth;            // restart the CSS animation
+      b.classList.add("in");
+      this.bannerTimer = opts.hold ?? 1.2;
+    }
+    clearBanner() { this.bannerEl.innerHTML = ""; this.bannerTimer = 0; }
+
+    // Start a 3-2-1 countdown (game time). `sub` shows under the numbers.
+    countdown(seconds = 3, sub = "") {
+      this.countdownLeft = seconds;
+      this.lastCount = 0;
+      this.countSub = sub;
+    }
+
+    /* ---------- Floating text at a world position ---------- */
+    floater(text, x, z, color = "#fff", size = 1) {
+      let left = 50, top = 45;
+      if (this.camera) {
+        const v = new THREE.Vector3(x, 1.5, z).project(this.camera);
+        left = Math.min(88, Math.max(12, (v.x * 0.5 + 0.5) * 100));
+        top = Math.min(85, Math.max(18, (-v.y * 0.5 + 0.5) * 100));
+      }
+      const f = el("div", "m5-float", this.floatLayer);
+      f.style.left = left + "%";
+      f.style.top = top + "%";
+      f.style.color = color;
+      f.style.fontSize = `clamp(${Math.round(22 * size)}px, ${(4.5 * size).toFixed(1)}vw, ${Math.round(64 * size)}px)`;
+      f.textContent = text;
+      f.addEventListener("animationend", () => f.remove());
+      // Safety net in case animationend never fires (hidden tab, reduced motion).
+      setTimeout(() => f.remove(), 2000);
+    }
+
+    /* ---------- Hint pill ---------- */
+    hint(text, seconds = 3.5) {
+      // Allow **bold** in hint text for key words.
+      this.hintEl.innerHTML = esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+      this.hintEl.classList.add("show");
+      this.hintTimer = seconds;
+    }
+
+    /* ---------- Round end card ---------- */
+    roundCard(e = {}, state = TP.M5.match || {}) {
+      const ps = this.players || [];
+      const pcts = toPercents(e.scores || state.scores) || ps.map(() => 0);
+      const winner = e.winner;
+      const order = ps.map((p, k) => ({ p, i: p.index ?? k })).sort((a, b) => (pcts[b.i] || 0) - (pcts[a.i] || 0));
+      const wName = winner != null && winner >= 0 && ps.find((p, k) => (p.index ?? k) === winner);
+      const glow = wName ? CSS()[winner % 4] : "#fff";
+      const round = e.round || state.round;
+      this.openCard(`
+        <div class="kicker">${round ? `Round ${round}` : "Round over"}</div>
+        <h2 style="--glow:${glow};color:${wName ? glow : "#fff"}">${wName ? `${esc(wName.name)} takes it!` : "Dead heat!"}</h2>
+        ${order.map(({ p, i }) => `
+          <div class="m5-row ${i === winner ? "win" : ""}" style="color:${CSS()[i % 4]}">
+            <span class="nm" style="color:#f2f5ff">${esc(p.name)}</span>
+            <span class="track"><span class="fill" data-w="${(pcts[i] || 0).toFixed(1)}"></span></span>
+            <span class="val" style="color:#f2f5ff">${Math.round(pcts[i] || 0)}%</span>
+          </div>`).join("")}
+        ${state.roundWins ? `<div class="foot">Rounds won: ${order.map(({ p, i }) =>
+          `<b style="color:${CSS()[i % 4]}">${esc(p.name)} ${state.roundWins[i] || 0}</b>`).join(" · ")}</div>` : ""}`);
+    }
+
+    /* ---------- Match results card ----------
+       e.standings: player indices best-first (or [{index, ...}])
+       e.stats:     per player { bestFill, pops, painted, distance, ... } — any keys shown */
+    matchCard(e = {}) {
+      const ps = this.players || [];
+      const nameOf = (i) => { const p = ps.find((q, k) => (q.index ?? k) === i); return p ? p.name : `P${i + 1}`; };
+      const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.index));
+      const champ = order[0];
+      const stats = e.stats || [];
+      const LABELS = { bestFill: "Best fill", pops: "Pops", painted: "Painted", distance: "Distance", fills: "Fills", rounds: "Rounds" };
+      const keys = Object.keys(stats[champ] || stats[0] || {});
+      const fmt = (k, v) => (v == null ? "–" : k === "distance" ? Math.round(v) + " m" :
+        k === "bestFill" || k === "painted" ? Math.round(v) + "%" : Math.round(v * 10) / 10);
+      this.openCard(`
+        <div class="kicker">Match over</div>
+        <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${esc(nameOf(champ))} wins!</h2>
+        ${order.map((i, rank) => `<div class="m5-row ${rank === 0 ? "win" : ""}" style="color:${CSS()[i % 4]}">
+          <span class="nm" style="color:#f2f5ff">${rank + 1}. ${esc(nameOf(i))}</span>
+          <span class="track"><span class="fill" data-w="${100 - rank * 22}"></span></span>
+          <span class="val" style="color:#f2f5ff">${e.roundWins ? e.roundWins[i] || 0 : ""}</span></div>`).join("")}
+        ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
+          ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
+            ${keys.map((k) => `<td>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
+    }
+
+    openCard(html) {
+      this.clearBanner();   // never draw a banner over a card
+      this.cardWrap.innerHTML = `<div class="m5-card">${html}</div>`;
+      void this.cardWrap.offsetWidth;
+      this.cardWrap.classList.add("show");
+      // Let the bars grow from zero (CSS transition) a moment after showing.
+      setTimeout(() => this.cardWrap.querySelectorAll(".fill").forEach((f) => { f.style.width = f.dataset.w + "%"; }), 60);
+    }
+    hideCard() { this.cardWrap.classList.remove("show"); }
+
+    /* ---------- Events ---------- */
+    listen() {
+      if (!TP.M5.on || this.listening) return;
+      this.listening = true;
+      const on = TP.M5.on;
+      const colorOf = (p) => CSS()[TP.M5.pi(p) % 4];
+      on("roundCountdown", (e = {}) => {
+        this.hideCard();
+        this.overdrive = false;
+        const round = e.round || 1;
+        const arenaName = e.arena && (e.arena.name || (typeof e.arena === "string" ? e.arena : ""));
+        this.countdown(e.seconds || 3, `Round ${round}${arenaName ? " · " + arenaName : ""}`);
+      });
+      on("roundStart", () => {
+        this.countdownLeft = 0;
+        this.banner("GO!", { color: "#ffd23f", glow: "#ff7a1f", hold: 0.8 });
+      });
+      on("overdrive", () => {
+        this.overdrive = true;
+        this.banner("OVERDRIVE", { sub: "Wider paint · more pickups", color: "#ff3d9a", glow: "#ff3d9a", hold: 1.8 });
+      });
+      on("fill", (e) => {
+        const pct = e.pct || 0;
+        // Big fills get a bigger number.
+        const size = pct >= 10 ? 1.5 : pct >= 4 ? 1.15 : 0.85;
+        this.floater(`FILL +${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`, e.cx || 0, e.cz || 0, colorOf(e.player), size);
+      });
+      on("pop", (e) => this.floater("POPPED!", e.x || 0, e.z || 0, colorOf(e.victim), 0.9));
+      on("pickup", (e) => {
+        const NAMES = { bomb: "PAINT BOMB!", mega: "MEGA ROLLER!", boost: "BOOST!" };
+        const car = (TP.M5.match && TP.M5.match.cars) ? TP.M5.match.cars[TP.M5.pi(e.player)] : null;
+        if (car) this.floater(NAMES[e.kind] || "PICKUP!", car.pos.x, car.pos.z, "#ffffff", 0.7);
+      });
+      on("hint", (e) => this.hint(e.text || "", e.seconds || 3.5));
+      on("roundEnd", (e) => {
+        this.overdrive = false;
+        this.timerEl.classList.remove("warn", "od");
+        this.banner("TIME!", { color: "#ffffff", glow: "#7dd3fc", hold: 1.0 });
+        clearTimeout(this.cardTimer);
+        this.cardTimer = setTimeout(() => this.roundCard(e), 1100 / (TP.M5.speed || 1));
+      });
+      // The match card replaces the round card (and wins if both are pending).
+      on("matchEnd", (e) => {
+        clearTimeout(this.cardTimer);
+        this.cardTimer = setTimeout(() => this.matchCard(e), 1400 / (TP.M5.speed || 1));
+      });
+    }
+
+    dispose() { this.root.remove(); }
+  }
+
+  TP.M5.Hud = Hud;
+})();
