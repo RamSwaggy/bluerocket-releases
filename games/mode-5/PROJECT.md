@@ -43,3 +43,4 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 
 ## Merge log
 - QC 10a0e5e: tools/mode-5-{lib,smoke,shots,probe}.js (test-hook contract forwarded to Gameplay).
+- Art 1f58907: world/vfx/hud/audio + art-preview.html (reviewed screenshots 1280×720, 390×844, match card; no errors).
