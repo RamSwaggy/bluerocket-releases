@@ -4,6 +4,16 @@
    second you're the ONLY car inside it. If two or more cars are in the
    zone, nobody scores — so shove them out! The zone jumps to a new spot
    every 8 seconds. Most points wins.
+
+   Bots play different roles so they don't all pile into the zone and
+   cancel each other out (which is what used to happen: the zone was
+   empty or contested most of the time and scores stayed very low):
+     holder  — alone in the zone: sits near the middle and turns to face
+               anyone charging in (a car hit on the nose is pushed less)
+     rammer  — charges the holder to knock them out, then takes over
+     lurker  — waits just outside the rim, out of the scrum, and darts in
+               when the zone empties
+   Roles are re-rolled every few seconds and whenever the zone moves.
    ===================================================================== */
 (function () {
   "use strict";
@@ -12,6 +22,8 @@
   const HALF = 20;
   const ZONE_R = 4.5;
   const MOVE_EVERY = 8;   // seconds between zone moves
+  const RAM_CHANCE = 0.25; // chance a bot outside the zone picks "rammer"
+  const LURK_GAP = 2.5;   // how far outside the rim lurkers wait
 
   class KingOfTheHill extends TP.Arena {
     constructor(game) {
@@ -20,6 +32,18 @@
       this.moveTimer = MOVE_EVERY;
       this.inZone = [];
       this.placeZone(0, 0);
+      // Per-bot state: role ("ram" or "lurk" while outside the zone),
+      // seconds until the role is re-rolled, how close before a rammer
+      // commits its boost, and where it lurks (an angle round the rim).
+      this.minds = this.cars.map(() => ({}));
+      this.minds.forEach((m) => this.rollRole(m));
+    }
+
+    rollRole(m) {
+      m.role = Math.random() < RAM_CHANCE ? "ram" : "lurk";
+      m.timer = rand(3, 6);
+      m.chargeDist = rand(5, 8);
+      m.lurkAngle = rand(0, Math.PI * 2);
     }
 
     build() {
@@ -70,8 +94,15 @@
         } while (dist2D(x, z, this.zx, this.zz) < 16 && ++tries < 30);
         this.placeZone(x, z);
         this.moveTimer = MOVE_EVERY;
+        this.minds.forEach((m) => this.rollRole(m)); // new zone, new plans
         TP.UI.toast("The zone moved!");
         TP.sfx.play("go");
+      }
+
+      // Bots re-think their role every few seconds.
+      for (const m of this.minds) {
+        m.timer -= dt;
+        if (m.timer <= 0) this.rollRole(m);
       }
 
       // Who's inside? (Airborne cars over the zone still count.)
@@ -98,24 +129,94 @@
       this.zoneMat.opacity = 0.25 * warn + 0.05;
     }
 
+    /* Drive to (x, z) and STOP there. TP.ai.driveTo's "arrive" only eases
+       off the gas, and cars carry a lot of speed, so bots used to shoot
+       straight through the zone and out the other side. Here we pick a
+       target speed that falls as we get closer (about 2.2 units/s per
+       unit of distance, capped at 14) and brake whenever we're faster
+       than that. */
+    arriveAt(car, x, z) {
+      const ctrl = TP.ai.driveTo(car, x, z, { boostDist: 999 });
+      const dist = dist2D(car.pos.x, car.pos.z, x, z);
+      const f = car.forward();
+      const vF = car.vel.x * f.x + car.vel.z * f.z; // speed along the nose
+      const want = Math.min(14, dist * 2.2);
+      if (ctrl.throttle > 0) ctrl.throttle = vF > want + 1 ? -1 : vF < want ? 1 : 0;
+      ctrl.boost = false;
+      return ctrl;
+    }
+
+    /* Drive so as to shove `target` straight away from point (fx, fz):
+       aim a few units beyond them on the far side, so the hit carries
+       them outward instead of glancing off. Boost in when close and
+       lined up. */
+    shove(car, target, fx, fz, chargeDist) {
+      let dx = target.pos.x - fx, dz = target.pos.z - fz;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len; dz /= len;
+      const tx = target.pos.x + dx * 3, tz = target.pos.z + dz * 3;
+      const ctrl = TP.ai.driveTo(car, tx, tz, { boostDist: 0 });
+      const d = dist2D(car.pos.x, car.pos.z, target.pos.x, target.pos.z);
+      ctrl.boost = d < chargeDist && Math.abs(TP.ai.angleTo(car, tx, tz)) < 0.4 && car.boost > 20;
+      return ctrl;
+    }
+
     botControls(car) {
+      const m = this.minds[car.index];
       const me = dist2D(car.pos.x, car.pos.z, this.zx, this.zz);
-      // Inside with company → ram the nearest intruder out.
-      if (me < ZONE_R && this.inZone.length > 1) {
-        let t = null, best = Infinity;
-        for (const o of this.inZone) {
-          if (o === car) continue;
+      const inside = me < ZONE_R;
+      const others = this.cars.filter((c) => c !== car);
+      const nearest = (list) => {
+        let best = null, bd = Infinity;
+        for (const o of list) {
           const d = dist2D(car.pos.x, car.pos.z, o.pos.x, o.pos.z);
-          if (d < best) { best = d; t = o; }
+          if (d < bd) { bd = d; best = o; }
         }
-        if (t) {
-          const ctrl = TP.ai.driveTo(car, t.pos.x, t.pos.z, { boostDist: 0 });
-          ctrl.boost = best < 6 && car.boost > 20;
+        return { car: best, dist: bd };
+      };
+
+      /* ---------- Inside the zone ---------- */
+      if (inside) {
+        const rivals = this.inZone.filter((c) => c !== car);
+        // Contested: shove the nearest rival out, pushing them away from
+        // the zone's centre so they end up outside it.
+        if (rivals.length) return this.shove(car, nearest(rivals).car, this.zx, this.zz, 6);
+        // Holding alone. If someone's charging in, turn to face them
+        // (head-on hits push less than side-on ones), creeping only
+        // slightly so we stay inside. Otherwise settle near the middle.
+        const threat = nearest(others);
+        if (threat.car && threat.dist < 9 && me < ZONE_R * 0.6) {
+          const ctrl = TP.ai.driveTo(car, threat.car.pos.x, threat.car.pos.z, { boostDist: 999 });
+          ctrl.throttle = Math.abs(TP.ai.angleTo(car, threat.car.pos.x, threat.car.pos.z)) > 0.5 ? 0.3 : 0;
           return ctrl;
         }
+        return this.arriveAt(car, this.zx, this.zz);
       }
-      // Otherwise get to the middle of the zone and hold position.
-      return TP.ai.driveTo(car, this.zx, this.zz, { boostDist: 10, arrive: 3 });
+
+      /* ---------- Outside the zone ---------- */
+      // Zone empty: the bot closest to it (and any rammer) goes for it;
+      // the rest hang back so they don't all arrive at once and cancel out.
+      if (this.inZone.length === 0) {
+        let closestCar = null, cd = Infinity;
+        for (const c of this.cars) {
+          const d = dist2D(c.pos.x, c.pos.z, this.zx, this.zz);
+          if (d < cd) { cd = d; closestCar = c; }
+        }
+        if (closestCar === car || m.role === "ram") {
+          // Boost while far away, then brake into the middle.
+          if (cd > 12 && closestCar === car) return TP.ai.driveTo(car, this.zx, this.zz, { boostDist: 8 });
+          return this.arriveAt(car, this.zx, this.zz);
+        }
+      } else if (this.inZone.length === 1 && m.role === "ram") {
+        // One holder: rammers knock them out (away from the zone centre).
+        return this.shove(car, this.inZone[0], this.zx, this.zz, m.chargeDist);
+      }
+
+      // Lurk just outside the rim (also what everyone does while the zone
+      // is contested — no point joining the scrum and cancelling it out).
+      const lx = this.zx + Math.cos(m.lurkAngle) * (ZONE_R + LURK_GAP);
+      const lz = this.zz + Math.sin(m.lurkAngle) * (ZONE_R + LURK_GAP);
+      return this.arriveAt(car, Math.max(-HALF + 2, Math.min(HALF - 2, lx)), Math.max(-HALF + 2, Math.min(HALF - 2, lz)));
     }
 
     // One decimal so near-ties still rank correctly but read cleanly.
