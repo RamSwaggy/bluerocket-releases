@@ -89,3 +89,45 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-27: Set up this team, using RocketBonk's structure.
 - 2026-11-27: Turbo Party is now a mode of **Rocket Rumble** (one umbrella game, one car feel;
   minigame tuning limited to `TP.MODE_TUNABLE`). The Director owns `shared/` and the hub.
+- 2026-11-27: Reece approved the boss's first plan ("approved"). Rulings the Director made under
+  that approval:
+  - **Ties:** if every player ties, each gets 3 coins and nobody gets a minigame win. In a
+    partial tie, each tied player gets that place's payout, and a tie for 1st counts as a win
+    for each of them.
+  - **Trophy relocation:** counted in spaces along the track, at least 10 spaces from the buyer,
+    never on the shortcut directly ahead of the buyer. Checked with QC's 20-match before/after.
+  - **Head-on knockback** (`shared/car.js`) is approved in principle. It ships together with a
+    Sumo retune that keeps rounds at 20–35 s. Gameplay sends the exact change to the Director.
+  - The bigger art ideas (arena backdrops, board clutter, car models) wait until jobs 1–5 are
+    merged.
+
+## Current jobs (round 1)
+
+| # | Job | Who | Status |
+|---|---|---|---|
+| 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | **merged** (ba264be) |
+| A | 20-match 6-turn balance baseline + reusable balance tool | QC | sent |
+| 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | sent |
+| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | after A |
+| 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
+| 4b | Small bugs: can choose items you can't afford, others found by job 3 | Gameplay / Art and UI | after job 3 |
+| 5 | Knockback + Sumo retune (via the Director), King of the Hill crowding, Goal Frenzy posts | Gameplay | later |
+| 6 | Gamepad and sound check (checklist below) | Reece | end of round |
+
+## Reece's checklist: gamepad and sound (job 6)
+
+Only you can check these: the cloud sessions have no speakers or gamepads. Open
+`games/index.html` in Chrome, pick Turbo Party, and note anything odd:
+
+1. **Gamepad:** plug one in, set a seat to it in the hub, and start a match.
+   - Do the triggers drive forward and back? Does the stick steer *without* moving the car?
+   - Do Jump, Boost and Hit work in a minigame (try Sumo Ring and Goal Frenzy)?
+   - On the board, can you roll the die, pick the fork direction, and use the shop and item
+     menus with the gamepad alone?
+2. **Two gamepads, or a gamepad and a keyboard:** does each control only its own car?
+3. **Sound:** is the music pleasant or grating? Are any sounds too loud (bumps, explosions,
+   coins)? Does `M` mute and unmute?
+4. **Feel:** anything that feels slow, confusing or unfair. Rough notes are fine.
+
+Tell the boss what you found, and it becomes the next jobs.
+

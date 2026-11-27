@@ -17,7 +17,8 @@
      event  — a random surprise (see runEvent)
      shop   — buy an item to use at the start of a later turn
    The trophy sits on one space. Drive onto or past it with 20+ coins
-   and you can buy it; then it moves somewhere else.
+   and you can buy it (once per turn); then it moves at least 10 spaces
+   further along the track.
    ===================================================================== */
 (function () {
   "use strict";
@@ -29,6 +30,9 @@
   const TOKEN_SCALE = 0.55;   // cars are shrunk down on the board
   const STEP_TIME = 0.3;      // seconds to hop one space
   const MAX_ITEMS = 2;
+  // After someone buys the trophy it moves at least this many spaces
+  // ahead of them (counted along the track), so it can't just be re-bought.
+  const MIN_TROPHY_AHEAD = 10;
 
   const SPACE_STYLE = {
     start: { color: 0xffffff, emissive: 0x666666 },
@@ -69,6 +73,7 @@
       this.camOffset = new THREE.Vector3(0, 62, 48);    // camera position relative to focus
       this.camera.position.copy(this.camFocus).add(this.camOffset);
       this.orbit = false; // menu background / intro slowly circles the board
+      this.trophyBoughtThisTurn = false; // reset at the start of every turn
 
       this.buildTrack();
       this.buildDecor();
@@ -366,7 +371,9 @@
       g.traverse((o) => { if (o.isMesh && o !== beam) o.castShadow = true; });
       this.trophy = g;
       this.scene.add(g);
-      this.placeTrophy(this.randomTrophySpot(this.spaces[0].pos));
+      // Everyone starts on space 0, so the first trophy uses the same
+      // "far enough ahead" rule measured from the start line.
+      this.placeTrophy(this.randomTrophySpot(0));
     }
 
     placeTrophy(index) {
@@ -375,12 +382,65 @@
       this.trophy.position.set(p.x, 2.2, p.z);
     }
 
-    // A good new spot for the trophy: far from `awayFrom`, never on the
-    // start or a shop.
-    randomTrophySpot(awayFrom) {
-      const ok = this.spaces.filter((s) => s.type !== "start" && s.type !== "shop" &&
-        s.pos.distanceTo(awayFrom) > 20);
-      return pick(ok.length ? ok : this.spaces.slice(1)).index;
+    /* How many hops forward it takes to reach every space from `fromIndex`,
+       following the board's `next` links (so the fork's two ways are both
+       explored). It's a breadth-first search, so each number is the
+       SHORTEST forward route — the fewest spaces anyone starting here
+       could drive to get there, whichever way they take at the fork.
+       Returns an array: distances[spaceIndex] = hops (0 for fromIndex). */
+    spacesAhead(fromIndex) {
+      const dist = new Array(this.spaces.length).fill(Infinity);
+      dist[fromIndex] = 0;
+      const queue = [fromIndex];
+      while (queue.length) {
+        const i = queue.shift();
+        for (const n of this.spaces[i].next) {
+          if (dist[n] === Infinity) {
+            dist[n] = dist[i] + 1;
+            queue.push(n);
+          }
+        }
+      }
+      return dist;
+    }
+
+    /* Is the Risky Shortcut "directly ahead" of someone on `fromIndex`?
+       True if they're already on it, or if the very next stretch of road
+       they come to is the fork (they reach it in under MIN_TROPHY_AHEAD
+       spaces). In both cases a trophy on the shortcut would be an easy
+       grab, so the trophy isn't allowed to land there. */
+    shortcutAhead(fromIndex) {
+      if (this.spaces[fromIndex].shortcut) return true;
+      return this.spacesAhead(fromIndex)[this.forkIndex] < MIN_TROPHY_AHEAD;
+    }
+
+    /* Where the trophy may move to, given the buyer is on `fromIndex`.
+       Rules (the Director's ruling, approved by Reece):
+         • at least MIN_TROPHY_AHEAD spaces ahead of the buyer, counted
+           along the track by the shortest route (not straight-line
+           distance — two spaces can be close on screen but far apart
+           on the road, and vice versa);
+         • never on the shortcut when the shortcut is directly ahead;
+         • never on the start space or a shop (those have their own
+           effects and it reads oddly to have the trophy there).
+       Returns a list of space indices. */
+    trophySpotsFrom(fromIndex) {
+      const ahead = this.spacesAhead(fromIndex);
+      const noShortcut = this.shortcutAhead(fromIndex);
+      return this.spaces
+        .filter((s) => s.type !== "start" && s.type !== "shop")
+        .filter((s) => ahead[s.index] >= MIN_TROPHY_AHEAD && ahead[s.index] !== Infinity)
+        .filter((s) => !(noShortcut && s.shortcut))
+        .map((s) => s.index);
+    }
+
+    // Pick a random legal new spot for the trophy (see trophySpotsFrom).
+    // The board is a 30-space loop, so there are always plenty of legal
+    // spots; the fallback only exists so a future board edit can't crash.
+    randomTrophySpot(fromIndex) {
+      const ok = this.trophySpotsFrom(fromIndex);
+      if (ok.length) return pick(ok);
+      return pick(this.spaces.filter((s) => s.index !== fromIndex && s.type !== "start")).index;
     }
 
     /* ---------- The 3D die: a cube that floats above the active car ----------
@@ -548,6 +608,8 @@
       ui.center(`${player.name}'s turn`, "", player.css);
       await TP.sched.wait(0.9);
       ui.center("");
+      // Fresh turn, so this player may buy the trophy again (max one per turn).
+      this.trophyBoughtThisTurn = false;
 
       /* ---------- Use an item? ---------- */
       let rollMode = "normal";
@@ -733,7 +795,7 @@
         { title: "Flat tyre!", run: () => this.addCoins(player, -5, "Flat tyre! −5 coins") },
         {
           title: "Pit-lane swap!",
-          run: () => {
+          run: async () => {
             // Swap board positions with a random rival.
             const other = pick(rivals);
             [player.space, other.space] = [other.space, player.space];
@@ -743,6 +805,13 @@
             this.fx.burst(this.tokens[other.index].pos, SPACE_STYLE.event.color, { count: 16 });
             TP.UI.toast(`Swapped places with ${other.name}!`);
             TP.sfx.play("boost");
+            // Landed on the trophy by swapping? Offer it as if you'd driven
+            // there. (Only the player whose turn it is gets the offer; the
+            // rival swapped away is just along for the ride.)
+            if (player.space === this.trophyIndex) {
+              await TP.sched.wait(0.8);
+              await this.trophyStop(player);
+            }
           },
         },
         {
@@ -764,7 +833,7 @@
       TP.UI.center("? EVENT ?", ev.title, "#9be22d");
       await TP.sched.wait(1.1);
       TP.UI.center("");
-      ev.run();
+      await ev.run(); // some events (pit-lane swap) can pause for a trophy offer
     }
 
     /* ---------- Shop: buy one item ---------- */
@@ -808,6 +877,14 @@
 
     /* ---------- Trophy purchase ---------- */
     async trophyStop(player) {
+      // One trophy per turn. Even with the trophy moving 10+ spaces away,
+      // a big roll (Double Dice goes up to 20, plus a boost pad's 3) could
+      // carry you onto it again before your turn ends.
+      if (this.trophyBoughtThisTurn) {
+        TP.UI.toast("Only one trophy per turn — come back next time!");
+        await TP.sched.wait(0.9);
+        return;
+      }
       if (player.coins < TROPHY_COST) {
         TP.UI.toast(`Trophy costs ${TROPHY_COST} coins — you have ${player.coins}`);
         await TP.sched.wait(0.9);
@@ -818,6 +895,7 @@
 
       player.coins -= TROPHY_COST;
       player.trophies += 1;
+      this.trophyBoughtThisTurn = true;
       TP.sfx.play("trophy");
       this.fx.confetti(this.trophy.position);
       TP.UI.center("🏆 TROPHY!", `${player.name} has ${player.trophies}`, "#ffcc33");
@@ -825,8 +903,9 @@
       await TP.sched.wait(1.6);
       TP.UI.center("");
 
-      // Move the trophy somewhere far away, and show where it went.
-      this.placeTrophy(this.randomTrophySpot(this.spaces[player.space].pos));
+      // Move the trophy at least 10 spaces ahead of the buyer (see
+      // trophySpotsFrom for the full rules), and show where it went.
+      this.placeTrophy(this.randomTrophySpot(player.space));
       TP.UI.toast("The trophy moved!");
       const cam = this.camFocus.clone();
       this.camFocus.set(this.trophy.position.x, 0, this.trophy.position.z);
