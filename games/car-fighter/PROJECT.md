@@ -77,7 +77,13 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   `TP.Fight.ARENA`. The boss checked it with a scratch page:
   - Sim of 200 matches: PASS, P1 49% / P2 51%, average round 26 s, no time-outs.
   - Frame-data check: PASS, all 11 moves.
-- Waiting on Art job 1 (page, view, HUD, menu).
+- Art job 1 is merged (`cd053fd`): `index.html`, `view.js` (turntable stage, side-on camera,
+  car posing), `fx-fight.js`, `ui.js` (HUD and cards) and `main.js` (menu). There are no
+  third-party assets. **`?demo` works**: `node tools/car-fighter-smoke.js 8 180 12345` gives
+  PASS (P2 2-0 by KO, 5664 frames checked, no errors).
+- **Open bug (Art, being fixed):** opening `index.html` without `?demo` auto-starts a bot fight,
+  and the menu never shows. `TP.MATCH_MANUAL_START` isn't set, and `main.js` passes
+  `TP.Match.start` a different config shape from the one `match.js` expects.
 - Shared changes made by the Director for us:
   - the **Heavy** button in `input.js` (`heavy` / `heavyPressed`: kb1 R, kb2 comma, pad Y)
   - `car.manualBodyPose` in `car.js`, which lets us pose the car body ourselves
