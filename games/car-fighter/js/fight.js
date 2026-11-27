@@ -73,7 +73,7 @@ window.TP = window.TP || {};
   // The short recovery after landing out of an air move. Not a real move
   // (no button makes it), so it isn't in TP.MOVES; each fighter gets a copy.
   const LANDING = Object.freeze({
-    id: "landing", name: "Landing", input: null, button: null,
+    id: "landing", name: "Landing", input: null, button: null, internal: true,
     startup: 0, active: 0, recovery: 4,
     damage: 0, hitstun: 0, blockstun: 0, push: 0, launch: 0, airLaunch: 0, hitstop: 0, meter: 0,
     box: null, cancel: [], flags: { system: true },
