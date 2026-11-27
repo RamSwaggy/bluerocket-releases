@@ -87,3 +87,6 @@ check that Turbo Party still passes after any change to `../shared/`:
   feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
   and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
   The Director owns `shared/` and the hub.
+- 2026-11-27 (via the Director): **Free assets and tools only** (see `../TEAMS.md`). Every
+  third-party asset needs a line in `../CREDITS.md` before the boss merges it; assets made in
+  code are exempt.
