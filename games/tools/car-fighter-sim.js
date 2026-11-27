@@ -30,9 +30,11 @@
    --extra=<query> to add URL options to it.
 
    Frame numbers: "frame" in the frames report is the move frame the hit
-   landed on, counting the first frame the move shows in fight.state as
-   frame 1. A hit within one frame of the table's active window passes
-   (startup conventions differ by one); anything further out fails.
+   landed on, counting the frame the button was pressed as frame 1.
+   Per DESIGN.md §9 the first active frame is startup+1, counting
+   the press frame as 1. A move that doesn't travel must hit exactly then
+   (the cars start touching). A move that carries the car forward may hit
+   anywhere in its active window.
    Exit code 0 = no errors and nothing out of line; 1 otherwise.
 
    Built against the fight-core contract in car-fighter/DESIGN.md §9.
@@ -274,15 +276,12 @@ function inPage(args) {
   /* One scripted attempt: P1 does the move, P2 either stands still
      ("idle") or holds away to block ("block"). Returns what happened. */
   function attempt(mv, recipe, dist, defend, steerSign) {
-    const fight = newFight({ fighter: opts.p1 || "rivet", controller: "kb1" }, { fighter: opts.p2 || "rivet", controller: "kb2" }, seed, 3, 60);
+    // Signature moves (boost+heavy) cost a super bar, so P1 starts with one
+    // through the per-player `super` option (DESIGN.md §9, contract detail 3).
+    const p1 = { fighter: opts.p1 || "rivet", controller: "kb1" };
+    if (recipe.hold.boost && recipe.press.heavy) p1.super = 100;
+    const fight = newFight(p1, { fighter: opts.p2 || "rivet", controller: "kb2" }, seed, 3, 60);
     if (!skipToFight(fight)) return { error: `never reached phase "fight" (stuck in "${fight.state.phase}")` };
-
-    // Signature moves cost a super bar: try to give P1 one. state is meant
-    // to be read-only, so this only works if fight.js reads it back; if
-    // not, the move is reported as "needs meter".
-    if (recipe.hold.boost && recipe.press.heavy) {
-      try { fight.state.cars[0].super = 100; if (fight.cars[0]) fight.cars[0].super = 100; } catch (e) { /* read-only */ }
-    }
     const realDist = place(fight, dist);
     const s0 = fight.state;
     const p1Right = s0.cars[0].x > s0.cars[1].x;
@@ -298,6 +297,9 @@ function inPage(args) {
       super0: s0.cars[0].super,
     };
     let pressesDone = 0, lastPress = -99, airborneSince = null;
+    // state.frame and P1's x on the step that held the latest button press.
+    // The press that started the move is frame 1 of the move (contract detail 2).
+    let lastPressFrame = null, lastPressX = null, hitstopSincePress = 0;
 
     for (let f = 0; f < 4 * FPS; f++) {
       const st = fight.state;
@@ -328,14 +330,28 @@ function inPage(args) {
         if (recipe.press.jump) { c1.jump = true; c1.confirmPressed = true; }
         lastPress = f; pressesDone++;
       }
+      const pressedNow = lastPress === f;
+      const xBeforeStep = me.x;
 
       const hpBeforeStep = st.cars[1].health;
+      const phaseBefore = st.phase;   // read before stepping: state may be one live object
       fight.step([c1, c2]);
       const after = fight.state;
       const a = after.cars[0], d = after.cars[1];
+      if (pressedNow) { lastPressFrame = after.frame; lastPressX = xBeforeStep; hitstopSincePress = 0; }
+      // Hit-stop freezes both cars (DESIGN.md §5), so those frames don't
+      // count towards the move's frame number. A chain move pressed on the
+      // frame the previous hit landed sits frozen through that hit-stop.
+      // A step that began in hit-stop was a frozen frame.
+      else if (phaseBefore === "hitstop" && !res.hit) hitstopSincePress++;
 
       if (a.move && a.move !== mv.id && !res.otherMoves.includes(a.move)) res.otherMoves.push(a.move);
-      if (res.moveStart === null && a.move === mv.id) { res.moveStart = after.frame; res.startMoveFrame = a.moveFrame; }
+      if (res.moveStart === null && a.move === mv.id) {
+        res.moveStart = after.frame; res.startMoveFrame = a.moveFrame;
+        // Count from the press that started it (falls back to the first frame the move shows).
+        res.pressFrame = lastPressFrame !== null ? lastPressFrame : after.frame;
+        res.pressX = lastPressX !== null ? lastPressX : a.x;
+      }
 
       // First hit/block/throw by P1 with this move.
       if (res.moveStart !== null && !res.hit) {
@@ -343,8 +359,12 @@ function inPage(args) {
           const e = fight.events[i];
           if (e.attacker === 0 && e.move === mv.id && (e.type === "hit" || e.type === "block" || e.type === "throw")) {
             res.hit = { type: e.type, damage: e.damage, stun: e.stun, frame: e.frame };
-            // Move frame numbers are 1-based here: the frame the move first shows up is frame 1.
-            res.hitRel = e.frame - res.moveStart + 1;
+            // Move frame number of the hit, counting the press frame as frame 1.
+            res.hitRel = e.frame - res.pressFrame + 1 - hitstopSincePress;
+            res.hitstopFrames = hitstopSincePress;
+            // How far P1 travelled between the press and the hit: a move that
+            // travels (Dash Strike, lunges) may connect later in its active window.
+            res.travel = Math.abs(a.x - res.pressX);
             res.hpAtHit = hpBeforeStep;
             break;
           }
@@ -399,12 +419,23 @@ function inPage(args) {
           row.notes.push(`started but never connected at any distance up to ${dists[dists.length - 1]}`);
         } else {
           const h = hitRun.hit;
-          // Hit frame: should land inside the active window.
+          /* Hit frame (contract detail 2): the first active frame is startup+1,
+             counting the press frame as 1. The cars start touching, so a move
+             that doesn't travel must land exactly on that frame. A move that
+             carries the car forward (it moved > TRAVEL units before hitting) may
+             land anywhere inside its active window. Either way the exact frame
+             is reported. */
           if (t.startup !== undefined && t.active !== undefined) {
+            const TRAVEL = 0.3;
             const first = t.startup + 1, last = t.startup + t.active;
-            // 1 frame of slack either side for "is startup counted inclusive" conventions.
-            if (hitRun.hitRel < first - 1 || hitRun.hitRel > last + 1) { row.status = "FAIL"; row.notes.push(`hit on move frame ${hitRun.hitRel}, active window is ${first}-${last}`); }
-            else if (hitRun.hitRel !== first) row.notes.push(`hit on move frame ${hitRun.hitRel} (first active frame ${first})`);
+            const travelled = (hitRun.travel || 0) > TRAVEL;
+            if (hitRun.hitRel < first || hitRun.hitRel > last) {
+              row.status = "FAIL"; row.notes.push(`hit on move frame ${hitRun.hitRel}, outside the active window ${first}-${last}`);
+            } else if (hitRun.hitRel !== first && !travelled) {
+              row.status = "FAIL"; row.notes.push(`hit on move frame ${hitRun.hitRel}, expected ${first}: the target was already in reach and the car didn't travel`);
+            } else if (hitRun.hitRel !== first) {
+              row.notes.push(`travelling move: hit on move frame ${hitRun.hitRel} (window ${first}-${last}, moved ${hitRun.travel.toFixed(2)} first)`);
+            }
           }
           /* Damage. A chained move is hit N of a combo, so DESIGN.md §5 scaling
              applies: 10% less per earlier hit, floor 50%. We accept either
