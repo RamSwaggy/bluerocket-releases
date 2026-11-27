@@ -16,16 +16,46 @@
   const UI = {
     esc,
 
-    /* ---------- Board HUD: one card per player ---------- */
+    /* ---------- Board HUD: one card per player ----------
+       Each card shows the name, a small controller tag (CPU / KEYS 1 / PAD 2),
+       trophies, coins and held items. Two extra markers:
+         - whose turn it is: that card glows in the player's colour, gets a
+           "TURN" tab hanging under it, and the other cards dim;
+         - who's leading: a crown badge (most trophies, coins break ties).
+           If everyone is level, nobody gets the crown. */
     setPlayers(players, activeIndex = -1) {
-      $("hud-players").innerHTML = players.map((p, i) => `
-        <div class="pcard ${i === activeIndex ? "active" : ""}"
-             style="border-color:${i === activeIndex ? p.css : "var(--line)"}">
-          <div class="name" style="color:${p.css}">${esc(p.name)}</div>
-          <div class="ctrl">${esc(TP.CONTROLLER_LABELS[p.controller])}</div>
+      const score = (p) => p.trophies * 10000 + p.coins;
+      const best = Math.max(...players.map(score));
+      const leaders = players.filter((p) => score(p) === best);
+      const showCrown = leaders.length < players.length;
+      const someoneActive = activeIndex >= 0;
+
+      $("hud-players").innerHTML = players.map((p, i) => {
+        const active = i === activeIndex;
+        const lead = showCrown && score(p) === best;
+        const cls = ["pcard", active ? "active" : "", someoneActive && !active ? "idle" : ""].join(" ");
+        // --pc carries the player colour into the CSS (glow, tab, border).
+        return `
+        <div class="${cls}" style="--pc:${p.css}">
+          ${lead ? `<div class="crown" title="In the lead">👑 1st</div>` : ""}
+          <div class="top">
+            <span class="name" style="color:${p.css}">${esc(p.name)}</span>
+            <span class="tag">${esc(UI.shortController(p.controller))}</span>
+          </div>
           <div class="stats"><span>🏆 ${p.trophies}</span><span>🪙 ${p.coins}</span>
             <span title="Items">${(p.items || []).map((id) => TP.ITEMS[id].icon).join("")}</span></div>
-        </div>`).join("");
+          ${active ? `<div class="turn-tab">▶ TURN</div>` : ""}
+        </div>`;
+      }).join("");
+    },
+
+    // Short controller name for the little tag on each player card.
+    shortController(id) {
+      if (id === "bot") return "CPU";
+      if (id === "kb1") return "KEYS 1";
+      if (id === "kb2") return "KEYS 2";
+      const pad = /^pad(\d)$/.exec(id || "");
+      return pad ? `PAD ${Number(pad[1]) + 1}` : String(id || "").toUpperCase();
     },
     showPlayers(show) { $("hud-players").style.display = show ? "flex" : "none"; },
 
@@ -33,8 +63,12 @@
 
     /* ---------- Big centre text. Pass "" to clear. ---------- */
     center(text, sub = "", color = "") {
+      // The text sits in a dark rounded panel (.box) so it stays readable over
+      // a busy 3D scene. The panel's top edge picks up the message colour.
       $("center-msg").innerHTML = text
-        ? `<span style="color:${color || "inherit"}">${esc(text)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}`
+        ? `<div class="box" style="--cc:${color || "var(--line)"}">
+             <span class="main" style="color:${color || "inherit"}">${esc(text)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
+           </div>`
         : "";
     },
 
