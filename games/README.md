@@ -1,7 +1,10 @@
-# Car-sports game modes
+# Rocket Rumble
 
-Rocket-car takes on four classic game genres. Each mode is an original game built on the
-same shared engine in `shared/` (car physics, input, sound, helpers and Three.js).
+One rocket car, a pile of ways to play. **Rocket Rumble** is a browser game with several modes.
+Every mode uses the same car, controls and feel, and each has its own objective.
+
+**To play, double-click `index.html` in this folder.** That's the hub: set up your players
+once, then pick a mode. No install or internet needed. Keep the whole `games` folder together.
 
 | Mode | Genre | Status |
 |---|---|---|
@@ -10,5 +13,6 @@ same shared engine in `shared/` (car physics, input, sound, helpers and Three.js
 | [Deflect Duel](deflect-duel/) | Arena ball-deflection: the ball speeds up with every hit | 🚧 Work in progress (not playable yet) |
 | [Car Fighter](car-fighter/) | 1v1 car combat with health bars and special moves | Planned (design stage) |
 
-Each game is worked on by a team of Claude sessions (boss, Gameplay, Art and UI, QC).
-See [TEAMS.md](TEAMS.md) for how that works, and each game's `PROJECT.md` for its current state.
+Each mode is worked on by a team of Claude sessions (boss, Gameplay, Art and UI, QC), under
+the Rocket Rumble Director. See [TEAMS.md](TEAMS.md) for how that works, and each mode's
+`PROJECT.md` for its current state.

@@ -58,3 +58,7 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 - 2026-11-27: One of four rocket-car games, alongside Turbo Party, Deflect Duel and the other
   new mode. Browser game (Three.js), local multiplayer plus bots, sharing `../shared/`.
 - 2026-11-27: Set up this team, using RocketBonk's structure.
+- 2026-11-27: This is now a mode of **Rocket Rumble** (one umbrella game). It uses the shared car
+  feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
+  and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
+  The Director owns `shared/` and the hub.

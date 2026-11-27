@@ -1,6 +1,24 @@
-# Car-game teams: how they work
+# Rocket Rumble teams: how they work
 
-Each car game has its own **team** of four Claude sessions, the same way RocketBonk is run:
+**Rocket Rumble** is one game with several **modes**. Every mode uses the same rocket car,
+controls and feel; what changes is the objective. The hub (`games/index.html`) is the title
+screen: set up players once, pick a mode.
+
+```
+Rocket Rumble · Director        (this umbrella: hub, shared engine, car feel, cross-mode calls)
+├── Turbo Party team     boss + Gameplay + Art and UI + QC
+├── Deflect Duel team    boss + Gameplay + Art and UI + QC
+├── Boost Runner team    boss + Gameplay + Art and UI + QC
+└── Car Fighter team     boss + Gameplay + Art and UI + QC
+```
+
+**The Director** (session `session_01GHNBrs2PaPyHH8XycVBywq`, titled "Rocket Rumble · Director")
+owns `games/index.html` (the hub), `games/shared/` (the engine every mode runs on) and this
+file. Mode bosses go to the Director for anything that affects more than their own mode:
+changes to `shared/`, the car feel, the hub listing, or anything that should match across
+modes (controls, player colours, menu style).
+
+Inside each mode, the team works the same way RocketBonk is run:
 
 | Session | Job |
 |---|---|
@@ -9,7 +27,7 @@ Each car game has its own **team** of four Claude sessions, the same way RocketB
 | **`<Game> · Art and UI (look and screens)`** | 3D models, scenes, particles, camera, HUD, menus, cards, sound and music. |
 | **`<Game> · QC (playtest and checks)`** | Plays the game (headless bots and scripted human input), writes and runs tests, files bugs with exact repro steps, checks every merge. Only fixes things the boss assigns it. |
 
-The games: **Turbo Party** (`games/turbo-party`), **Deflect Duel** (`games/deflect-duel`),
+The modes: **Turbo Party** (`games/turbo-party`), **Deflect Duel** (`games/deflect-duel`),
 **Boost Runner** (`games/boost-runner`) and **Car Fighter** (`games/car-fighter`).
 Each game folder has a `PROJECT.md` with that team's current state, file ownership,
 test commands and a log of Reece's decisions. **Read it before every job.**
@@ -60,12 +78,35 @@ For example: `team/turbo-party`, `team/turbo-party-gameplay`.
 - Give one clear job at a time per role, with the files involved and what "done" looks like.
 - Before merging a role branch: read the diff, run the smoke test on the merged result, and
   tell the other roles when something they depend on changed.
-- **`games/shared/` is shared by every game.** Any change there must keep all games working,
-  so run every game's smoke test. Tell the other bosses about it.
+- **`games/shared/` belongs to the Director.** If your mode needs a shared change, ask the
+  Director with what you need and why. Small additive changes (a new helper, a new sound) can be
+  approved quickly. Anything that changes existing behaviour gets checked against every mode.
+- When your mode becomes playable, or its status or blurb changes, tell the Director so the hub
+  card (`TP.Rumble.MODES` in `shared/js/rumble.js`) is updated.
 - Never push to `main` or `claude/eager-tesla-vdhyd9`. When Reece wants a version released,
   open a pull request from `team/<game>` only if he asks for one.
 - New standing rules from Reece go into that game's `PROJECT.md` (or this file, if they apply
   to every team) and get passed on to the roles.
+
+## One car feel (Reece's decision, 2026-11-27)
+
+Every mode drives the **same car with the same handling**, so a player's skills carry over.
+A mode may only tweak the settings in `TP.MODE_TUNABLE` (`bumpScale`, `grip`, `maxSpeed`,
+`boostMax`, `pivot`), using `TP.modeTuning({...})` from `shared/js/car.js`. Anything else
+(acceleration, turn rate, jump, gravity, boost drain and regen) is fixed. Changing it is a
+Director decision, because it changes the car everywhere. A mode that needs a whole new
+movement layer (like Boost Runner's side-on track) builds it on top of the shared car, and the
+Director agrees the design first.
+
+Same for controls: Drive, Steer, Jump, Boost and Hit mean the same thing in every mode, on the
+same keys and buttons (see `shared/js/input.js`).
+
+## Shared player setup
+
+Players are set up once in the hub and saved with `TP.Rumble.saveSetup()`. Every mode's menu
+should start from `TP.Rumble.loadSetup()` and save back when a match starts, and should have a
+"← All modes" link to `TP.Rumble.HUB_URL`. A seat set to `"off"` means "empty": a mode that
+needs every seat filled plays it as a bot.
 
 ## Shared engine (`games/shared/`)
 
@@ -77,6 +118,7 @@ For example: `team/turbo-party`, `team/turbo-party-gameplay`.
 | `js/car.js` | The rocket car: model, arcade physics, bumps, bot steering helpers |
 | `js/fx.js` | Particles: sparks, confetti, explosions |
 | `js/sfx.js` | Synthesised sound effects and background music |
+| `js/rumble.js` | Rocket Rumble glue: the mode list for the hub, shared player setup, hub link |
 
 ## Test tools (`games/tools/`)
 
@@ -89,3 +131,16 @@ Run these from the `games` folder. Playwright is pre-installed in cloud sessions
 
 Each new game should get its own `tools/<game>-smoke.js` as soon as it can run.
 That job belongs to QC.
+
+## Roster (session IDs, for `send_message`)
+
+Created 2026-11-27. All are cloud sessions tagged `team:<game>` plus `role:<role>`.
+
+| Game | Boss | Gameplay | Art and UI | QC |
+|---|---|---|---|---|
+| Turbo Party | `session_01GHNBrt23mSuiGTyLcdpmqK` | `session_01GHNBrrE9ipBPBwoUZ5Axrt` | `session_01GHNBrrfMnRLjVS95iDUFgw` | `session_01GHNBrqhaxQit2X1D5DYyad` |
+| Deflect Duel | `session_01GHNBrrDAhFP7gZXs4Ap9TK` | `session_01GHNBrpQgRcR4wuJEviMDGG` | `session_01GHNBrqgetkZbzAJt8h3dPM` | `session_01GHNBrouPoebhNMp9PjrRtH` |
+| Boost Runner | `session_01GHNBrsk3LnQA2PCCCRSzxD` | `session_01GHNBrsNjSm8NLsDts3nDdU` | `session_01GHNBrowW48d38MRxz3z9U7` | `session_01GHNBrrLjMJWrWEvKiCzLJn` |
+| Car Fighter | `session_01GHNBrsKZCF3ywtyYiG3aDC` | `session_01GHNBrpqsFPkZtFWPbeSe24` | `session_01GHNBrs22k4u4qavTiP35oE` | `session_01GHNBrsHShaTu6YTArUzwUG` |
+
+Bosses who need to coordinate a `games/shared/` change can message each other with the IDs above.
