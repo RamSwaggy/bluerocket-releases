@@ -89,7 +89,15 @@
     const ctrlOptions = (selected) => TP.CONTROLLER_IDS.map((id) =>
       `<option value="${id}" ${id === selected ? "selected" : ""}>${TP.CONTROLLER_LABELS[id]}</option>`).join("");
 
+    // Start from the players set up in the Rocket Rumble hub (if any).
+    // Turbo Party always has 4 seats, so an empty hub seat plays as a bot.
+    const saved = TP.Rumble.loadSetup().slots.map((s) => ({
+      name: s.name,
+      controller: s.controller === "off" ? "bot" : s.controller,
+    }));
+
     const card = TP.UI.card(`
+      <p class="muted" style="margin:0 0 2px;letter-spacing:.12em">ROCKET RUMBLE</p>
       <h1><span class="t1">TURBO</span> PARTY</h1>
       <p>A rocket-car party board game. Roll the die, drive the board, buy trophies,
          and fight for coins in car minigames between turns. Most trophies wins.</p>
@@ -98,8 +106,8 @@
         ${[0, 1, 2, 3].map((i) => `
           <div class="slot" style="border-color:${TP.PLAYER_CSS[i]}">
             <label>Player ${i + 1}</label>
-            <input id="name${i}" maxlength="12" value="${TP.DEFAULT_NAMES[i]}" />
-            <select id="ctrl${i}">${ctrlOptions(i === 0 ? "kb1" : "bot")}</select>
+            <input id="name${i}" maxlength="12" value="${TP.UI.esc(saved[i].name)}" />
+            <select id="ctrl${i}">${ctrlOptions(saved[i].controller)}</select>
           </div>`).join("")}
       </div>
 
@@ -126,7 +134,10 @@
         <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Steer stick · Jump/confirm <kbd>A</kbd> · Boost <kbd>B</kbd>/<kbd>LB</kbd></td></tr>
       </table>
 
-      <div class="row" style="margin-top:18px"><button class="btn" id="start">Start party</button></div>`);
+      <div class="row" style="margin-top:18px">
+        <button class="btn" id="start">Start party</button>
+        <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}">← All modes</a>
+      </div>`);
 
     // Show how many gamepads the browser can see (press a button to wake them).
     const padInfo = card.querySelector("#padinfo");
@@ -150,6 +161,8 @@
         if (used.has(s.controller)) s.controller = "bot";
         used.add(s.controller);
       }
+      // Remember these players for the hub and the other modes.
+      TP.Rumble.saveSetup(slots);
       startGame({
         turns: Number(card.querySelector("#turns").value),
         bonuses: card.querySelector("#bonuses").value === "on",

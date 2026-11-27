@@ -239,7 +239,10 @@
           <div class="muted" style="font-size:13px;margin:-2px 0 6px 18px">
             ${p.stats.minigameWins} minigame wins · ${p.stats.coinsEarned} coins earned · ${p.stats.spacesMoved} spaces driven
           </div>`).join("")}
-        <div class="row" style="margin-top:18px"><button class="btn" id="again">Play again</button></div>`);
+        <div class="row" style="margin-top:18px">
+          <button class="btn" id="again">Play again</button>
+          <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}">← All modes</a>
+        </div>`);
       card.querySelector("#again").addEventListener("click", () => location.reload());
     }
   }
