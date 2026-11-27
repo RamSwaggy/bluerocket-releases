@@ -188,6 +188,27 @@ Reece delegated approvals to the Director on 2026-11-27 ("keep going, I trust yo
   - `car.manualBodyPose` opt-out added to `car.js`.
   - Per-mode music tracks: `TP.sfx.defineTrack` / `TP.sfx.music(on, name)`.
 
+## Free assets and tools only (Reece's rule, 2026-11-27)
+
+Everything that ships in Rocket Rumble, and every tool used to make it, must be **free**.
+**Allowed:**
+- CC0 / public domain (Kenney, Quaternius, Poly Pizza CC0 items, Poly Haven)
+- free-with-credit licences (CC-BY: Kevin MacLeod, some Sketchfab models)
+- free royalty-free bundles (Sonniss GDC bundles)
+- free tools: Blender; Mixamo; locally-run open models like TRELLIS
+- free tiers of AI generators, **only if** that tier's terms allow use in a game we ship
+
+**Not allowed:**
+- paid packs or paid-only tools
+- "NonCommercial" or "NoDerivatives" licences
+- anything without a clear licence
+- Quixel Megascans and other assets whose free licence is tied to a specific engine
+
+**Every third-party asset gets a line in `games/CREDITS.md`:** the file path in the repo, the
+source URL, the author, the licence, and the credit text if the licence requires one. No line,
+no merge. Bosses check this before merging. Our own code-generated models, sounds and music
+don't need a line.
+
 ## The surprise mode (Reece's rule, 2026-11-27: no spoilers)
 
 A fifth mode is being made as a **surprise for Reece** by the **Surprise team**, in
