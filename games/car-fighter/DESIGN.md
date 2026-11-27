@@ -225,7 +225,22 @@ fight.events;         // log since start: { frame, type: "hit"|"block"|"whiff"|"
                       //   attacker, move, damage, stun, x, y, z }
 fight.onEvent(fn);    // Art and UI hook for sparks, sounds and camera kicks
 TP.MOVES, TP.FIGHTERS // the data tables, readable by tests
+TP.Fight.ARENA        // { halfX, halfZ, minY, maxY }: the playable bounds, for QC's checks
 ```
+
+**Contract details** (settled 2026-11-27 from QC's questions):
+
+1. Every `TP.MOVES` row has an `input` string. Examples: `"hit"`, `"hit*2"` (2nd chain hit),
+   `"hit*3"`, `"heavy"`, `"toward+heavy"`, `"away+heavy"`, `"boost+hit"`, `"jump>hit"`,
+   `"jump>heavy"`, `"hit+heavy"` (throw), `"boost+heavy"` (signature).
+2. `startup: N` means N frames of windup. The move's **first active frame is frame N+1**,
+   counting the frame the button is pressed as frame 1.
+3. `TP.Fight.create` takes an optional `super` per player (e.g. `p1: { ..., super: 100 }`),
+   so tests can start with meter. It's also useful for training mode later.
+4. `onEvent(fn)` takes **any number of listeners**. Tests should still read `fight.events`.
+5. `round_end` events carry `winner` (0, 1, or `null` for a draw) and
+   `reason: "KO" | "time-out" | "draw" | "double-KO"`. `combo_end` carries `hits` and
+   `damage`.
 
 `fight.js` drives each car's position with the shared `TP.Car` physics and
 `TP.modeTuning(...)`:
