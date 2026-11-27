@@ -53,6 +53,7 @@ From the `games` folder (run these in the background, since they take over 30 s)
 ```
 node tools/turbo-party-smoke.js 3 8 240      # full 4-bot match → PASS/FAIL
 node tools/turbo-party-minigame.js all 5     # each minigame ×5, winners/lengths/errors
+node tools/turbo-party-balance.js 20 6       # 20 six-turn bot matches → trophy balance report (~18 min)
 ```
 
 In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&speed=N`,
@@ -89,6 +90,8 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-27: Set up this team, using RocketBonk's structure.
 - 2026-11-27: Turbo Party is now a mode of **Rocket Rumble** (one umbrella game, one car feel;
   minigame tuning limited to `TP.MODE_TUNABLE`). The Director owns `shared/` and the hub.
+- 2026-11-27: **The Director can approve for Reece** (Reece, directly to the boss: "Director can
+  approve for me"). Plans and decisions approved by the Director count as Reece's approval.
 - 2026-11-27: **Free assets and tools only** (Reece's standing rule, see `../TEAMS.md`). Every
   third-party file gets a line in `../CREDITS.md`, or it isn't merged. Assets made in code are exempt.
 - 2026-11-27: Reece approved the boss's first plan ("approved"). Rulings the Director made under
@@ -108,9 +111,9 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | # | Job | Who | Status |
 |---|---|---|---|
 | 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | **merged** (ba264be) |
-| A | 20-match 6-turn balance baseline + reusable balance tool | QC | sent |
+| A | 20-match 6-turn balance baseline + reusable balance tool | QC | **merged** (2f9e168); "after" run in progress |
 | 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | **merged** (a8a4caa) |
-| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | after A |
+| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | sent |
 | 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
 | 4b | Greyed-out menu options (unaffordable shop items, unusable items) | Art and UI | **merged** (e7502c0) |
 | 4c | Bugs found by job 3 | Gameplay / Art and UI | after job 3 |
