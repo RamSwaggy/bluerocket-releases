@@ -37,6 +37,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 - QC: M1 `tools/mode-5-smoke.js` + `tools/mode-5-shots.js` (screenshots at sizes).
 
 ## Decisions log
+- 2026-11-27 (Director, standing rule): free assets and tools only; every third-party asset gets a neutral line in `games/CREDITS.md` (no spoilers) or it isn't merged. Our plan is all code-made (exempt).
 - 2026-11-27: Concept chosen by the boss (Reece's instruction: the team decides everything and he
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
