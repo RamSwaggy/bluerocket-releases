@@ -297,10 +297,16 @@
       m.rotation.y = this.heading;
       const { body, flame, marker } = m.userData;
 
-      // Nose up when climbing, nose down when falling; lean on hard turns.
-      const targetPitch = this.onGround ? 0 : clamp(-this.vel.y * 0.04, -0.5, 0.5);
-      this.pitch = TP.util.damp(this.pitch, targetPitch, 8, dt || 1);
-      body.rotation.x = this.pitch;
+      // Nose up when climbing, nose down when falling.
+      // A mode that animates the body itself (Car Fighter's flips and
+      // barrel rolls, a side-on runner's air tilt) sets
+      // `car.manualBodyPose = true` and writes mesh.userData.body.rotation
+      // on its own; we then leave the body's rotation alone.
+      if (!this.manualBodyPose) {
+        const targetPitch = this.onGround ? 0 : clamp(-this.vel.y * 0.04, -0.5, 0.5);
+        this.pitch = TP.util.damp(this.pitch, targetPitch, 8, dt || 1);
+        body.rotation.x = this.pitch;
+      }
 
       flame.visible = this.boosting;
       if (this.boosting) {
