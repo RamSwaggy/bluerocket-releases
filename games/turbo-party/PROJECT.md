@@ -110,7 +110,8 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | **merged** (a8a4caa) |
 | 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | after A |
 | 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
-| 4b | Small bugs: can choose items you can't afford, others found by job 3 | Gameplay / Art and UI | after job 3 |
+| 4b | Greyed-out menu options (unaffordable shop items, unusable items) | Art and UI | **merged** (e7502c0) |
+| 4c | Bugs found by job 3 | Gameplay / Art and UI | after job 3 |
 | 5a | Head-on knockback + Sumo retune (rounds 20–35 s; fix early pile-ups and frequent 45 s shared-win rounds) | Gameplay → Director | sent |
 | 5b | King of the Hill crowding, Goal Frenzy posts | Gameplay | after 5a |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
