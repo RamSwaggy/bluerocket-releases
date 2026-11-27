@@ -68,14 +68,38 @@
 
   // MIDI note number → frequency in Hz.
   const hz = (n) => 440 * Math.pow(2, (n - 69) / 12);
-  // Chord roots + the three chord notes (as MIDI numbers).
-  const CHORDS = [
-    { root: 48, notes: [60, 64, 67] }, // C
-    { root: 43, notes: [59, 62, 67] }, // G
-    { root: 45, notes: [57, 60, 64] }, // Am
-    { root: 41, notes: [57, 60, 65] }, // F
-  ];
-  const ARP = [0, 1, 2, 1, 0, 2, 1, 2]; // order the chord notes are played in
+
+  /* ---------- Music tracks ----------
+     Each mode can define its own track in its OWN folder with
+     TP.sfx.defineTrack(name, track) and start it with
+     TP.sfx.music(true, name). Nobody needs to edit this file for new music.
+
+     A track is either the simple form:
+       { bpm: 140,
+         chords: [{ root: 45, notes: [57, 60, 64] }, ...],  // one chord per bar, MIDI numbers
+         arp: [0, 1, 2, 1, ...],      // order the chord notes are played in (8th notes)
+         lead: "square",              // arpeggio waveform (optional)
+         drums: true }                // kick + hi-hat (optional, default true)
+     or, for full control, a custom step function:
+       { bpm: 150, step(s, t, api) { ... } }
+     where s = 16th-note index, t = audio time, and api gives
+     { noteAt, hatAt, hz, len } (len = one 16th note in seconds). */
+  const TRACKS = {
+    // Turbo Party's board loop: C → G → Am → F.
+    party: {
+      bpm: 116,
+      chords: [
+        { root: 48, notes: [60, 64, 67] }, // C
+        { root: 43, notes: [59, 62, 67] }, // G
+        { root: 45, notes: [57, 60, 64] }, // Am
+        { root: 41, notes: [57, 60, 65] }, // F
+      ],
+      arp: [0, 1, 2, 1, 0, 2, 1, 2],
+      lead: "square",
+      drums: true,
+    },
+  };
+  let track = TRACKS.party;
 
   // Same as tone() but at an exact audio-clock time, into the music bus.
   function noteAt(t, f0, f1, dur, type, vol) {
@@ -114,17 +138,26 @@
 
   // Schedule everything that happens on one 16th-note step.
   function playStep(s, t) {
-    const chord = CHORDS[Math.floor(s / 16) % 4];
-    const inBar = s % 16;
     const len = 60 / bpm / 4; // one 16th note, in seconds
+    // Custom tracks do their own thing.
+    if (typeof track.step === "function") {
+      track.step(s, t, { noteAt, hatAt, hz, len });
+      return;
+    }
+    const chords = track.chords;
+    const arp = track.arp || [0, 1, 2, 1];
+    const chord = chords[Math.floor(s / 16) % chords.length];
+    const inBar = s % 16;
 
-    if (inBar % 8 === 0) noteAt(t, 150, 40, 0.18, "sine", 0.5);              // kick
-    if (inBar % 4 === 2) hatAt(t, 0.12);                                      // hat
+    if (track.drums !== false) {
+      if (inBar % 8 === 0) noteAt(t, 150, 40, 0.18, "sine", 0.5);            // kick
+      if (inBar % 4 === 2) hatAt(t, 0.12);                                    // hat
+    }
     if (inBar % 4 === 0) noteAt(t, hz(chord.root), hz(chord.root), len * 1.8, "triangle", 0.28);       // bass
     if (inBar % 4 === 3) noteAt(t, hz(chord.root + 12), hz(chord.root + 12), len * 0.9, "triangle", 0.18);
     if (inBar % 2 === 0) {                                                    // arpeggio
-      const n = chord.notes[ARP[(inBar / 2) % ARP.length]] + 12;
-      noteAt(t, hz(n), hz(n), len * 1.6, "square", 0.045);
+      const n = chord.notes[arp[(inBar / 2) % arp.length] % chord.notes.length] + 12;
+      noteAt(t, hz(n), hz(n), len * 1.6, track.lead || "square", 0.045);
     }
   }
 
@@ -133,7 +166,7 @@
     while (nextTime < ctx.currentTime + 0.15) {
       playStep(step, nextTime);
       nextTime += 60 / bpm / 4;
-      step = (step + 1) % 64;
+      step = (step + 1) % (16 * 64); // wraps after 64 bars; tracks use s % their own length
     }
   }
 
@@ -156,8 +189,18 @@
       try { if (effects[name]) effects[name](arg); } catch (e) { /* ignore audio errors */ }
     },
 
-    // Start/stop the background loop.
-    music(on) {
+    // Register a music track (see the "Music tracks" note above).
+    defineTrack(name, def) { TRACKS[name] = def; },
+
+    /* Start/stop the background loop. Pass a track name to switch tracks
+       (it also resets the tempo to that track's bpm); with no name it
+       keeps the current track (Turbo Party's "party" by default). */
+    music(on, name) {
+      if (name && TRACKS[name] && TRACKS[name] !== track) {
+        track = TRACKS[name];
+        bpm = track.bpm || bpm;
+        step = 0;
+      }
       if (!ctx) return;
       if (on && !musicTimer) {
         nextTime = ctx.currentTime + 0.1;
