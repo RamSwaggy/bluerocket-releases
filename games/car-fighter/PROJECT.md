@@ -111,3 +111,8 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   sidestep, as Car Fighter's control mode.
 - 2026-11-27 (Director): new fx, sfx and fighter bodies are built inside `car-fighter/js`
   first. The Director moves good ones into `shared/` later.
+- 2026-11-27 (Reece, via the Director): **free assets and tools only.** CC0, CC-BY and other
+  free licences are allowed; paid, NonCommercial, NoDerivatives, unlicensed and engine-locked
+  assets are not. Every third-party asset gets a line in `../CREDITS.md` (path, source URL,
+  author, licence, credit text). No line means no merge. Assets made in code are exempt. See
+  `../TEAMS.md`.
