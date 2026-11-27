@@ -67,3 +67,6 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
   feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
   and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
   The Director owns `shared/` and the hub.
+- 2026-11-27 (standing rule, via the Director): **free assets and tools only.** Every third-party
+  asset gets a line in `../CREDITS.md` (path, source URL, author, licence, credit text); no line,
+  no merge. Code-generated models, sounds and music are exempt. See `../TEAMS.md`.
