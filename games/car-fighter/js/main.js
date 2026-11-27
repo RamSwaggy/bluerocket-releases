@@ -4,19 +4,19 @@
 
    Flow:
      1. Page loads. With ?demo (bot vs bot) or ?headless we skip the menu:
-        match.js reads the URL options and runs the fight.
+        match.js reads the URL options and starts the fight on page load.
+        Otherwise we set TP.MATCH_MANUAL_START so match.js waits for us.
      2. Otherwise: the menu, over the empty stage turning slowly. Seats
         come from the Rocket Rumble hub's saved setup (seats 1 and 2).
      3. Start → save the setup back to the hub → TP.Match.start(config).
      4. Match over → results card: Rematch, Menu, "← All modes".
 
-   How main.js and match.js meet (agreed with Gameplay through the boss):
-     TP.Match.start(config)   config = { p1, p2, rounds, roundTime } in the
-                              same shape as TP.Fight.create's options
-                              (see DESIGN.md §9). Pass null to run from the
-                              URL options (that's what ?demo does).
+   How main.js and match.js meet (see the header of match.js):
+     TP.Match.start(overrides)   overrides = { p1, p2 (fighter ids),
+                                 bot, bot2 (difficulties), controllers:
+                                 [seat1, seat2], rounds, roundTime }
    match.js then creates the fight, calls TP.FightView.init(scene, fight)
-   and TP.FightView.frame(state) every frame.
+   and TP.FightView.frame(state, dt, fight) every frame.
    ===================================================================== */
 (function () {
   "use strict";
@@ -29,8 +29,11 @@
 
   let lastConfig = null;   // what Rematch replays
 
-  // Headless runs (fast sims for QC) don't draw anything at all.
+  // Headless runs (fast sims for QC) don't draw anything at all, and a
+  // ?demo is started by match.js itself. Every other visit gets the menu,
+  // so match.js must wait for the Start button.
   if (params.has("headless")) return;
+  if (!params.has("demo")) TP.MATCH_MANUAL_START = true;
 
   /* ---------- Small per-browser preferences (bot difficulty per seat) ---------- */
   function loadPrefs() {
@@ -145,13 +148,15 @@
 
       const rounds = Number(params.get("rounds")) || 3;
       const roundTime = Number(params.get("roundTime")) || 60;
+      const controllers = seats.map((s) => (isBot(s.controller) ? "bot" : s.controller));
       const config = {
         rounds, roundTime,
-        p1: { fighter: "rivet", controller: isBot(seats[0].controller) ? "bot" : seats[0].controller, bot: seats[0].bot },
-        p2: { fighter: "rivet", controller: isBot(seats[1].controller) ? "bot" : seats[1].controller, bot: seats[1].bot },
+        p1: "rivet", p2: "rivet",                 // M1: Rivet only
+        bot: seats[0].bot, bot2: seats[1].bot,    // difficulty per seat (used only if it's a bot)
+        controllers,
       };
       UI.setPlayers(seats.map((s, i) => ({
-        name: s.name, fighter: "Rivet", controller: config[i ? "p2" : "p1"].controller,
+        name: s.name, fighter: "Rivet", controller: controllers[i],
       })), winsFor(rounds));
       startMatch(config);
     });
@@ -216,9 +221,7 @@
       { name: `${TP.DEFAULT_NAMES[0]} Bot`, fighter: `${fname("p1", "rivet")} · ${cap(b1)}`, controller: "bot" },
       { name: `${TP.DEFAULT_NAMES[1]} Bot`, fighter: `${fname("p2", "rivet")} · ${cap(b2)}`, controller: "bot" },
     ], winsFor(rounds));
-    // Wait for every script to load, then start from the URL options,
-    // unless match.js already started the demo by itself.
-    window.addEventListener("load", () => { if (!TP.fight) startMatch(null); });
+    // match.js starts the demo by itself once the page has loaded.
   } else {
     showMenu();
   }

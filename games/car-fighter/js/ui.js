@@ -129,7 +129,7 @@
     const round = state.round || 1;
     if (phase === "intro") {
       const last = (state.roundWins || [0, 0]).every((w) => w === winsNeeded - 1);
-      const sudden = round > winsNeeded * 2 - 1;
+      const sudden = state.suddenDeath || round > winsNeeded * 2 - 1;
       call(sudden ? "SUDDEN DEATH" : last ? "FINAL ROUND" : `ROUND ${round}`, "", "#f2f5ff", f + 600, "intro" + round);
       T.lastRound = round;
     } else if (phase === "fight" && prev === "countdown") {
@@ -189,11 +189,11 @@
         onPhase(state, phase, prev);
       }
 
-      // Countdown: use state.countdown (seconds left) if fight.js gives it,
-      // otherwise count 3-2-1 from when the countdown phase began.
+      // Countdown: 3-2-1 from the frames left in the countdown phase
+      // (fight.js's phaseFramesLeft), or from when the phase began.
       if (phase === "countdown") {
-        let n = state.countdown != null ? Math.ceil(Number(state.countdown) - 1e-6)
-                                        : 3 - Math.floor((f - T.phaseStart) / FPS);
+        let n = state.phaseFramesLeft != null ? Math.ceil(Number(state.phaseFramesLeft) / FPS - 1e-6)
+                                              : 3 - Math.floor((f - T.phaseStart) / FPS);
         n = Math.max(1, Math.min(3, n));
         if (T.callKey !== "count" + n + state.round && TP.sfx) TP.sfx.play("count");
         call(String(n), `Round ${state.round || 1}`, "#f2f5ff", f + FPS, "count" + n + state.round);
