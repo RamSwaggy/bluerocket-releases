@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Turbo Party</title>
+  <style>
+    /* ------------------------------------------------------------------
+       Colour tokens. Everything on screen pulls from these so the look
+       stays consistent and is easy to re-skin later.
+       ------------------------------------------------------------------ */
+    :root {
+      --bg: #0b1020;
+      --panel: rgba(12, 18, 40, 0.86);
+      --panel-solid: #121a36;
+      --line: rgba(255, 255, 255, 0.14);
+      --text: #f2f5ff;
+      --muted: #9aa6c8;
+      --accent: #ffcc33;
+      --good: #34d399;
+      --bad: #f87171;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+    /* The WebGL canvas fills the window; all UI floats above it. */
+    #game { position: fixed; inset: 0; display: block; }
+    .layer { position: fixed; pointer-events: none; }
+
+    /* ---------- Board HUD: one panel per player along the top ---------- */
+    #hud-players {
+      top: 12px; left: 12px; right: 12px;
+      display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+    }
+    .pcard {
+      min-width: 150px; padding: 8px 12px; border-radius: 12px;
+      background: var(--panel); border: 2px solid var(--line);
+      display: flex; flex-direction: column; gap: 2px;
+      transition: transform .2s, border-color .2s;
+    }
+    .pcard.active { transform: translateY(4px) scale(1.05); }
+    .pcard .name { font-weight: 700; font-size: 15px; }
+    .pcard .ctrl { font-size: 11px; color: var(--muted); }
+    .pcard .stats { font-size: 15px; display: flex; gap: 12px; }
+
+    /* ---------- Turn counter, top-left ---------- */
+    #turn-label {
+      top: 96px; left: 50%; transform: translateX(-50%);
+      font-size: 14px; color: var(--muted); letter-spacing: .08em;
+    }
+
+    /* ---------- Big centre message (countdowns, "GO!", etc.) ---------- */
+    #center-msg {
+      top: 38%; left: 0; right: 0; text-align: center;
+      font-size: 64px; font-weight: 900; letter-spacing: .02em;
+      text-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 30px rgba(0,0,0,.6);
+    }
+    #center-msg .sub { display: block; font-size: 22px; font-weight: 600; margin-top: 6px; }
+
+    /* ---------- Toast: short pop-up notes ("+3 coins") ---------- */
+    #toast {
+      bottom: 110px; left: 50%; transform: translateX(-50%);
+      padding: 10px 20px; border-radius: 999px;
+      background: var(--panel); border: 1px solid var(--line);
+      font-size: 20px; font-weight: 700; opacity: 0; transition: opacity .25s;
+      white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+
+    /* ---------- Bottom hint bar: which keys to press right now ---------- */
+    #hint {
+      bottom: 16px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; border-radius: 10px; background: var(--panel);
+      font-size: 15px; color: var(--muted); white-space: nowrap;
+    }
+    #hint:empty { display: none; }
+    kbd {
+      display: inline-block; padding: 1px 7px; border-radius: 5px;
+      background: #26305a; color: var(--text); font-family: inherit; font-size: 13px;
+      border-bottom: 2px solid #0a0f22;
+    }
+
+    /* ---------- Dice box ---------- */
+    #die {
+      top: 22%; left: 50%; transform: translateX(-50%);
+      width: 110px; height: 110px; border-radius: 22px;
+      background: #fff; color: #111; font-size: 64px; font-weight: 900;
+      display: none; align-items: center; justify-content: center;
+      box-shadow: 0 8px 0 #b8c0d8, 0 14px 30px rgba(0,0,0,.5);
+    }
+    #die.show { display: flex; }
+
+    /* ---------- Yes/No style choice prompt ---------- */
+    #choice {
+      top: 58%; left: 50%; transform: translateX(-50%);
+      padding: 16px 20px; border-radius: 16px; background: var(--panel-solid);
+      border: 2px solid var(--line); text-align: center; display: none;
+    }
+    #choice.show { display: block; }
+    #choice .title { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+    #choice .opts { display: flex; gap: 12px; justify-content: center; }
+    #choice .opt {
+      padding: 10px 22px; border-radius: 10px; background: #26305a;
+      font-size: 18px; font-weight: 700; border: 2px solid transparent;
+    }
+    #choice .opt.sel { border-color: var(--accent); background: #3a4580; }
+
+    /* ---------- Minigame HUD: timer + live scores ---------- */
+    #mg-hud {
+      top: 12px; left: 50%; transform: translateX(-50%);
+      display: none; gap: 10px; align-items: center;
+    }
+    #mg-hud.show { display: flex; }
+    #mg-hud .timer {
+      padding: 6px 16px; border-radius: 10px; background: var(--panel);
+      font-size: 26px; font-weight: 900; min-width: 76px; text-align: center;
+    }
+    #mg-hud .score {
+      padding: 6px 12px; border-radius: 10px; background: var(--panel);
+      font-size: 18px; font-weight: 700; border-bottom: 4px solid;
+    }
+    #mg-hud .score.out { opacity: .35; text-decoration: line-through; }
+
+    /* ---------- Full-screen cards: menu, minigame intro, results ---------- */
+    #overlay {
+      inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(5, 8, 20, 0.6); pointer-events: auto;
+    }
+    #overlay.show { display: flex; }
+    .card {
+      width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+      padding: 26px 28px; border-radius: 20px;
+      background: var(--panel-solid); border: 2px solid var(--line);
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .card h1 { margin: 0 0 4px; font-size: 44px; letter-spacing: .02em; }
+    .card h1 .t1 { color: var(--accent); }
+    .card h2 { margin: 0 0 8px; font-size: 30px; }
+    .card p { color: var(--muted); margin: 6px 0 14px; line-height: 1.45; }
+    .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+    .slot {
+      padding: 10px 12px; border-radius: 12px; background: #1a2448;
+      border-left: 6px solid; display: flex; flex-direction: column; gap: 6px;
+    }
+    .slot label { font-size: 12px; color: var(--muted); }
+    .slot input, .slot select, .row select {
+      font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 8px;
+      border: 1px solid var(--line); background: #0f1631; color: var(--text);
+    }
+    .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+    .btn {
+      font: inherit; font-size: 20px; font-weight: 800; cursor: pointer;
+      padding: 12px 26px; border-radius: 12px; border: none;
+      background: var(--accent); color: #1a1300;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .controls-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+    .controls-table td { padding: 4px 6px; border-top: 1px solid var(--line); color: var(--muted); }
+    .controls-table td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    .result-row {
+      display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 6px 0;
+      border-radius: 12px; background: #1a2448; border-left: 6px solid; font-size: 18px;
+    }
+    .result-row .place { font-weight: 900; width: 44px; font-size: 22px; }
+    .result-row .who { flex: 1; font-weight: 700; }
+    .result-row .gain { color: var(--good); font-weight: 800; }
+    .muted { color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .slots { grid-template-columns: 1fr; }
+      #center-msg { font-size: 44px; }
+      .pcard { min-width: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD layers. pointer-events are off so they never block the game. -->
+  <div id="hud-players" class="layer"></div>
+  <div id="turn-label" class="layer"></div>
+  <div id="mg-hud" class="layer"></div>
+  <div id="center-msg" class="layer"></div>
+  <div id="die" class="layer"></div>
+  <div id="choice" class="layer"></div>
+  <div id="toast" class="layer"></div>
+  <div id="hint" class="layer"></div>
+  <div id="overlay" class="layer"><div class="card" id="card"></div></div>
+
+  <!-- Three.js is vendored locally so the game works offline and from file:// -->
+  <script src="vendor/three.min.js"></script>
+
+  <!-- Game code. Plain scripts (not ES modules) so double-clicking
+       index.html works without a web server. Order matters: each file
+       can use anything defined by the files above it. -->
+  <script src="js/util.js"></script>
+  <script src="js/sfx.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/car.js"></script>
+  <script src="js/arena.js"></script>
+  <script src="js/minigames/coin-rush.js"></script>
+  <script src="js/minigames/sumo-ring.js"></script>
+  <script src="js/minigames/goal-frenzy.js"></script>
+  <script src="js/board.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
