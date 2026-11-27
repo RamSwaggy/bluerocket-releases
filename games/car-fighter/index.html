@@ -273,22 +273,26 @@
        each file can use anything defined by the files above it. -->
   <script src="../shared/js/util.js"></script>
   <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/rumble.js"></script>
   <script src="../shared/js/car.js"></script>
   <script src="../shared/js/fx.js"></script>
   <script src="../shared/js/sfx.js"></script>
-  <script src="../shared/js/rumble.js"></script>
 
   <!-- The fight core (Gameplay). No rendering in here: it runs headless too. -->
   <script src="js/moves.js"></script>
   <script src="js/fighters.js"></script>
   <script src="js/fight.js"></script>
   <script src="js/bot.js"></script>
-  <script src="js/match.js"></script>
 
-  <!-- Look and screens (Art and UI). -->
+  <!-- Look and screens (Art and UI). main.js decides whether the menu
+       starts the match (it sets TP.MATCH_MANUAL_START before match.js). -->
   <script src="js/fx-fight.js"></script>
   <script src="js/view.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
+
+  <!-- Loop and URL options (Gameplay). Last, so everything above exists
+       when it starts a ?demo fight on page load. -->
+  <script src="js/match.js"></script>
 </body>
 </html>

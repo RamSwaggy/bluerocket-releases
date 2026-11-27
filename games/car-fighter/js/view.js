@@ -597,7 +597,7 @@
           if (!M || M.fight !== fight) return;
           M.fx.onEvent(ev);
           playEventSound(ev);
-          if (ev.type === "ko") { M.koT = 0; M.koVictim = ev.attacker === 0 ? 1 : 0; }
+          if (ev.type === "ko") { M.koT = 0; M.koVictim = ev.victim != null ? ev.victim : ev.attacker === 0 ? 1 : 0; }
         });
       }
 
@@ -605,7 +605,9 @@
       FightView.frame(fight.state);
     },
 
-    /* Called by match.js once per rendered frame. */
+    /* Called by match.js once per rendered frame: frame(state, dt, fight).
+       We time our own animations with the real clock below, so dt and
+       fight aren't needed. */
     frame(state) {
       if (!M || !state) return;
       const now = performance.now();
