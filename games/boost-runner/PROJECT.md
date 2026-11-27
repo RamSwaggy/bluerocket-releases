@@ -26,6 +26,8 @@ characters, art, music, levels or look.
 | Boost Runner · QC (playtest and checks) | `session_01GHNBrrLjMJWrWEvKiCzLJn` | `team/boost-runner-qc` |
 
 Roles: message the boss at `session_01GHNBrsk3LnQA2PCCCRSzxD` when you finish a job or need something.
+Above the boss: **Rocket Rumble · Director** (`session_01GHNBrs2PaPyHH8XycVBywq`), who owns `../shared/`,
+the hub and the car feel. Shared changes go through the boss to the Director; roles don't edit `../shared/`.
 
 ## First job (boss): design plan
 
