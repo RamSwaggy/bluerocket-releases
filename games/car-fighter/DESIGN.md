@@ -51,7 +51,8 @@ one new button, added by the Director for this mode.
 | Button | kb1 | kb2 | Gamepad |
 |---|---|---|---|
 | Steer (left / right on screen) | A / D | ← / → | Left stick X, D-pad |
-| Drive (up / down) | W / S | ↑ / ↓ | Left stick Y, RT / LT |
+| Up / down (`ctrl.pitch`) | W / S | ↑ / ↓ | Left stick up / down, D-pad up / down if the shared input adds it |
+| Drive (`ctrl.throttle`) | W / S | ↑ / ↓ | RT / LT (not used for fighting in v1) |
 | Jump | Space | Enter | A |
 | Boost | Left Shift / F | Right Shift | B / LB |
 | Hit (light attack) | E | . | X / RB |
@@ -62,7 +63,7 @@ movement" as Car Fighter's control mode):
 
 - **Left / right** moves the car along the line on screen. "Toward" and "away" depend on which
   side you're on. **Holding away blocks**, as long as you're not attacking.
-- **Tapping up or down** sidesteps into or out of the screen. Hits miss you for a moment,
+- **Tapping up or down** (read from `ctrl.pitch`, which works the same on keyboards and gamepads) sidesteps into or out of the screen. Hits miss you for a moment,
   then there's a short recovery. Holding up or down does nothing else in v1.
 - **Jump** hops. You can steer in the air a little, just like the shared car.
 - **Boost** gives a short burst of speed along the line toward where you're pointing on the
