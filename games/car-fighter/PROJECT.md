@@ -81,14 +81,11 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   car posing), `fx-fight.js`, `ui.js` (HUD and cards) and `main.js` (menu). There are no
   third-party assets. **`?demo` works**: `node tools/car-fighter-smoke.js 8 180 12345` gives
   PASS (P2 2-0 by KO, 5664 frames checked, no errors).
-- **Open bug (Art, being fixed):** opening `index.html` without `?demo` auto-starts a bot fight,
-  and the menu never shows. `TP.MATCH_MANUAL_START` isn't set, and `main.js` passes
-  `TP.Match.start` a different config shape from the one `match.js` expects.
-- Shared changes made by the Director for us:
-  - the **Heavy** button in `input.js` (`heavy` / `heavyPressed`: kb1 R, kb2 comma, pad Y)
-  - `car.manualBodyPose` in `car.js`, which lets us pose the car body ourselves
-  - per-mode music tracks: `TP.sfx.defineTrack("car-fighter", {...})`, then `TP.sfx.music(true, "car-fighter")`
-  - All three are merged into `team/car-fighter` from `claude/eager-tesla-vdhyd9` at `0923873`.
+- Art's rebuild is merged (`fec85cf`). **The menu works:** with no query string it shows the
+  menu, no fight runs until Fight!, then keyboard 1 plays the bot (holding D moves P1 right).
+  Smoke test: PASS. Boss checked it with Playwright, no errors.
+- **M1 is code-complete.** Waiting on QC's full real-page run (JOB 2) before telling the
+  Director to switch the hub card to Play.
 
 ## Decisions (from Reece)
 
