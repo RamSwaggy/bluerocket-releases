@@ -21,8 +21,10 @@
    Controls are SCREEN-relative (DESIGN §3), so the view's camera must
    show +X as screen-right:
      steer  +1 = move right on screen (+X), -1 = left (-X)
-     drive  up (throttle > 0)   = tap to sidestep INTO the screen (-Z)
-            down (throttle < 0) = tap to sidestep OUT of the screen (+Z)
+     pitch  up (> 0)   = tap to sidestep INTO the screen (-Z)
+            down (< 0) = tap to sidestep OUT of the screen (+Z)
+     (pitch is the shared up/down axis: W/S, arrows, or the left stick,
+     so it works the same on keyboards and gamepads)
    "Toward" / "away" = steer pointing at / away from the opponent.
    Holding away blocks.
 
@@ -66,7 +68,16 @@ window.TP = window.TP || {};
   // States in which a car can block (and must be on the ground).
   const CAN_BLOCK = new Set(["idle", "walk", "block", "blockstun"]);
 
-  const NEUTRAL = Object.freeze({ throttle: 0, steer: 0, boost: false, jump: false, hit: false, heavy: false });
+  const NEUTRAL = Object.freeze({ throttle: 0, steer: 0, pitch: 0, boost: false, jump: false, hit: false, heavy: false });
+
+  // The short recovery after landing out of an air move. Not a real move
+  // (no button makes it), so it isn't in TP.MOVES; each fighter gets a copy.
+  const LANDING = Object.freeze({
+    id: "landing", name: "Landing", input: null, button: null,
+    startup: 0, active: 0, recovery: 4,
+    damage: 0, hitstun: 0, blockstun: 0, push: 0, launch: 0, airLaunch: 0, hitstop: 0, meter: 0,
+    box: null, cancel: [], flags: { system: true },
+  });
   const BUTTONS = ["hit", "heavy", "boost", "jump", "up", "down"];
 
   /* ---------- Seeded random numbers (mulberry32) ----------
@@ -118,6 +129,7 @@ window.TP = window.TP || {};
       timer: roundTime,        // seconds left in the round
       roundWins: [0, 0],
       roundResults: [],        // { round, winner (0|1|null = draw), reason, health, frames }
+                               // reason: "KO" | "time-out" | "draw" | "double-KO"
       winner: null,            // at matchEnd: 0 or 1, or null for a drawn match
       seed,
       cars: [],
@@ -133,14 +145,15 @@ window.TP = window.TP || {};
         index,
         id: def.id,
         def,
-        moves: TP.fighterMoves(def.id),
+        moves: Object.assign(TP.fighterMoves(def.id), { landing: LANDING }),
         tuning: TP.fighterTuning(def.id),
         car,
         controller,
         bot: null,
         maxHealth: def.health,
         health: def.health,
-        super: 0,
+        // Optional starting meter (tests, training mode). Kept between rounds.
+        super: Math.max(0, Math.min(RULES.superMax, Number(p.super) || 0)),
         state: "idle",
         move: null,
         moveFrame: 0,
@@ -227,11 +240,11 @@ window.TP = window.TP || {};
       c = c || NEUTRAL;
       const held = {
         hit: !!c.hit,
-        heavy: !!c.heavy,            // undefined (older input.js) means not pressed
+        heavy: !!c.heavy,
         boost: !!c.boost,
         jump: !!c.jump,
-        up: (c.throttle || 0) > 0.5,
-        down: (c.throttle || 0) < -0.5,
+        up: (c.pitch || 0) > 0.5,
+        down: (c.pitch || 0) < -0.5,
       };
       // A press is either the input layer's own "just pressed" flag, or
       // our own edge (held now, not held last step). Both mean the same press.
@@ -288,6 +301,7 @@ window.TP = window.TP || {};
       f.move = id;
       f.moveFrame = 0;
       f.moveSerial++;
+      f.slamLanded = false;
       f.moveConnected = false;
       f.moveBlocked = false;
       f.stateFramesLeft = TP.moveFrames(m);
@@ -449,8 +463,9 @@ window.TP = window.TP || {};
       const landed = integrate(f, m.drive && t < m.drive.to ? 0 : 10);
       if (landed && m.air) {
         if (f.move === "drop_slam" && t < m.startup + m.active) {
-          // The slam hits the floor: skip straight to its recovery.
-          f.moveFrame = m.startup + m.active;
+          // The slam hits the floor. This frame still counts (it can hit
+          // what's under it); recovery starts next frame (see advanceMove).
+          f.slamLanded = true;
           car.vel.x = 0;
         } else if (f.move !== "drop_slam") {
           // Landed out of another air move: short landing recovery.
@@ -573,6 +588,11 @@ window.TP = window.TP || {};
       if (f.state !== "attack") return;
       const m = f.moves[f.move];
       f.moveFrame++;
+      if (f.slamLanded) {
+        // An "active until it lands" move has landed: jump to its recovery.
+        f.slamLanded = false;
+        if (f.moveFrame < m.startup + m.active) f.moveFrame = m.startup + m.active;
+      }
       f.stateFramesLeft = Math.max(0, TP.moveFrames(m) - f.moveFrame);
       if (f.moveFrame >= TP.moveFrames(m)) {
         // An air move that times out in the air (rare) falls as "air".
@@ -828,8 +848,8 @@ window.TP = window.TP || {};
         emit("ko", { attacker: a.index, victim: v.index, move: lastHitBy[a.index] || null, damage: 0, stun: 0,
           x: v.car.pos.x, y: v.car.pos.y, z: v.car.pos.z });
       }
-      if (down.length === 2) endRound(null, "double_ko");
-      else endRound(1 - down[0].index, "ko");
+      if (down.length === 2) endRound(null, "double-KO");
+      else endRound(1 - down[0].index, "KO");
       hitstopLeft = Math.max(pendingHitstop, RULES.koHitstop);
       afterHitstop = "roundEnd";
       state.phase = "hitstop";
@@ -875,7 +895,7 @@ window.TP = window.TP || {};
       if (state.timer <= 0) {
         // Time out: higher health percentage wins; equal is a draw (both get the round).
         const d = pct(f0) - pct(f1);
-        endRound(Math.abs(d) < 1e-9 ? null : d > 0 ? 0 : 1, Math.abs(d) < 1e-9 ? "time_draw" : "time");
+        endRound(Math.abs(d) < 1e-9 ? null : d > 0 ? 0 : 1, Math.abs(d) < 1e-9 ? "draw" : "time-out");
         state.phase = "roundEnd";
         return;
       }
@@ -995,5 +1015,11 @@ window.TP = window.TP || {};
     return fight;
   }
 
-  TP.Fight = { create, makeRng, DT, ARENA, BODY };
+  TP.Fight = {
+    create, makeRng, DT, BODY,
+    // The play space, for the view's camera and stage (DESIGN §9):
+    // rails at x = ±halfX, sidesteps reach z = ±halfZ, floor at minY, and
+    // maxY is about the highest a car gets (launch + juggle pops + a jump).
+    ARENA: { halfX: ARENA.halfWidth, halfZ: ARENA.zLimit, minY: 0, maxY: 8 },
+  };
 })();

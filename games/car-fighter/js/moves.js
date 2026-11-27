@@ -9,13 +9,19 @@
 
    Each move row:
      name        what players see (our own names, see DESIGN.md §4)
+     input       how it's done, for people and tests (DESIGN §9 contract
+                 detail 1): "hit", "hit*2" (2nd chain hit), "toward+heavy",
+                 "jump>hit" (jump, then hit), "hit+heavy" (together) ...
      button      which attack button starts it: "hit", "heavy" or "both"
      air         true = only usable in the air (after a jump)
-     startup     frames before the hit box comes out
+     startup     frames of windup before the hit box comes out. Counting
+                 the frame the button is pressed as frame 1, the first
+                 active frame is frame startup+1 (contract detail 2)
      active      frames the hit box is out
      recovery    frames after that before the car can act again
                  (a move that hits or is blocked can CANCEL into the next
                  move during active/recovery; see `cancel`)
+     Total length = startup + active + recovery (TP.moveFrames).
      damage      health taken on a clean hit (before combo scaling)
      hitstun     frames the victim can't act after a grounded hit
      blockstun   frames a blocking victim is stuck after blocking it
@@ -51,7 +57,7 @@ window.TP = window.TP || {};
   TP.MOVES = {
     /* ---------- Light chain: Hit, Hit, Hit ---------- */
     jab: {
-      name: "Jab", button: "hit",
+      name: "Jab", input: "hit", button: "hit",
       startup: 4, active: 3, recovery: 8,
       damage: 40, hitstun: 14, blockstun: 9,
       push: 3, launch: 0, airLaunch: 5, hitstop: 3, meter: 8,
@@ -61,7 +67,7 @@ window.TP = window.TP || {};
       flags: {},
     },
     swipe: {
-      name: "Swipe", button: "hit",
+      name: "Swipe", input: "hit*2", button: "hit",
       startup: 5, active: 3, recovery: 10,
       damage: 45, hitstun: 15, blockstun: 10,
       push: 3.5, launch: 0, airLaunch: 5, hitstop: 3, meter: 9,
@@ -71,7 +77,7 @@ window.TP = window.TP || {};
       flags: {},
     },
     spinout: {
-      name: "Spinout", button: "hit",
+      name: "Spinout", input: "hit*3", button: "hit",
       startup: 7, active: 4, recovery: 16,
       damage: 60, hitstun: 20, blockstun: 12,
       push: 9, launch: 0, airLaunch: 6, hitstop: 4, meter: 12,
@@ -83,7 +89,7 @@ window.TP = window.TP || {};
 
     /* ---------- Heavy-button moves ---------- */
     ram: {                       // Heavy: big pushback, punishable if blocked (−12)
-      name: "Ram", button: "heavy",
+      name: "Ram", input: "heavy", button: "heavy",
       startup: 12, active: 5, recovery: 22,
       damage: 110, hitstun: 24, blockstun: 14,
       push: 14, launch: 0, airLaunch: 7, hitstop: 6, meter: 18,
@@ -93,7 +99,7 @@ window.TP = window.TP || {};
       flags: {},
     },
     corkscrew: {                 // Toward + Heavy: the launcher. Jump-cancel on hit to juggle.
-      name: "Corkscrew", button: "heavy",
+      name: "Corkscrew", input: "toward+heavy", button: "heavy",
       startup: 15, active: 4, recovery: 20,
       damage: 90, hitstun: 0, blockstun: 14,
       push: 2.5, launch: 13, airLaunch: 10, hitstop: 6, meter: 16,
@@ -103,7 +109,7 @@ window.TP = window.TP || {};
       flags: { launcher: true },
     },
     tailwhip: {                  // Away + Heavy: 180° spin, hits both sides, shoves them off you
-      name: "Tailwhip", button: "heavy",
+      name: "Tailwhip", input: "away+heavy", button: "heavy",
       startup: 10, active: 5, recovery: 18,
       damage: 80, hitstun: 22, blockstun: 13,
       push: 13, launch: 0, airLaunch: 7, hitstop: 6, meter: 14,
@@ -114,7 +120,7 @@ window.TP = window.TP || {};
 
     /* ---------- Boost moves ---------- */
     dash_strike: {               // Boost + Hit: fast charge along the line. Costs 25 boost.
-      name: "Dash Strike", button: "hit", usesBoost: true,
+      name: "Dash Strike", input: "boost+hit", button: "hit", usesBoost: true,
       startup: 6, active: 8, recovery: 16,
       damage: 85, hitstun: 20, blockstun: 12,
       push: 10, launch: 0, airLaunch: 7, hitstop: 5, meter: 14,
@@ -127,7 +133,7 @@ window.TP = window.TP || {};
 
     /* ---------- Air moves (after a jump) ---------- */
     flip_kick: {                 // Jump, then Hit
-      name: "Flip Kick", button: "hit", air: true,
+      name: "Flip Kick", input: "jump>hit", button: "hit", air: true,
       startup: 5, active: 6, recovery: 12,
       damage: 55, hitstun: 16, blockstun: 10,
       push: 2, launch: 0, airLaunch: 6, hitstop: 4, meter: 10,
@@ -136,7 +142,7 @@ window.TP = window.TP || {};
       flags: { overhead: true },
     },
     drop_slam: {                 // Jump, then Heavy: dive down, knockdown. Active until it lands.
-      name: "Drop Slam", button: "heavy", air: true,
+      name: "Drop Slam", input: "jump>heavy", button: "heavy", air: true,
       startup: 8, active: 40, recovery: 14,
       damage: 100, hitstun: 0, blockstun: 14,
       push: 4, launch: 4, airLaunch: 4, hitstop: 7, meter: 16,
@@ -148,7 +154,7 @@ window.TP = window.TP || {};
 
     /* ---------- Throw: Hit + Heavy together, up close ---------- */
     tow_hook: {
-      name: "Tow Hook", button: "both",
+      name: "Tow Hook", input: "hit+heavy", button: "both",
       startup: 5, active: 2, recovery: 20,
       damage: 120, hitstun: 0, blockstun: 0,
       push: 0, launch: 0, airLaunch: 0, hitstop: 4, meter: 16,
@@ -162,7 +168,7 @@ window.TP = window.TP || {};
        Each fighter replaces this row with its own (fighters.js).
        This default is Rivet's M1 stub: a big Ram. */
     signature: {
-      name: "Signature", button: "heavy", usesBoost: true,
+      name: "Signature", input: "boost+heavy", button: "heavy", usesBoost: true,
       startup: 10, active: 8, recovery: 24,
       damage: 220, hitstun: 30, blockstun: 16,
       push: 16, launch: 0, airLaunch: 8, hitstop: 10, meter: 0,
@@ -173,13 +179,6 @@ window.TP = window.TP || {};
       flags: { signature: true },
     },
 
-    /* ---------- Not attacks ---------- */
-    landing: {                   // the short recovery after landing out of an air move
-      name: "Landing", button: null,
-      startup: 0, active: 0, recovery: 4,
-      damage: 0, hitstun: 0, blockstun: 0, push: 0, launch: 0, airLaunch: 0, hitstop: 0, meter: 0,
-      box: null, cancel: [], flags: { system: true },
-    },
   };
 
   /* =====================================================================

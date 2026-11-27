@@ -97,7 +97,7 @@ window.TP = window.TP || {};
 
     function blank() {
       return {
-        throttle: 0, steer: 0, boost: false, jump: false, hit: false, heavy: false,
+        throttle: 0, steer: 0, pitch: 0, boost: false, jump: false, hit: false, heavy: false,
         confirmPressed: false, hitPressed: false, heavyPressed: false, leftPressed: false, rightPressed: false,
       };
     }
@@ -274,7 +274,7 @@ window.TP = window.TP || {};
         if (coming && defence === "block") { out.steer = -toward; return out; }
         if (coming && defence === "sidestep" && seen.moveFrame < m.startup) {
           defence = null;
-          out.throttle = rng() < 0.5 ? 1 : -1;
+          out.pitch = rng() < 0.5 ? 1 : -1;      // tap up or down: sidestep
           return out;
         }
         /* 5. Punish a long recovery up close. */
