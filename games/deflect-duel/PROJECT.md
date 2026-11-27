@@ -56,8 +56,8 @@ Roles reply to the boss with `send_message` to the boss session ID above.
 | `js/duel.js` (to write) | ball physics, hitting, ownership, KOs, lives, respawn, hit-freeze timing, bots | arena look, ball glow and trail, swing ring, KO effects, camera shake |
 | `js/main.js` (to write) | match flow and config | menu, results and rematch screens |
 | `js/hud.js`, `index.html` | — | owns these |
-| `../shared/js/input.js`, `car.js` | owns | car model only |
-| `../shared/js/fx.js`, `sfx.js` | — | owns (hit/swing/KO sounds already exist) |
+| `js/arena.js` (to write, if Reece agrees) | — | arena meshes and lighting |
+| `../shared/` (all of it) | — (ask the boss, who asks the Director) | — (ask the boss, who asks the Director) |
 | `../tools/deflect-duel-*.js` | — (QC owns) | — (QC owns) |
 
 Suggested split for the first build: Gameplay writes `duel.js`'s rules with plain placeholder
