@@ -18,12 +18,14 @@ characters, art, music, levels or look.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Boost Runner (boss) | `team/boost-runner` |
-| Boost Runner · Gameplay (systems and feel) | `team/boost-runner-gameplay` |
-| Boost Runner · Art and UI (look and screens) | `team/boost-runner-art` |
-| Boost Runner · QC (playtest and checks) | `team/boost-runner-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Boost Runner (boss) | `session_01GHNBrsk3LnQA2PCCCRSzxD` | `team/boost-runner` |
+| Boost Runner · Gameplay (systems and feel) | `session_01GHNBrsNjSm8NLsDts3nDdU` | `team/boost-runner-gameplay` |
+| Boost Runner · Art and UI (look and screens) | `session_01GHNBrowW48d38MRxz3z9U7` | `team/boost-runner-art` |
+| Boost Runner · QC (playtest and checks) | `session_01GHNBrrLjMJWrWEvKiCzLJn` | `team/boost-runner-qc` |
+
+Roles: message the boss at `session_01GHNBrsk3LnQA2PCCCRSzxD` when you finish a job or need something.
 
 ## First job (boss): design plan
 
@@ -52,7 +54,7 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 
 ## Current state (as of 2026-11-27)
 
-- **Not started.** Only this file exists.
+- **Not started.** Only this file exists. Team set up; the boss is drafting the design plan with Reece. No build jobs yet.
 
 ## Decisions (from Reece)
 
