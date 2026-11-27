@@ -187,3 +187,45 @@ Reece delegated approvals to the Director on 2026-11-27 ("keep going, I trust yo
   - Heavy button added to `input.js`.
   - `car.manualBodyPose` opt-out added to `car.js`.
   - Per-mode music tracks: `TP.sfx.defineTrack` / `TP.sfx.music(on, name)`.
+
+## Free assets and tools only (Reece's rule, 2026-11-27)
+
+Everything that ships in Rocket Rumble, and every tool used to make it, must be **free**.
+**Allowed:**
+- CC0 / public domain (Kenney, Quaternius, Poly Pizza CC0 items, Poly Haven)
+- free-with-credit licences (CC-BY: Kevin MacLeod, some Sketchfab models)
+- free royalty-free bundles (Sonniss GDC bundles)
+- free tools: Blender; Mixamo; locally-run open models like TRELLIS
+- free tiers of AI generators, **only if** that tier's terms allow use in a game we ship
+
+**Not allowed:**
+- paid packs or paid-only tools
+- "NonCommercial" or "NoDerivatives" licences
+- anything without a clear licence
+- Quixel Megascans and other assets whose free licence is tied to a specific engine
+
+**Every third-party asset gets a line in `games/CREDITS.md`:** the file path in the repo, the
+source URL, the author, the licence, and the credit text if the licence requires one. No line,
+no merge. Bosses check this before merging. Our own code-generated models, sounds and music
+don't need a line.
+
+## The surprise mode (Reece's rule, 2026-11-27: no spoilers)
+
+A fifth mode is being made as a **surprise for Reece** by the **Surprise team**, in
+`games/mode-5/` on `team/mode-5*` branches. Reece asked not to be told, shown or given any hint
+about it, and not to be asked for input on it, until it's in its most polished, playable state.
+This rule applies to **every** session, the Director included:
+
+1. **Never tell Reece anything about it:** not its name, genre, mechanics, look, theme or progress
+   details. Not in any session's replies, turn summaries, messages, commit messages, PR text, or
+   files outside `games/mode-5/`.
+2. **Never ask Reece anything about it.** The Surprise team decides everything itself; the
+   Director settles anything cross-mode.
+3. **Never show it.** It isn't listed in the hub (`TP.Rumble.MODES`), any README, `PROJECT.md`
+   files outside `games/mode-5/`, or screenshots shared with Reece, until the Director reveals it.
+4. **Other teams:** don't open, describe or build on `games/mode-5/`.
+5. **Surprise team:** use neutral commit messages ("Mode 5: work in progress, part N"). End every
+   turn in your own session with one vague line ("Mode 5: still cooking"). Reece may glance at
+   the session list.
+6. **The bar is a finished, polished game**, not a prototype. Only the Director decides when it's
+   ready, and only the Director reveals it.
