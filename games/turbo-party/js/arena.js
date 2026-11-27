@@ -23,7 +23,9 @@
       this.players = game.players;
       this.title = opts.title;
       this.duration = opts.duration;     // seconds, or 0 for "until isOver()"
-      this.tuning = Object.assign({}, TP.CAR_TUNING, opts.tuning || {});
+      // Shared car feel; a minigame may only tweak the settings listed in
+      // TP.MODE_TUNABLE (see shared/js/car.js).
+      this.tuning = TP.modeTuning(opts.tuning || {});
 
       /* ---------- Scene, camera, lights ---------- */
       this.scene = new THREE.Scene();

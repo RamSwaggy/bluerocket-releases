@@ -5,6 +5,9 @@ specifics. The boss keeps it up to date.
 
 ## What it is
 
+**A mode of Rocket Rumble** (see `../TEAMS.md`): it shares the car, controls and feel with every
+other mode. Players come from the hub's saved setup, and the menu links back to the hub.
+
 A rocket-car party board game for 1–4 local players plus bots (keyboard, gamepad or CPU). You
 roll a die, drive a looping board (with a risky shortcut), collect coins, buy items and
 trophies, and play a car minigame after every round. Bonus trophies are handed out at the end.
@@ -85,3 +88,5 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-27: Wanted more minigames, a better board (fork, shop, bonus awards) and
   polish. All three were done in the first pass.
 - 2026-11-27: Set up this team, using RocketBonk's structure.
+- 2026-11-27: Turbo Party is now a mode of **Rocket Rumble** (one umbrella game, one car feel;
+  minigame tuning limited to `TP.MODE_TUNABLE`). The Director owns `shared/` and the hub.
