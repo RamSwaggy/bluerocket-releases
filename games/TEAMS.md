@@ -98,8 +98,17 @@ Director decision, because it changes the car everywhere. A mode that needs a wh
 movement layer (like Boost Runner's side-on track) builds it on top of the shared car, and the
 Director agrees the design first.
 
-Same for controls: Drive, Steer, Jump, Boost and Hit mean the same thing in every mode, on the
-same keys and buttons (see `shared/js/input.js`).
+Same for controls: Drive, Steer, Jump, Boost, Hit and Heavy mean the same thing in every mode, on
+the same keys and buttons (see `shared/js/input.js`). A mode that doesn't use a button just
+ignores it. Heavy (keyboard 1 `R`, keyboard 2 `,`, gamepad `Y`) was added for Car Fighter.
+
+**Mode-owned extras that don't need a shared edit:**
+- **Music:** define a track in your own folder with `TP.sfx.defineTrack(name, {...})` and start
+  it with `TP.sfx.music(true, name)`. See the "Music tracks" note in `shared/js/sfx.js`.
+- **Posing the car body yourself** (flips, rolls, air tilt): set `car.manualBodyPose = true` and
+  write `car.mesh.userData.body.rotation`. `syncMesh` then leaves it alone.
+- **New effects, sounds or car bodies:** build them in your mode's folder first. Once they're
+  stable, tell the Director which ones are worth moving into `shared/`.
 
 ## Shared player setup
 
@@ -144,3 +153,37 @@ Created 2026-11-27. All are cloud sessions tagged `team:<game>` plus `role:<role
 | Car Fighter | `session_01GHNBrsKZCF3ywtyYiG3aDC` | `session_01GHNBrpqsFPkZtFWPbeSe24` | `session_01GHNBrs22k4u4qavTiP35oE` | `session_01GHNBrsHShaTu6YTArUzwUG` |
 
 Bosses who need to coordinate a `games/shared/` change can message each other with the IDs above.
+
+## Director decisions log
+
+Reece delegated approvals to the Director on 2026-11-27 ("keep going, I trust you").
+
+- **2026-11-27, Turbo Party:** plan approved (trophy fixes, fair results, better tests, small bugs, feel fixes; Art and UI job 4a in parallel).
+  - **Ties:** if everyone ties, everyone gets 3 coins and nobody gets a minigame win. A partial tie pays the tied players that place's payout. A tie for 1st counts as a win for each of them.
+  - **Trophy relocation:** at least 10 spaces along the track from the buyer.
+  - **Gamepad and sound checklist:** saved for Reece.
+- **2026-11-27, Deflect Duel:** build plan approved with the boss's defaults.
+  - The ball never KOs its owner.
+  - Double KO: the last hitter wins.
+  - Stalemate: the 12-second reset only.
+  - Serve: anyone can take it.
+  - Aim: about 25°.
+  - Pillars: on, behind a config flag.
+  - `js/arena.js` belongs to Art and UI.
+- **2026-11-27, Boost Runner:** design picks approved.
+  - No wall rides or grapple yet, no pickups in v1.
+  - First to 3, strong bumps.
+  - "Night-shift test range" theme.
+  - Controls: right/left = accelerate/brake, Drive (W/S, ↑/↓, stick Y) = air tilt.
+  - The runner movement layer sits on top of `TP.modeTuning()`.
+- **2026-11-27, Car Fighter:** design picks approved.
+  - Side-on camera, simple specials, 3 original cars, crunchy damage.
+  - 60-second rounds, best of 3, training mode later.
+  - A bot with three difficulty levels.
+  - A new shared **Heavy** button.
+  - Moves may set velocity while they last. Auto-face is allowed (steer becomes sidestep).
+  - New fx, sfx and car bodies live in the mode folder first.
+- **2026-11-27, shared engine:**
+  - Heavy button added to `input.js`.
+  - `car.manualBodyPose` opt-out added to `car.js`.
+  - Per-mode music tracks: `TP.sfx.defineTrack` / `TP.sfx.music(on, name)`.
