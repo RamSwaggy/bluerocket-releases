@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deflect Duel</title>
+  <style>
+    /* Colour tokens — same family as Turbo Party so the modes feel related. */
+    :root {
+      --bg: #0a0d1c;
+      --panel: rgba(12, 16, 36, 0.86);
+      --panel-solid: #121732;
+      --line: rgba(255, 255, 255, 0.14);
+      --text: #f2f5ff;
+      --muted: #9aa6c8;
+      --accent: #ff4fd8;
+      --accent2: #ffe14d;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+    #game { position: fixed; inset: 0; display: block; }
+    .layer { position: fixed; pointer-events: none; }
+
+    /* ---------- Top HUD: player chips with lives, ball speed in the middle ---------- */
+    #hud {
+      top: 12px; left: 12px; right: 12px;
+      display: none; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #hud.show { display: flex; }
+    .chip {
+      padding: 6px 12px; border-radius: 10px; background: var(--panel);
+      border-bottom: 4px solid; font-weight: 700; font-size: 17px;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .chip.out { opacity: .35; }
+    .chip .lives { letter-spacing: 2px; }
+    #speed {
+      padding: 4px 18px; border-radius: 12px; background: var(--panel);
+      text-align: center; min-width: 120px;
+    }
+    #speed .label { font-size: 11px; color: var(--muted); letter-spacing: .15em; }
+    #speed .val { font-size: 30px; font-weight: 900; line-height: 1.05; }
+
+    /* ---------- Big centre text ---------- */
+    #center-msg {
+      top: 36%; left: 0; right: 0; text-align: center;
+      font-size: 68px; font-weight: 900; font-style: italic; letter-spacing: .02em;
+      text-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 30px rgba(0,0,0,.6);
+    }
+    #center-msg .sub { display: block; font-size: 22px; font-weight: 600; font-style: normal; margin-top: 6px; }
+
+    /* ---------- Callouts ("SMASH!", "Orange KO'd Green!") ---------- */
+    #toast {
+      bottom: 90px; left: 50%; transform: translateX(-50%);
+      padding: 10px 20px; border-radius: 999px; background: var(--panel);
+      border: 1px solid var(--line); font-size: 20px; font-weight: 800;
+      opacity: 0; transition: opacity .2s; white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+
+    #hint {
+      bottom: 16px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; border-radius: 10px; background: var(--panel);
+      font-size: 14px; color: var(--muted); white-space: nowrap; max-width: calc(100vw - 24px);
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    #hint:empty { display: none; }
+    kbd {
+      display: inline-block; padding: 1px 7px; border-radius: 5px;
+      background: #2a2f5e; color: var(--text); font-family: inherit; font-size: 13px;
+      border-bottom: 2px solid #0a0f22;
+    }
+
+    /* ---------- Full-screen cards: menu & results ---------- */
+    #overlay {
+      inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(5, 6, 18, 0.6); pointer-events: auto;
+    }
+    #overlay.show { display: flex; }
+    .card {
+      width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+      padding: 26px 28px; border-radius: 20px;
+      background: var(--panel-solid); border: 2px solid var(--line);
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .card h1 { margin: 0 0 4px; font-size: 46px; font-style: italic; letter-spacing: .01em; }
+    .card h1 .t1 { color: var(--accent); }
+    .card h1 .t2 { color: var(--accent2); }
+    .card h2 { margin: 0 0 8px; font-size: 32px; }
+    .card p { color: var(--muted); margin: 6px 0 14px; line-height: 1.45; }
+    .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+    .slot {
+      padding: 10px 12px; border-radius: 12px; background: #1a1f45;
+      border-left: 6px solid; display: flex; flex-direction: column; gap: 6px;
+    }
+    .slot label { font-size: 12px; color: var(--muted); }
+    .slot input, .slot select, .row select {
+      font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 8px;
+      border: 1px solid var(--line); background: #0e1230; color: var(--text);
+    }
+    .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+    .btn {
+      font: inherit; font-size: 20px; font-weight: 800; cursor: pointer;
+      padding: 12px 26px; border-radius: 12px; border: none;
+      background: var(--accent2); color: #1a1300;
+    }
+    .btn.alt { background: #2a2f5e; color: var(--text); }
+    .btn:hover { filter: brightness(1.08); }
+    .controls-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+    .controls-table td { padding: 5px 6px; border-top: 1px solid var(--line); color: var(--muted); }
+    .controls-table td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    .result-row {
+      display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 6px 0;
+      border-radius: 12px; background: #1a1f45; border-left: 6px solid; font-size: 18px;
+    }
+    .result-row .place { font-weight: 900; width: 44px; font-size: 22px; }
+    .result-row .who { flex: 1; font-weight: 700; }
+    .muted { color: var(--muted); }
+    .error { color: #f87171; min-height: 1.2em; margin: 4px 0 0; }
+
+    @media (max-width: 640px) {
+      .slots { grid-template-columns: 1fr; }
+      #center-msg { font-size: 46px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="layer"></div>
+  <div id="center-msg" class="layer"></div>
+  <div id="toast" class="layer"></div>
+  <div id="hint" class="layer"></div>
+  <div id="overlay" class="layer"><div class="card" id="card"></div></div>
+
+  <!-- Shared engine code (same files Turbo Party uses). -->
+  <script src="../shared/vendor/three.min.js"></script>
+  <script src="../shared/js/util.js"></script>
+  <script src="../shared/js/sfx.js"></script>
+  <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/car.js"></script>
+
+  <!-- This mode. -->
+  <script src="js/hud.js"></script>
+  <script src="js/duel.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -7,5 +7,5 @@ same shared engine in `shared/` (car physics, input, sound, helpers and Three.js
 |---|---|---|
 | [Turbo Party](turbo-party/) | Party board game with minigames | ✅ Playable |
 | Boost Runner | Side-scrolling race where you're knocked out if you fall off-screen | Planned |
-| Deflect Duel | Arena ball-deflection: the ball speeds up with every hit | Planned |
+| [Deflect Duel](deflect-duel/) | Arena ball-deflection: the ball speeds up with every hit | 🚧 Work in progress (not playable yet) |
 | Car Fighter | 1v1 car combat with health bars and special moves | Planned |
