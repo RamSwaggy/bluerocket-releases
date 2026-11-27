@@ -55,8 +55,17 @@ Course chunk **data** belongs to Gameplay. How it **looks** belongs to Art and U
 
 ## How to test
 
-Nothing to run yet. As soon as a match can finish with bots, QC writes
-`tools/boost-runner-smoke.js` (copy `tools/turbo-party-smoke.js`) and adds the command here. Any
+From the `games` folder:
+
+```
+node tools/credits-check.js          # free-assets rule; run before every merge -> PASS/FAIL
+```
+
+`credits-check.js` defaults to `boost-runner` (pass other mode folders as arguments). It exits 1 on
+MISSING (an asset file with no `../CREDITS.md` row) or BAD-LICENCE. STALE and FLAGGED are
+warnings for the boss to look at.
+
+The full-match smoke test (`tools/boost-runner-smoke.js`) is coming once the logic runs. Any
 change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
 ## Current state (as of 2026-11-27)
