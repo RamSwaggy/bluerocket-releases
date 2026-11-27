@@ -41,4 +41,4 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
-- (none yet)
+- QC 10a0e5e: tools/mode-5-{lib,smoke,shots,probe}.js (test-hook contract forwarded to Gameplay).
