@@ -191,11 +191,17 @@ function inPage(args) {
       startup: pick("startup"), active: pick("active"), recovery: pick("recovery"),
       damage: pick("damage", "dmg"), hitstun: pick("hitstun", "hitStun"), blockstun: pick("blockstun", "blockStun"),
       flags: Object.assign({}, flagsObj, { launcher: m.launcher || flagsObj.launcher, throw: m.throw || flagsObj.throw }),
-      input: m.input, cost: m.superCost || m.cost,
+      input: m.input, cost: m.superCost || m.cost, internal: isInternal(m),
       reach: m.hitbox ? (m.hitbox.x || 0) + (m.hitbox.forward || 0) + (m.hitbox.w || m.hitbox.size || 0) / 2 : undefined,
     };
   }
+  // Rows marked internal: true (e.g. "landing", a recovery state with no
+  // button) aren't moves a player can press, so they're left out entirely.
+  const isInternal = (m) => !!(m && (m.internal || (m.flags && m.flags.internal)));
   function listMoves() {
+    return allMoves().filter((mv) => !mv.internal);
+  }
+  function allMoves() {
     const T = TP.MOVES;
     if (!T) return [];
     if (Array.isArray(T)) return T.map((m, i) => normMove(m.id || "move" + i, m));
@@ -412,7 +418,7 @@ function inPage(args) {
         const t = mv;
         if (!hitRun || hitRun.moveStart === null) {
           row.status = "FAIL";
-          if (recipe.hold.boost && recipe.press.heavy && hitRun && hitRun.super0 < 100) row.notes.push(`move never started (needs a super bar; P1 had ${hitRun.super0} and the test can't set it)`);
+          if (recipe.hold.boost && recipe.press.heavy && hitRun && hitRun.super0 < 100) row.notes.push(`move never started: needs a super bar, but P1 had ${hitRun.super0} even with super: 100 passed to TP.Fight.create`);
           else row.notes.push(`move never started${hitRun && hitRun.otherMoves.length ? ` (got ${hitRun.otherMoves.join(", ")} instead)` : ""}`);
         } else if (!hitRun.hit) {
           row.status = "FAIL";
