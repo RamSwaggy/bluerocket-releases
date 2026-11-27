@@ -29,7 +29,11 @@ Roles: message the boss at `session_01GHNBrsk3LnQA2PCCCRSzxD` when you finish a 
 Above the boss: **Rocket Rumble · Director** (`session_01GHNBrs2PaPyHH8XycVBywq`), who owns `../shared/`,
 the hub and the car feel. Shared changes go through the boss to the Director; roles don't edit `../shared/`.
 
-## First job (boss): design plan
+## Design
+
+Signed off: see **`DESIGN.md`**. The original first-job brief is kept below for history.
+
+## First job (boss): design plan (done)
 
 Before any code, the boss writes `DESIGN.md` here with Reece: camera and perspective (2.5D
 side view of 3D cars?), how the shared car physics adapts to a side-on track, the movement
@@ -37,16 +41,17 @@ toolkit, course building (hand-made sections chained together or generated), eli
 round rules, pickups, bots, controls, and a first playable milestone. Get Reece's sign-off,
 then split it into Gameplay, Art and UI, and QC jobs.
 
-## Who owns what (once code exists)
+## Who owns what
 
-| Area | Gameplay | Art and UI |
-|---|---|---|
-| Rules, physics, controls, bots, modes, balance | owns | — |
-| 3D models, scenes, camera, particles, sound and music | — | owns |
-| `index.html`, menus, HUD, cards (copy `../turbo-party` and `../deflect-duel` patterns) | — | owns |
-| `../shared/js/car.js`, `input.js`, `util.js` | owns (car **model** belongs to Art) | car model only |
-| `../shared/js/fx.js`, `sfx.js` | — | owns |
-| `../tools/boost-runner-*.js`, tests | — (QC owns) | — (QC owns) |
+| Files (in `games/boost-runner/`) | Owner |
+|---|---|
+| `js/runner-car.js`, `js/course.js`, `js/view.js`, `js/round.js`, `js/bots.js`, `js/br.js`, `sim.html`, `js/README.md` | Gameplay |
+| `index.html`, `js/main.js`, `js/camera.js`, `js/scene.js`, `js/hud.js`, `js/fx-br.js`, `js/music.js`, CSS | Art and UI |
+| `../tools/boost-runner-*.js`, `../tools/credits-check.js`, any tests | QC |
+| `DESIGN.md`, `PROJECT.md` | Boss |
+| `../shared/*`, `../index.html`, `../TEAMS.md`, `../CREDITS.md` format | Director (ask through the boss) |
+
+Course chunk **data** belongs to Gameplay. How it **looks** belongs to Art and UI, built from the same data.
 
 ## How to test
 
@@ -56,7 +61,7 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 
 ## Current state (as of 2026-11-27)
 
-- **Not started.** Only this file exists. Team set up; the boss is drafting the design plan with Reece. No build jobs yet.
+- **Design signed off** (`DESIGN.md`). First build jobs sent to all three roles. No game code yet.
 
 ## Decisions (from Reece)
 
@@ -70,3 +75,10 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 - 2026-11-27 (standing rule, via the Director): **free assets and tools only.** Every third-party
   asset gets a line in `../CREDITS.md` (path, source URL, author, licence, credit text); no line,
   no merge. Code-generated models, sounds and music are exempt. See `../TEAMS.md`.
+- 2026-11-27: **Design approved** by Reece as `DESIGN.md`: wall rides and grapple later, no pickups in
+  v1, first to 3, strong bumps (`bumpScale` 1.3), "Night-shift test range" theme, tilt-and-boost as
+  the core air trick. Controls (Director): drive = Steer (D/A, →/←, stick X) plus RT/LT on pads,
+  air tilt = `ctrl.pitch` (W/S, ↑/↓, stick Y). The Director also approved the double jump, Hit-dash,
+  bad-landing tumble and 2D bumps.
+- 2026-11-27: Reece: "Approved, and the Director speaks for me." From now on, the Director's
+  sign-offs count as Reece's.
