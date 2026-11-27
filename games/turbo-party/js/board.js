@@ -614,7 +614,14 @@
       /* ---------- Use an item? ---------- */
       let rollMode = "normal";
       if (player.items.length) {
-        const labels = ["Just roll", ...player.items.map((id) => `${ITEMS[id].icon} ${ITEMS[id].name}`)];
+        // Items that would do nothing right now are shown greyed out with the
+        // reason, and humans can't pick them (see itemUnusable).
+        const labels = ["Just roll", ...player.items.map((id) => {
+          const why = this.itemUnusable(player, id);
+          return why
+            ? { label: `${ITEMS[id].icon} ${ITEMS[id].name}`, disabled: why }
+            : `${ITEMS[id].icon} ${ITEMS[id].name}`;
+        })];
         const pickIdx = await this.choose(player, "Use an item?", labels, this.botItemChoice(player));
         if (pickIdx > 0) {
           const id = player.items.splice(pickIdx - 1, 1)[0];
@@ -695,6 +702,22 @@
     }
 
     // Apply an item. Returns a roll mode for the dice ("normal"/"double"/"turbo").
+    /* Why an item can't usefully be used right now, or "" if it can.
+       Shown as the greyed-out reason in the "Use an item?" menu. */
+    itemUnusable(player, id) {
+      if (id === "steal") {
+        // Pickpocket takes from the richest rival; pointless if they're all broke.
+        const anyCoins = this.players.some((p) => p !== player && p.coins > 0);
+        if (!anyCoins) return "rivals are broke";
+      }
+      if (id === "warp") {
+        // Warp drops you on the space just before the trophy: no use if you're already there.
+        const before = this.spaces.find((s) => s.next.includes(this.trophyIndex));
+        if (before && before.index === player.space) return "already there";
+      }
+      return "";
+    }
+
     async useItem(player, id) {
       const ui = TP.UI;
       const item = ITEMS[id];
@@ -844,7 +867,11 @@
         return;
       }
       const stock = Object.values(ITEMS);
-      const labels = ["Leave", ...stock.map((it) => `${it.icon} ${it.name} · ${it.price}🪙`)];
+      // Items you can't afford are greyed out with what they cost, and humans
+      // can't select them. "Leave" is always available.
+      const labels = ["Leave", ...stock.map((it) => player.coins >= it.price
+        ? `${it.icon} ${it.name} · ${it.price}🪙`
+        : { label: `${it.icon} ${it.name}`, disabled: `need ${it.price}🪙` })];
       ui.center("SHOP", "Items are used at the start of your turn", "#a855f7");
       const choice = await this.choose(player, `Buy something? You have ${player.coins} coins`, labels, this.botShopChoice(player, stock));
       ui.center("");
@@ -916,13 +943,29 @@
     }
 
     /* Show a left/right choice and wait for the player to pick.
-       Bots just take `botPick` after a short "thinking" pause. */
+       Bots just take `botPick` after a short "thinking" pause.
+
+       Each option is either a plain string, or { label, disabled } where
+       `disabled` is a short reason ("need 14🪙"). Disabled options are drawn
+       greyed out with their reason, and left/right skips straight over them,
+       so a human can only ever confirm an enabled option. The first option
+       (Leave / Skip / Just roll) should always be enabled. */
     async choose(player, title, options, botPick) {
-      let sel = 0;
+      const off = (i) => typeof options[i] === "object" && !!options[i].disabled;
+      // Step from `from` in direction `dir` (+1 / -1) to the next enabled
+      // option, wrapping around. If somehow nothing else is enabled, stay put.
+      const step = (from, dir) => {
+        for (let n = 1; n <= options.length; n++) {
+          const i = (from + dir * n + options.length * n) % options.length;
+          if (!off(i)) return i;
+        }
+        return from;
+      };
+      let sel = off(0) ? step(0, 1) : 0;
       TP.UI.choice(title, options, sel);
       if (player.controller === "bot") {
         await TP.sched.wait(0.8);
-        sel = botPick;
+        sel = botPick; // bot logic is unchanged; it already avoids unaffordable picks
         TP.UI.choice(title, options, sel);
         await TP.sched.wait(0.5);
       } else {
@@ -930,10 +973,11 @@
         TP.UI.hint(`<kbd>${k.steer}</kbd> choose · <kbd>${k.confirm}</kbd> confirm`);
         await TP.sched.until(() => {
           const c = TP.Input.get(player.controller);
-          if (c.leftPressed) sel = (sel + options.length - 1) % options.length;
-          if (c.rightPressed) sel = (sel + 1) % options.length;
-          if (c.leftPressed || c.rightPressed) { TP.UI.choice(title, options, sel); TP.sfx.play("tick"); }
-          return c.confirmPressed;
+          const before = sel;
+          if (c.leftPressed) sel = step(sel, -1);
+          if (c.rightPressed) sel = step(sel, 1);
+          if (sel !== before) { TP.UI.choice(title, options, sel); TP.sfx.play("tick"); }
+          return c.confirmPressed && !off(sel);
         });
         TP.UI.hint("");
       }

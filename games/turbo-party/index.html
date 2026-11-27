@@ -139,6 +139,9 @@
       font-size: 18px; font-weight: 700; border: 2px solid transparent;
     }
     #choice .opt.sel { border-color: var(--accent); background: #3a4580; }
+    /* Options you can't pick right now: greyed out, with the reason under the label. */
+    #choice .opt.off { background: #1a2140; color: #5d6789; border: 2px dashed #2c3560; }
+    #choice .opt .why { display: block; font-size: 12px; font-weight: 700; color: var(--bad); margin-top: 2px; }
 
     /* ---------- Minigame HUD: timer + live scores ---------- */
     #mg-hud {
