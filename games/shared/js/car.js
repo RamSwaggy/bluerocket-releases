@@ -39,6 +39,27 @@
   };
   TP.CAR_TUNING = DEFAULT_TUNING;
 
+  /* ---------- One car feel across Rocket Rumble ----------
+     Every mode drives the same car, so skills carry over from mode to
+     mode. A mode may only adjust the settings listed here (for example,
+     Sumo Ring's harder bumps). Anything else (acceleration, turning,
+     jump height, gravity, boost drain) is fixed. Changing it is a
+     Director decision, and it changes the car in every mode.
+
+     Usage in a mode: const tuning = TP.modeTuning({ bumpScale: 1.2 });
+     Settings that aren't allowed are ignored, with a console warning, so
+     a mistake shows up in testing. */
+  const MODE_TUNABLE = ["bumpScale", "grip", "maxSpeed", "boostMax", "pivot"];
+  TP.MODE_TUNABLE = MODE_TUNABLE;
+  TP.modeTuning = function (overrides = {}) {
+    const t = Object.assign({}, DEFAULT_TUNING);
+    for (const [k, v] of Object.entries(overrides)) {
+      if (MODE_TUNABLE.includes(k)) t[k] = v;
+      else console.warn(`[Rocket Rumble] "${k}" is part of the shared car feel and can't be changed per mode. Ignored.`);
+    }
+    return t;
+  };
+
   /* ---------- 3D model ---------- */
   // Built from simple boxes/cylinders so we need no model files.
   // The car's nose points toward +Z in model space.
