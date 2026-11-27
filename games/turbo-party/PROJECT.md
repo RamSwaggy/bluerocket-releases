@@ -89,6 +89,8 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-27: Set up this team, using RocketBonk's structure.
 - 2026-11-27: Turbo Party is now a mode of **Rocket Rumble** (one umbrella game, one car feel;
   minigame tuning limited to `TP.MODE_TUNABLE`). The Director owns `shared/` and the hub.
+- 2026-11-27: **Free assets and tools only** (Reece's standing rule, see `../TEAMS.md`). Every
+  third-party file gets a line in `../CREDITS.md`, or it isn't merged. Assets made in code are exempt.
 - 2026-11-27: Reece approved the boss's first plan ("approved"). Rulings the Director made under
   that approval:
   - **Ties:** if every player ties, each gets 3 coins and nobody gets a minigame win. In a
