@@ -51,23 +51,38 @@ through the boss.
 
 ## How to test
 
-Not runnable yet. Once M1 lands, run these from the `games` folder, in the background:
+Run these from the `games` folder, in the background. Exit code 0 means PASS, 1 means FAIL.
 
 ```
-node tools/car-fighter-smoke.js            # bot-vs-bot best-of-3 → PASS/FAIL (QC writes this)
-node tools/car-fighter-sim.js 50           # 50 headless matches: win split, round lengths, move stats
+node tools/car-fighter-smoke.js 8 180 12345   # [speed] [maxSeconds] [seed]: bot vs bot in the real page
+node tools/car-fighter-sim.js 50 1000         # [matches] [seed]: headless bot-vs-bot stats
+                                              #   options: --p1= --p2= --bot= --bot2=
+node tools/car-fighter-sim.js frames 7        # frame-data check of every TP.MOVES row
 ```
 
-In the browser: `car-fighter/index.html?demo&speed=4&seed=1`. Any change that touches
-`../shared/` must also keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
+All three also take `--page=<path>` and `--extra="&opt=.."`.
+
+The tools exist, but they can't pass until the M1 game code lands. In the browser:
+`car-fighter/index.html?demo&speed=4&seed=1`. Any change that touches `../shared/` must also
+keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
 ## Current state (as of 2026-11-27)
 
 - `DESIGN.md` is signed off. The first M1 build jobs have gone to all three roles.
+- QC job 1 is merged (`aff8559`): `tools/car-fighter-smoke.js` and `tools/car-fighter-sim.js`
+  (stats and frame data). Tested only against a stub so far.
+- Gameplay job 1 and its follow-up are merged (`8a3daf0`, `d8ea725`): `moves.js`,
+  `fighters.js`, `fight.js`, `bot.js`, `match.js`, the full v1 move list, rounds and a Normal
+  bot. It follows the §9 contract, including the `input` field, the `super` option and
+  `TP.Fight.ARENA`. The boss checked it with a scratch page:
+  - Sim of 200 matches: PASS, P1 49% / P2 51%, average round 26 s, no time-outs.
+  - Frame-data check: PASS, all 11 moves.
+- Waiting on Art job 1 (page, view, HUD, menu).
 - Shared changes made by the Director for us:
   - the **Heavy** button in `input.js` (`heavy` / `heavyPressed`: kb1 R, kb2 comma, pad Y)
   - `car.manualBodyPose` in `car.js`, which lets us pose the car body ourselves
-  - Check that they're on `claude/eager-tesla-vdhyd9` before relying on them.
+  - per-mode music tracks: `TP.sfx.defineTrack("car-fighter", {...})`, then `TP.sfx.music(true, "car-fighter")`
+  - All three are merged into `team/car-fighter` from `claude/eager-tesla-vdhyd9` at `0923873`.
 
 ## Decisions (from Reece)
 
@@ -96,3 +111,8 @@ In the browser: `car-fighter/index.html?demo&speed=4&seed=1`. Any change that to
   sidestep, as Car Fighter's control mode.
 - 2026-11-27 (Director): new fx, sfx and fighter bodies are built inside `car-fighter/js`
   first. The Director moves good ones into `shared/` later.
+- 2026-11-27 (Reece, via the Director): **free assets and tools only.** CC0, CC-BY and other
+  free licences are allowed; paid, NonCommercial, NoDerivatives, unlicensed and engine-locked
+  assets are not. Every third-party asset gets a line in `../CREDITS.md` (path, source URL,
+  author, licence, credit text). No line means no merge. Assets made in code are exempt. See
+  `../TEAMS.md`.

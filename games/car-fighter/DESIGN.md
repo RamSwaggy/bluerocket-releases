@@ -51,7 +51,8 @@ one new button, added by the Director for this mode.
 | Button | kb1 | kb2 | Gamepad |
 |---|---|---|---|
 | Steer (left / right on screen) | A / D | ← / → | Left stick X, D-pad |
-| Drive (up / down) | W / S | ↑ / ↓ | Left stick Y, RT / LT |
+| Up / down (`ctrl.pitch`) | W / S | ↑ / ↓ | Left stick up / down, D-pad up / down if the shared input adds it |
+| Drive (`ctrl.throttle`) | W / S | ↑ / ↓ | RT / LT (not used for fighting in v1) |
 | Jump | Space | Enter | A |
 | Boost | Left Shift / F | Right Shift | B / LB |
 | Hit (light attack) | E | . | X / RB |
@@ -62,7 +63,7 @@ movement" as Car Fighter's control mode):
 
 - **Left / right** moves the car along the line on screen. "Toward" and "away" depend on which
   side you're on. **Holding away blocks**, as long as you're not attacking.
-- **Tapping up or down** sidesteps into or out of the screen. Hits miss you for a moment,
+- **Tapping up or down** (read from `ctrl.pitch`, which works the same on keyboards and gamepads) sidesteps into or out of the screen. Hits miss you for a moment,
   then there's a short recovery. Holding up or down does nothing else in v1.
 - **Jump** hops. You can steer in the air a little, just like the shared car.
 - **Boost** gives a short burst of speed along the line toward where you're pointing on the
@@ -224,7 +225,22 @@ fight.events;         // log since start: { frame, type: "hit"|"block"|"whiff"|"
                       //   attacker, move, damage, stun, x, y, z }
 fight.onEvent(fn);    // Art and UI hook for sparks, sounds and camera kicks
 TP.MOVES, TP.FIGHTERS // the data tables, readable by tests
+TP.Fight.ARENA        // { halfX, halfZ, minY, maxY }: the playable bounds, for QC's checks
 ```
+
+**Contract details** (settled 2026-11-27 from QC's questions):
+
+1. Every `TP.MOVES` row has an `input` string. Examples: `"hit"`, `"hit*2"` (2nd chain hit),
+   `"hit*3"`, `"heavy"`, `"toward+heavy"`, `"away+heavy"`, `"boost+hit"`, `"jump>hit"`,
+   `"jump>heavy"`, `"hit+heavy"` (throw), `"boost+heavy"` (signature).
+2. `startup: N` means N frames of windup. The move's **first active frame is frame N+1**,
+   counting the frame the button is pressed as frame 1.
+3. `TP.Fight.create` takes an optional `super` per player (e.g. `p1: { ..., super: 100 }`),
+   so tests can start with meter. It's also useful for training mode later.
+4. `onEvent(fn)` takes **any number of listeners**. Tests should still read `fight.events`.
+5. `round_end` events carry `winner` (0, 1, or `null` for a draw) and
+   `reason: "KO" | "time-out" | "draw" | "double-KO"`. `combo_end` carries `hits` and
+   `damage`.
 
 `fight.js` drives each car's position with the shared `TP.Car` physics and
 `TP.modeTuning(...)`:
