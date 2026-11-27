@@ -16,12 +16,14 @@ characters, art, music, levels or look.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Car Fighter (boss) | `team/car-fighter` |
-| Car Fighter · Gameplay (systems and feel) | `team/car-fighter-gameplay` |
-| Car Fighter · Art and UI (look and screens) | `team/car-fighter-art` |
-| Car Fighter · QC (playtest and checks) | `team/car-fighter-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Car Fighter (boss) | `session_01GHNBrsKZCF3ywtyYiG3aDC` | `team/car-fighter` |
+| Car Fighter · Gameplay (systems and feel) | `session_01GHNBrpqsFPkZtFWPbeSe24` | `team/car-fighter-gameplay` |
+| Car Fighter · Art and UI (look and screens) | `session_01GHNBrs22k4u4qavTiP35oE` | `team/car-fighter-art` |
+| Car Fighter · QC (playtest and checks) | `session_01GHNBrsHShaTu6YTArUzwUG` | `team/car-fighter-qc` |
+
+Message the boss with `send_message` to `session_01GHNBrsKZCF3ywtyYiG3aDC`.
 
 ## First job (boss): design plan
 
@@ -51,7 +53,8 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 
 ## Current state (as of 2026-11-27)
 
-- **Not started.** Only this file exists.
+- **Not started.** Only this file exists. Boss is drafting the design plan with Reece;
+  no build jobs until he signs off on `DESIGN.md`.
 
 ## Decisions (from Reece)
 
