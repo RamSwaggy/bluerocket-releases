@@ -116,6 +116,17 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 5b | King of the Hill crowding, Goal Frenzy posts | Gameplay | after 5a |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
 
+## Art backlog (after jobs 1–5; the Director sets the order)
+
+Art and UI's list, most value first (S ≈ 1 h, M ≈ a few hours, L ≈ half a day or more):
+
+1. Minigame arena backdrops: stadium ring, stands, sky, a theme per game (M)
+2. Board scene clean-up: floodlights, lamps, ground, trophy beam (S–M)
+3. Bigger, clearer tokens on the board, with a coloured ring and a taller marker (S; coordinate with Gameplay)
+4. Card and menu polish: title, minigame intro cards, podium results (M)
+5. Car model refresh (M–L): **shared/, so the Director decides**
+6. Particles and sound pass (M): **shared/, so the Director decides; needs Reece's ears**
+
 ## Reece's checklist: gamepad and sound (job 6)
 
 Only you can check these: the cloud sessions have no speakers or gamepads. Open
