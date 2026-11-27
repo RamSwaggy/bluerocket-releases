@@ -189,6 +189,30 @@
       try { if (effects[name]) effects[name](arg); } catch (e) { /* ignore audio errors */ }
     },
 
+    /* ---------- Recorded sounds (files) ----------
+       For real audio files loaded with TP.Assets ({ type: "audio" }).
+       decode() turns the loaded bytes into a playable buffer (needs the
+       audio unlocked first, i.e. after a click or key press).
+       playBuffer() plays it; returns a handle with stop(). */
+    async decode(bytes) {
+      if (!ctx) return null;
+      // decodeAudioData consumes the buffer, so pass a copy (the cache keeps the original).
+      return ctx.decodeAudioData(bytes.slice(0));
+    },
+    playBuffer(buffer, opts = {}) {
+      if (!ctx || !buffer) return { stop() {} };
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = !!opts.loop;
+      src.playbackRate.value = opts.rate || 1;
+      const g = ctx.createGain();
+      g.gain.value = opts.volume ?? 0.8;
+      // Music files go through the music volume; effects straight to master.
+      src.connect(g).connect(opts.music ? musicGain : master);
+      src.start();
+      return { stop() { try { src.stop(); } catch (e) { /* already stopped */ } } };
+    },
+
     // Register a music track (see the "Music tracks" note above).
     defineTrack(name, def) { TRACKS[name] = def; },
 
