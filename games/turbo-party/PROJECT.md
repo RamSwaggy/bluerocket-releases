@@ -109,7 +109,7 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | A | 20-match 6-turn balance baseline + reusable balance tool | QC | sent |
 | 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | sent |
 | 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | after A |
-| 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | sent |
+| 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
 | 4b | Small bugs: can choose items you can't afford, others found by job 3 | Gameplay / Art and UI | after job 3 |
 | 5 | Knockback + Sumo retune (via the Director), King of the Hill crowding, Goal Frenzy posts | Gameplay | later |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
