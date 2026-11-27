@@ -16,12 +16,14 @@ characters, art, music or levels.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Turbo Party (boss) | `team/turbo-party` |
-| Turbo Party · Gameplay (systems and feel) | `team/turbo-party-gameplay` |
-| Turbo Party · Art and UI (look and screens) | `team/turbo-party-art` |
-| Turbo Party · QC (playtest and checks) | `team/turbo-party-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Turbo Party (boss) | `session_01GHNBrt23mSuiGTyLcdpmqK` | `team/turbo-party` |
+| Turbo Party · Gameplay (systems and feel) | `session_01GHNBrrE9ipBPBwoUZ5Axrt` | `team/turbo-party-gameplay` |
+| Turbo Party · Art and UI (look and screens) | `session_01GHNBrrfMnRLjVS95iDUFgw` | `team/turbo-party-art` |
+| Turbo Party · QC (playtest and checks) | `session_01GHNBrqhaxQit2X1D5DYyad` | `team/turbo-party-qc` |
+
+Message a session with `send_message` and its session ID. Roles reply to the boss.
 
 ## Who owns what
 
