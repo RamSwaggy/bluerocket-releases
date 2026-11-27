@@ -71,15 +71,12 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 - `DESIGN.md` is signed off. The first M1 build jobs have gone to all three roles.
 - QC job 1 is merged (`aff8559`): `tools/car-fighter-smoke.js` and `tools/car-fighter-sim.js`
   (stats and frame data). Tested only against a stub so far.
-- Gameplay job 1 is merged (`8a3daf0`): `moves.js`, `fighters.js`, `fight.js`, `bot.js`,
-  `match.js`, the full v1 move list, rounds and a Normal bot. The boss checked it with a scratch
-  page:
-  - Sim of 300 matches: P1 46% / P2 54%, average round 26 s, no time-outs.
-  - Frame-data check: 9 of 12 moves OK. Drop Slam never connects from a neutral jump. The
-    signature move can't be tested until the `super` option exists. `landing` is an internal
-    row that needs flagging.
-  - Contract follow-ups have been sent to Gameplay: the `input` field, `TP.Fight.ARENA`, the
-    `super` option.
+- Gameplay job 1 and its follow-up are merged (`8a3daf0`, `d8ea725`): `moves.js`,
+  `fighters.js`, `fight.js`, `bot.js`, `match.js`, the full v1 move list, rounds and a Normal
+  bot. It follows the §9 contract, including the `input` field, the `super` option and
+  `TP.Fight.ARENA`. The boss checked it with a scratch page:
+  - Sim of 200 matches: PASS, P1 49% / P2 51%, average round 26 s, no time-outs.
+  - Frame-data check: PASS, all 11 moves.
 - Waiting on Art job 1 (page, view, HUD, menu).
 - Shared changes made by the Director for us:
   - the **Heavy** button in `input.js` (`heavy` / `heavyPressed`: kb1 R, kb2 comma, pad Y)
