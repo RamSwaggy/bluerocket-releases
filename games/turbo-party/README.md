@@ -10,7 +10,8 @@ This is the first of four planned car-sports modes (see `../README.md`).
 
 **Just double-click `index.html`.** It runs straight from the file in any modern browser
 (Chrome, Edge, Firefox). No install, no server, no internet needed: Three.js is bundled in
-`vendor/`.
+`../shared/vendor/`. Keep the whole `games` folder together, because Turbo Party loads the
+shared car code from `../shared/`.
 
 If your browser blocks local files for some reason, serve the folder instead:
 
@@ -28,7 +29,7 @@ Then open http://localhost:8080.
 |---|---|---|---|---|
 | Keyboard 1 | `W` / `S` | `A` / `D` | `Space` | `Left Shift` (or `F`) |
 | Keyboard 2 | `↑` / `↓` | `←` / `→` | `Enter` | `Right Shift` (or `/`) |
-| Gamepad | `RT` gas, `LT` reverse | Left stick / D-pad | `A` | `B` or `X` |
+| Gamepad | `RT` gas, `LT` reverse | Left stick / D-pad | `A` | `B` or `LB` |
 
 On the board, Jump/Confirm stops the die. Steer left/right picks options such as "Buy" or
 "Skip". Gamepads only show up after you press a button on them.
@@ -66,15 +67,15 @@ because they can't load from `file://`, and double-click-to-play matters more he
 
 | File | What it does |
 |---|---|
-| `js/util.js` | Maths helpers, the **scheduler** (`await TP.sched.wait(1)`) that game flow is written with, shared lighting |
-| `js/input.js` | Keyboards and gamepads → one controller shape (`throttle`, `steer`, `boost`, `jump`, …) |
-| `js/car.js` | **Shared car**: model, arcade physics, car-vs-car bumps, bot steering helpers |
+| `../shared/js/util.js` | Maths helpers, the **scheduler** (`await TP.sched.wait(1)`) that game flow is written with, shared lighting |
+| `../shared/js/input.js` | Keyboards and gamepads → one controller shape (`throttle`, `steer`, `boost`, `jump`, …) |
+| `../shared/js/car.js` | **Shared car**: model, arcade physics, car-vs-car bumps, bot steering helpers |
 | `js/arena.js` | Base class for minigames: countdown, timer, physics sub-steps, camera, results |
 | `js/minigames/*.js` | One file per minigame. Each one registers itself in `TP.MINIGAMES`. |
 | `js/board.js` | Board track, spaces, trophy, dice, movement, space effects |
 | `js/game.js` | Match flow: turns → minigame → payouts → final standings |
 | `js/ui.js` | All on-screen text (HUD, cards, prompts) |
-| `js/sfx.js` | Synthesised sound effects (no audio files) |
+| `../shared/js/sfx.js` | Synthesised sound effects (no audio files) |
 | `js/main.js` | Renderer, main loop, title menu |
 
 ### Adding a minigame

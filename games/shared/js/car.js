@@ -35,6 +35,7 @@
     jump: 10.5,         // upward speed given by a jump
     gravity: 28,
     bumpScale: 1.0,     // multiplier for car-vs-car bump strength
+    pivot: 0.25,        // turning allowed when stopped (fraction of full lock)
   };
   TP.CAR_TUNING = DEFAULT_TUNING;
 
@@ -179,7 +180,8 @@
            (full turning from ~5 units/s). Sign of vF flips steering when
            reversing, like a real car. A little "minimum turn" keeps it
            from feeling stuck when stopped. */
-        const speedFactor = clamp(Math.abs(vF) / 5, 0.25, 1) * (vF < -0.5 ? -1 : 1);
+        // `pivot` = how much you can turn while (nearly) stopped, 0..1.
+        const speedFactor = clamp(Math.abs(vF) / 5, T.pivot, 1) * (vF < -0.5 ? -1 : 1);
         this.heading -= ctrl.steer * T.turnRate * speedFactor * dt;
 
         /* ---------- Throttle / brake ---------- */

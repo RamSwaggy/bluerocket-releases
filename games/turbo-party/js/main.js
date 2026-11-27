@@ -117,7 +117,7 @@
       <table class="controls-table">
         <tr><td>Keyboard 1</td><td>Drive <kbd>W</kbd><kbd>S</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Jump/confirm <kbd>Space</kbd> · Boost <kbd>Shift</kbd></td></tr>
         <tr><td>Keyboard 2</td><td>Drive <kbd>↑</kbd><kbd>↓</kbd> · Steer <kbd>←</kbd><kbd>→</kbd> · Jump/confirm <kbd>Enter</kbd> · Boost <kbd>R-Shift</kbd></td></tr>
-        <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Steer stick · Jump/confirm <kbd>A</kbd> · Boost <kbd>B</kbd>/<kbd>X</kbd></td></tr>
+        <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Steer stick · Jump/confirm <kbd>A</kbd> · Boost <kbd>B</kbd>/<kbd>LB</kbd></td></tr>
       </table>
 
       <div class="row" style="margin-top:18px"><button class="btn" id="start">Start party</button></div>`);

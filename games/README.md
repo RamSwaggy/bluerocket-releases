@@ -1,7 +1,7 @@
 # Car-sports game modes
 
 Rocket-car takes on four classic game genres. Each mode is an original game built on the
-same shared car physics (`turbo-party/js/car.js`).
+same shared engine in `shared/` (car physics, input, sound, helpers and Three.js).
 
 | Mode | Genre | Status |
 |---|---|---|

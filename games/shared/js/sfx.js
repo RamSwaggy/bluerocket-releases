@@ -42,6 +42,10 @@
     goal: () => { tone(523, 523, 0.12, "square", 0.1); tone(659, 659, 0.12, "square", 0.1, 0.12); tone(784, 784, 0.3, "square", 0.1, 0.24); },
     trophy: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.18, "triangle", 0.14, i * 0.1)); },
     fall: () => tone(600, 80, 0.6, "triangle", 0.12),
+    swing: () => tone(500, 250, 0.08, "triangle", 0.06),
+    // Ball hit: pitch climbs with the ball's speed (0..1 = slow..max).
+    hit: (k = 0) => { const f = 220 + k * 900; tone(f, f * 1.5, 0.09, "square", 0.14); tone(f * 0.5, f * 0.3, 0.2, "sawtooth", 0.1); },
+    ko: () => { tone(900, 60, 0.5, "sawtooth", 0.16); tone(300, 40, 0.6, "square", 0.1, 0.05); },
   };
 
   TP.sfx = {
@@ -56,8 +60,8 @@
         ctx = null; // No audio support — game still works silently.
       }
     },
-    play(name) {
-      try { if (effects[name]) effects[name](); } catch (e) { /* ignore audio errors */ }
+    play(name, arg) {
+      try { if (effects[name]) effects[name](arg); } catch (e) { /* ignore audio errors */ }
     },
   };
 })();
