@@ -67,6 +67,42 @@ The tools exist, but they can't pass until the M1 game code lands. In the browse
 `car-fighter/index.html?demo&speed=4&seed=1`. Any change that touches `../shared/` must also
 keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
+## Paused 2026-11-28: resume notes
+
+**Paused by Reece (via the Director) to save usage.** M1 is live on the hub (base branch
+`claude/eager-tesla-vdhyd9` at `79161cb`). Everything below is on `team/car-fighter` at the
+time of the pause.
+
+**Merged and passing on `team/car-fighter` (M2, nearly done):**
+- 3 cars, Rivet / Haulback / Skitter, with signatures (Grinder, Quake Drop, Slipstream
+  cross-up) and Easy/Normal/Hard bots.
+  - Health: Rivet 1050, Haulback 1120, Skitter 975.
+  - Normal pairings land at 47–54%, rounds last 25–32 s, with 0% time-outs.
+- The throw fix (Hit + Heavy up to 3 frames apart).
+- Frames 15/15 PASS on all 3 cars.
+- Art: 3 bodies, damage looks, synthesised sfx and fight music, character select, MenuNav,
+  and the polish pass (hit/block flash, wall dust, KO slow-mo, round-intro pan, SUPER READY,
+  victory spotlight, reduce-flashing).
+- Smoke PASS on all 3 pairings.
+
+**Unfinished:**
+- **QC JOB 4** (on `team/car-fighter-qc`, possibly partly pushed): update
+  `tools/car-fighter-human.js` for the M2 menu.
+  - The flow is now `#next` → character select → `#fight`. The old `#start` is gone, so the
+    tool currently times out.
+  - `getReady` should wait for distance ≤ 3.4.
+  - Add a real-keypress throw case (E, then R about 30 ms later).
+  - Re-check the "Menu" step.
+  - Then run human.js on all 3 cars, plus the sim matrix.
+  - **This is the last gate before M2 goes to the Director.**
+
+**Next steps when resumed:**
+1. Merge whatever QC pushed, and finish QC JOB 4. Fix any bugs it finds first.
+2. Send M2 (`team/car-fighter`) to the Director to merge into the base branch.
+3. M3 (DESIGN.md §10): training mode (Art's move-list overlay, built from TP.MOVES input), a
+   3-segment super, more stages (rooftop, car wash), and moving fx and sfx into `shared/`
+   (a Director call).
+
 ## Current state (as of 2026-11-28)
 
 - `DESIGN.md` is signed off. The first M1 build jobs have gone to all three roles.
