@@ -511,7 +511,17 @@ TP.M5 = TP.M5 || {};
        ------------------------------------------------------------------ */
     _bumps(dt) {
       for (const k in this._bumpCd) this._bumpCd[k] -= dt;
+      // Car-vs-car pushes ignore the arena, so a car shoved against a deck
+      // or ramp side could end up a little inside it. Remember where each
+      // car was and undo any push that lands it inside something taller
+      // than it can step onto (the bounce velocity is kept).
+      const before = this.cars.map((c) => ({ x: c.pos.x, z: c.pos.z }));
       const hits = TP.Car.collideAll(this.cars, this.tuning);
+      this.cars.forEach((c, i) => {
+        if (c.out) return;
+        const g = this.arena.groundHeightAt(c.pos.x, c.pos.z);
+        if (g > c.pos.y + 0.6) { c.pos.x = before[i].x; c.pos.z = before[i].z; }
+      });
       for (const h of hits) {
         const a = h.attacker.index, v = h.victim.index;
         const key = Math.min(a, v) + "-" + Math.max(a, v);
