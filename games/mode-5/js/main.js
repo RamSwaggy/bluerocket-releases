@@ -4,6 +4,9 @@
 
    URL options (add to the address, e.g. index.html?demo&speed=8):
      ?demo          4 bots, starts straight away (watch a match)
+     ?human=1       (with ?demo) seat 1 stays a person on its saved
+                    controller (keyboard 1 if it was a bot or empty)
+     ?teams=1       2v2: seats 1+3 vs seats 2+4
      ?speed=N       run N fixed physics steps every frame (fast-forward
                     for tests; the game always simulates in 1/60 s steps)
      ?time=30       round length in seconds
@@ -21,7 +24,7 @@
      TP.M5.HUD    — if present, the stand-in HUD below is not created.
      TP.M5.Menu   — if present and there's no ?demo, main.js doesn't
                     auto-start; the menu calls TP.M5.startMatch(config)
-                    with { players, rounds, roundTime, arena, botLevel }.
+                    with { players, rounds, roundTime, arena, botLevel, teams }.
    ===================================================================== */
 (function () {
   "use strict";
@@ -36,6 +39,8 @@
   if (num("time")) CFG.roundTime = Math.max(5, num("time"));
   if (num("rounds")) CFG.rounds = Math.max(1, Math.floor(num("rounds")));
   if (params.get("bot") && TP.M5.BOT_LEVELS[params.get("bot")]) CFG.botLevel = params.get("bot");
+  const HUMAN = params.get("human") === "1";
+  const TEAMS = params.get("teams") === "1";
 
   /* ---------- Renderer ---------- */
   const canvas = document.getElementById("game");
@@ -58,7 +63,7 @@
 
   /* ---------- Starting a match ----------
      config: { players: [{ name, controller }] × 4, rounds, roundTime,
-               arena, botLevel }. Anything missing uses config.js. */
+               arena, botLevel, teams }. Anything missing uses config.js. */
   TP.M5.startMatch = function (config = {}) {
     TP.sfx.unlock();
     TP.M5._lastConfig = config;
@@ -71,6 +76,7 @@
       roundTime: config.roundTime || CFG.roundTime,
       arena: config.arena ?? num("arena") ?? 0,
       botLevel: config.botLevel || CFG.botLevel,
+      teams: config.teams ?? TEAMS,
     });
     TP.M5.match = match; // read-only state for the HUD and QC's tests
 
@@ -84,10 +90,11 @@
   /* Seats from the Rocket Rumble hub. This mode always has 4 cars, so an
      empty seat ("off") plays as a bot. ?demo makes every seat a bot. */
   function seatsFromHub() {
-    return TP.Rumble.loadSetup().slots.map((s) => ({
-      name: s.name,
-      controller: DEMO || s.controller === "off" ? "bot" : s.controller,
-    }));
+    return TP.Rumble.loadSetup().slots.map((s, i) => {
+      let controller = s.controller === "off" ? "bot" : s.controller;
+      if (DEMO) controller = HUMAN && i === 0 ? (controller === "bot" ? "kb1" : controller) : "bot";
+      return { name: s.name, controller };
+    });
   }
 
   /* ---------- Main loop ----------
