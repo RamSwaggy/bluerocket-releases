@@ -49,3 +49,16 @@ anyway**.
   are left out; `CREDITS.md` is included.
 - Optional launch flag for testing: `--start=turbo-party/index.html?demo` opens a page other
   than the hub.
+
+## Easiest way to play (auto-updating shortcut)
+
+Run this once in PowerShell, from this `desktop` folder:
+
+```
+powershell -ExecutionPolicy Bypass -File install-shortcut.ps1
+```
+
+That puts a **Rocket Rumble** shortcut with the logo on your Desktop. Every time you
+open it, it pulls the latest version of the game, then starts it. If you're offline,
+it plays the version you already have. No rebuilding is needed. If something seems off,
+`desktop\launch.log` shows what the last launch did.
