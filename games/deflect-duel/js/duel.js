@@ -117,7 +117,8 @@
     angleDownDeg: 35,    // strike angle with Down held
     aimBendDeg: 25,      // full steering bends the shot this many degrees sideways
     aimDeadzone: 0.5,    // stick/keys past this count as "held" for up/down aim
-    flipBonus: 4,        // extra speed for a flip strike (Stage B, when the shared car can flip)
+    flipBonus: 4,        // extra speed for a flip strike (flipping into the ball)
+    flipReach: 0.6,      // a flipping car strikes the ball from this far beyond touching it
 
     /* ---------- Bunt (wheels touch the ball: a flip reset) ---------- */
     buntKeep: 0.6,       // share of the speed tier the ball remembers
@@ -178,6 +179,11 @@
       fumbleFast: 0.4,             // ...plus this much more at max speed
       fumbleRally: 0.03,           // ...plus this much per strike in the current rally
       planFor: -1, plan: "",       // decision for the current shot
+      // Rocket moveset (when the shared car has it):
+      flipChance: rand(0.25, 0.45),// chance it flip-strikes a low ball it's lined up on
+      aerialSkill: rand(0.5, 0.9), // chance it goes up for a high ball instead of waiting
+      flipFor: -1,                 // shot it last rolled a flip-strike decision for
+      act: null,                   // a move in progress: { kind, until, tx, tz, ... }
     };
   }
 
@@ -284,7 +290,18 @@
 
       // Same car as every Rocket Rumble mode; Deflect Duel only lets you
       // turn more while nearly stopped, so you can aim.
-      this.tuning = TP.modeTuning({ pivot: 0.8 });
+      // With the rocket moveset (double jump, dodge flips, air control,
+      // aerial boost) when the shared car has it.
+      this.rocket = !!(TP.ROCKET_MOVES && TP.Car.sphereContact);
+      this.tuning = this.rocket ? TP.modeTuning({ pivot: 0.8 }, { moveset: "rocket" }) : TP.modeTuning({ pivot: 0.8 });
+      // The box's limits, in the form the shared car reads: the ceiling,
+      // and the four walls as planes (normal pointing in; inside where
+      // nx*x + nz*z >= d).
+      this.ceilingHeight = C.arenaH;
+      this.wallPlanes = [
+        { nx: 1, nz: 0, d: -C.arenaW / 2 }, { nx: -1, nz: 0, d: -C.arenaW / 2 },
+        { nx: 0, nz: 1, d: -C.arenaD / 2 }, { nx: 0, nz: -1, d: -C.arenaD / 2 },
+      ];
 
       /* ---------- Hooks for Art and UI (and anyone else) ----------
          Each one is called at the moment named; by default they do nothing. */
@@ -363,6 +380,8 @@
           lastSteer: 0,          // steering this step (aim: bend)
           lastThrottle: 0,       // throttle this step (aim: up / down)
           buntReady: 0,          // match time from which this car can bunt again
+          flipLive: false,       // a dodge flip is under way that can still strike the ball
+          lastPitch: 0,          // pitch input this step (aim: up / down in the air)
           // Counted per-player events (for QC's fun checks).
           stats: { swings: 0, strikes: 0, strikesAir: 0, strikesUp: 0, strikesDown: 0, strikesFlip: 0, smashes: 0, clashes: 0, bunts: 0, bumps: 0 },
         });
@@ -518,6 +537,10 @@
         p.prevHit = !!ctrl.hit;
         p.lastSteer = ctrl.steer || 0;
         p.lastThrottle = ctrl.throttle || 0;
+        p.lastPitch = ctrl.pitch ?? p.lastThrottle;
+        // A dodge flip that starts can strike the ball once (flip strike).
+        if (car.flipStarted) p.flipLive = true;
+        if (!car.flipping) p.flipLive = false;
         if (pressed && p.swingT <= 0 && p.cooldown <= 0) {
           p.swingT = C.swingTime;
           p.swingHit = false;
@@ -648,6 +671,7 @@
         // A swipe that reaches the ball wins over the ball reaching you:
         // that's the whole game (strike it before it touches you).
         if (this._tryHits()) break;
+        if (this._tryFlipStrikes()) break;
         moveBall(b, sub, C, this.pillars, onBounce);
         if (this._checkKOs()) return;
         this._carContacts();
@@ -717,10 +741,13 @@
       return { owner: b.owner, mode: b.mode, tier: b.tier, ownT: b.ownT, coolT: b.coolT, coolLen: b.coolLen, coolK0: b.coolK0, hits: b.hits };
     }
 
-    _strike(i) {
+    // opts.flip: this is a flip strike (into the ball, along the flip).
+    _strike(i, opts = {}) {
       const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i];
       const before = this._ballBefore();
       const aerial = !car.onGround;
+      const flip = !!opts.flip;
+      if (flip) p.flipLive = false;
 
       p.swingHit = true;
       p.swingT = 0;
@@ -737,6 +764,7 @@
       /* ---------- Next speed tier, straight-line flight ---------- */
       const fromNeutral = b.mode === "neutral" || b.tier <= 0;
       let speed = fromNeutral ? C.baseSpeed : Math.min(C.maxSpeed, b.tier + C.speedStep);
+      if (flip) speed = Math.min(C.maxSpeed, speed + C.flipBonus);
       // Smash: striking while boosting, with enough boost to pay for it.
       // Not on the first touch of a neutral ball: off a serve it would
       // leave faster than a car can chase.
@@ -746,14 +774,27 @@
         car.boost -= C.smashBoostCost;
       }
 
-      // Aim: up / straight / down from the throttle axis, bent sideways
-      // by steering. Steering right (+1) lowers the heading (see car.js),
-      // so the bend is subtracted.
-      let angle = "straight", elev = 0;
-      if (p.lastThrottle > C.aimDeadzone) { angle = "up"; elev = C.angleUpDeg * DEG; }
-      else if (p.lastThrottle < -C.aimDeadzone) { angle = "down"; elev = -C.angleDownDeg * DEG; }
-      const bend = clamp(p.lastSteer, -1, 1) * C.aimBendDeg;
-      const h = car.heading - bend * DEG;
+      // Aim. A swipe goes the way the car's nose points (in the air that
+      // includes its pitch), angled up / down by the up-down input, and
+      // bent sideways by steering. Steering right (+1) lowers the heading
+      // (see car.js), so the bend is subtracted. A flip strike goes along
+      // the flip, flat.
+      let angle = "straight", elev = 0, bend = 0, h = car.heading;
+      if (flip) {
+        h = Math.atan2(car.flipDir.x, car.flipDir.z);
+      } else {
+        const aim = p.lastPitch;
+        if (aim > C.aimDeadzone) { angle = "up"; elev = C.angleUpDeg * DEG; }
+        else if (aim < -C.aimDeadzone) { angle = "down"; elev = -C.angleDownDeg * DEG; }
+        if (aerial && typeof car.nose === "function") {
+          const n = car.nose();
+          elev += Math.atan2(n.y, Math.hypot(n.x, n.z));
+          if (Math.hypot(n.x, n.z) > 0.2) h = Math.atan2(n.x, n.z);
+        }
+        elev = clamp(elev, -80 * DEG, 80 * DEG);
+        bend = clamp(p.lastSteer, -1, 1) * C.aimBendDeg;
+        h -= bend * DEG;
+      }
       const ch = Math.cos(elev);
       b.vel.set(Math.sin(h) * ch * speed, Math.sin(elev) * speed, Math.cos(h) * ch * speed);
       b.speed = speed;
@@ -768,13 +809,14 @@
       const frac = clamp((speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
       this.freezeLeft = lerp(C.freezeMin, C.freezeMax, frac);
 
-      const info = { kind: "strike", angle, bend: +bend.toFixed(1), aerial };
+      const info = { kind: flip ? "flip" : "strike", angle, bend: +bend.toFixed(1), aerial };
       p.stats.strikes++;
+      if (flip) { p.stats.strikesFlip++; this.stats.flipStrikes = (this.stats.flipStrikes || 0) + 1; }
       if (aerial) p.stats.strikesAir++;
       if (angle === "up") p.stats.strikesUp++;
       if (angle === "down") p.stats.strikesDown++;
       if (smash) p.stats.smashes++;
-      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip: false, smash });
+      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash });
       this.hooks.onHit(car, b, frac, smash, info);
       this.onEvent("hit", { player: p, speed, frac, smash, info });
     }
@@ -858,12 +900,50 @@
       return Math.abs(lx) <= C.carHalfW * C.buntWheelbase && Math.abs(lz) <= C.carHalfL * C.buntWheelbase;
     }
 
+    /* ---------- Does the ball touch car i? ----------
+       Returns null, or { nx, ny, nz (car → ball), px, py, pz (contact
+       point), depth, wheels (the touch is on the car's underside) }.
+       Uses the shared car's own body box and wheel test when it has them
+       (TP.Car.sphereContact), else this file's yaw-only stand-in. */
+    _touch(i) {
+      const C = this.cfg, b = this.ball, car = this.cars[i];
+      if (this.rocket) {
+        const hit = TP.Car.sphereContact(car, b.pos, C.ballR);
+        if (!hit) return null;
+        return { nx: hit.normal.x, ny: hit.normal.y, nz: hit.normal.z, px: hit.point.x, py: hit.point.y, pz: hit.point.z, depth: hit.depth, wheels: !!hit.wheels };
+      }
+      const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
+      if (box.d >= C.ballR) return null;
+      return { nx: box.nx, ny: box.ny, nz: box.nz, px: box.cx, py: box.cy, pz: box.cz, depth: C.ballR - box.d, wheels: this._wheelsTouch(car) };
+    }
+
+    // Flip strikes: a car mid-flip that touches the ball (or comes within
+    // a little of it) strikes it along the flip, once per flip. Two of
+    // these, or a flip and a swipe, inside clashWindow are a clash.
+    _tryFlipStrikes() {
+      const C = this.cfg, b = this.ball;
+      if (!this.rocket || this.time < b.lockUntil) return false;
+      for (let i = 0; i < this.players.length; i++) {
+        const p = this.players[i], car = this.cars[i];
+        if (p.out || p.dead > 0 || !p.flipLive || !car.flipping) continue;
+        // A flip that's still within reach of an enemy ball would rather
+        // strike it than be KO'd by it: contact plus a small margin.
+        if (!TP.Car.sphereContact(car, b.pos, C.ballR + C.flipReach)) continue;
+        const ls = this.lastStrike;
+        if (ls && ls.i !== i && this.time - ls.t <= C.clashWindow) this._clash(ls, i);
+        else this._strike(i, { flip: true });
+        return true;
+      }
+      return false;
+    }
+
     _tryBunt() {
       const now = this.time;
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         if (p.out || p.dead > 0 || now < p.buntReady) continue;
-        if (this._wheelsTouch(this.cars[i])) { this._bunt(i); return true; }
+        const hit = this._touch(i);
+        if (hit && hit.wheels) { this._bunt(i); return true; }
       }
       return false;
     }
@@ -911,8 +991,7 @@
         if (p.out || p.dead > 0 || i === b.owner || p.invuln > 0) return;
         // True 3D: the ball sphere against the car's body box. Jumping
         // over the ball works only if you really are above it.
-        const box = this._carBox(this.cars[i], b.pos.x, b.pos.y, b.pos.z);
-        if (box.d < C.ballR) victims.push(i);
+        if (this._touch(i)) victims.push(i);
       });
       if (!victims.length) return false;
 
@@ -941,11 +1020,11 @@
       this.players.forEach((p, i) => {
         if (p.out || p.dead > 0 || b.mode !== "neutral") return;
         const car = this.cars[i];
-        const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
-        if (box.d >= C.ballR) return;
-        const { nx, ny, nz } = box;
+        const hit = this._touch(i);
+        if (!hit) return;
+        const { nx, ny, nz } = hit;
         // Push the ball out of the car.
-        b.pos.set(box.cx + nx * C.ballR, Math.max(C.ballR, box.cy + ny * C.ballR), box.cz + nz * C.ballR);
+        b.pos.set(hit.px + nx * C.ballR, Math.max(C.ballR, hit.py + ny * C.ballR), hit.pz + nz * C.ballR);
         // Bounce off the car, moving with it.
         const rel = (b.vel.x - car.vel.x) * nx + (b.vel.y - car.vel.y) * ny + (b.vel.z - car.vel.z) * nz;
         if (rel >= 0) return; // already separating
@@ -1087,6 +1166,12 @@
        ===================================================================== */
     _botControls(i) {
       const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i], S = this.bots[i];
+      // A move in progress (flip strike, dodge flip, double jump) runs to
+      // the end before anything else is decided.
+      if (S.act) {
+        const c = this._botAct(i);
+        if (c) return c;
+      }
       const canSwing = p.swingT <= 0 && p.cooldown <= 0 && this.state === "play";
       const reach = this._reach(car);
       const mine = b.owner === i;
@@ -1105,12 +1190,25 @@
       //    timing can be off. If another car is nearer the ball, usually
       //    let it have it (sometimes go for it anyway: a clash).
       const contested = this.players.some((q, j) => j !== i && !q.out && q.dead <= 0 && this._reach(this.cars[j]) < reach);
+      // Flip strike: lined up on a low ball a few units ahead, sometimes
+      // dodge-flip into it instead of swiping (more power).
+      if (this.rocket && this.state === "play" && !dangerous && car.onGround && !contested && b.pos.y < 2.6 && S.flipFor !== b.hitId) {
+        const ahead = dist2D(car.pos.x, car.pos.z, b.pos.x, b.pos.z);
+        if (ahead < 6 && ahead > 2.5 && Math.abs(TP.ai.angleTo(car, b.pos.x, b.pos.z)) < 0.35) {
+          S.flipFor = b.hitId;
+          if (Math.random() < S.flipChance) {
+            S.act = { kind: "flip", until: this.time + 1.1 };
+            return this._botAct(i);
+          }
+        }
+      }
       if (canSwing && !dangerous && reach < C.hitRange * 0.85 && this.time >= b.lockUntil && (!contested || Math.random() < 0.06)) {
         const ctrl = TP.ai.driveTo(car, b.pos.x, b.pos.z, { boostDist: 99 });
         const aim = this._botAim(i);
         ctrl.hit = true;
         ctrl.steer = aim.steer;
         ctrl.throttle = aim.throttle;
+        ctrl.pitch = aim.throttle;
         ctrl.jump = false;
         ctrl.boost = car.boost > C.smashBoostCost + 10 && Math.random() < 0.3; // sometimes smash
         return ctrl;
@@ -1183,6 +1281,7 @@
           ctrl.hit = true;
           ctrl.steer = aim.steer;
           ctrl.throttle = aim.throttle;
+          ctrl.pitch = aim.throttle;
         }
         return ctrl;
       }
@@ -1194,6 +1293,22 @@
         if (yAt < C.ballR + 0.6) {
           ctrl.jump = car.onGround && tImpact <= S.jumpLead;
           return ctrl;
+        }
+        if (this.rocket && car.onGround) {
+          // Rocket moves: double-jump over a ball that's only a bit
+          // higher, or side-flip out of the line of anything else.
+          const need = yAt + C.ballR + 0.15; // wheels must clear the ball's top
+          const plan = TP.ai.planJump(need, this.tuning);
+          if (plan.kind === "double" && tImpact <= plan.t + 0.05) {
+            S.act = { kind: "hop", until: this.time + 1.2, secondAt: plan.secondAt };
+            return this._botAct(i);
+          }
+          if (tImpact <= 0.45) {
+            const len = Math.hypot(b.vel.x, b.vel.z) || 1;
+            const side = mx * b.vel.z - mz * b.vel.x >= 0 ? 1 : -1;
+            S.act = { kind: "side", until: this.time + 1.0, tx: car.pos.x + (-b.vel.z / len) * side * 10, tz: car.pos.z + (b.vel.x / len) * side * 10 };
+            return this._botAct(i);
+          }
         }
         const len = Math.hypot(b.vel.x, b.vel.z) || 1;
         const side = mx * b.vel.z - mz * b.vel.x >= 0 ? 1 : -1;
@@ -1208,12 +1323,41 @@
       return ctrl;
     }
 
+    /* ---------- Multi-step bot moves (rocket moveset) ----------
+       Each runs for a few steps and returns controls, or null when it's
+       finished (then the normal plan takes over again).
+         flip  jump, then dodge-flip into the ball (a flip strike)
+         side  jump, then side-flip toward (tx, tz) to dodge
+         hop   double jump straight up to clear a ball */
+    _botAct(i) {
+      const S = this.bots[i], car = this.cars[i], b = this.ball;
+      const a = S.act;
+      if (car.flipping) a.started = true;
+      const done = this.time > a.until || car.tumbling ||
+        (a.started && !car.flipping) || (a.kind === "hop" && a.jumped2 && car.onGround);
+      if (done) { S.act = null; return null; }
+      let c;
+      if (a.kind === "flip") c = TP.ai.flipAt(car, b.pos.x, b.pos.z);
+      else if (a.kind === "side") c = TP.ai.flipAt(car, a.tx, a.tz);
+      else {
+        // hop: jump, release, then a second jump with no direction held.
+        c = { throttle: 0, steer: 0, pitch: 0, boost: false, jump: false };
+        if (car.onGround && !a.jumped1) { c.jump = true; a.jumped1 = true; }
+        else if (!car.onGround && !a.jumped2 && car.airTime >= a.secondAt && car.canAirJump) {
+          c.jump = !car._jumpHeld;
+          if (c.jump) a.jumped2 = true;
+        }
+      }
+      c.hit = false;
+      return c;
+    }
+
     /* ---------- Meeting a gravity ball ----------
        Run the ball's flight forward (the same physics the real ball uses),
        find the first moment it's low enough to strike and I can get
        there in time, and drive to that spot. Jump if it'll be high. */
     _botMeet(i) {
-      const C = this.cfg, car = this.cars[i], b = this.ball;
+      const C = this.cfg, car = this.cars[i], b = this.ball, S = this.bots[i];
       const path = this._predictBall();
       const reachTop = C.strikeY + C.hitRange * 0.8;   // highest strike from the ground
       let target = path[path.length - 1];
@@ -1232,6 +1376,12 @@
         const bx = target.x - (tx / tl) * 3, bz = target.z - (tz / tl) * 3;
         // Far from the line-up spot: go there first. Close: drive through the ball.
         if (dist2D(car.pos.x, car.pos.z, bx, bz) > 2.5 && dist2D(car.pos.x, car.pos.z, target.x, target.z) > 2.5) { gx = bx; gz = bz; }
+      }
+      // High ball and the moveset: sometimes fly up to meet it (an aerial).
+      if (this.rocket && target.y > reachTop + 1.2 && target.y < C.arenaH - 2 && car.boost > 30 && (S.aerialFor === b.hitId ? S.aerialGo : (S.aerialFor = b.hitId, S.aerialGo = Math.random() < S.aerialSkill))) {
+        const c = TP.ai.aerialTo(car, target.x, target.y, target.z, { takeoffDist: 9 });
+        c.hit = false;
+        return c;
       }
       const ctrl = TP.ai.driveTo(car, ...this._inside(gx, gz), { boostDist: 9 });
       ctrl.hit = false;
