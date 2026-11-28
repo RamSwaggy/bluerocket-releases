@@ -191,6 +191,7 @@
         <p class="error" id="menu-error"></p>
         <div class="btn-row sticky">
           <button class="btn" id="start" data-nav-primary>Start duel</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
           <a class="btn hub" href="${TP.Rumble.HUB_URL}">← All modes</a>
         </div>`);
 

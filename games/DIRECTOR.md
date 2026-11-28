@@ -16,7 +16,7 @@ Director merges them after verifying.
 
 | Mode | Hub | Team state | Next when resumed |
 |---|---|---|---|
-| Turbo Party | ✅ Play | **Paused** | Trophy reachability. Bots never bought Trophy Warp; job 10 (bot item strategy + Goal Frenzy tie-break) was in progress. If that's not enough, decide a rule change (cheaper Warp or a 2nd trophy). |
+| Turbo Party | ✅ Play | **Active: one builder** (`session_01GHNBrrU9qwu2HbnfzzVvxe`) | Round 2 roadmap in its PROJECT.md: bugs, juice, board life, 14+ minigames, interaction, modes. Merge each phase when it reports. |
 | Car Fighter | ✅ Play (M1, 1 car) | **Paused** | M2: two more cars (Haulback, Skitter), signatures, Easy/Hard bots, sfx/music, damage looks, character select. |
 | Deflect Duel | ✅ Play (v2) | **Active: boss only** | v2 merged on the hub (7c5ded7). Next: Reece's feel check, then Easy/Hard bots. |
 | Boost Runner | Coming soon | **Paused** | Logic done (bot rounds, fair seats). Job 3 (bot difficulty spread, softer squeeze) was in progress. Art/menus not merged yet. Put it on the hub when it's playable and verified. |
@@ -48,3 +48,13 @@ The full roster is in `TEAMS.md`. Active ones:
 - Deflect Duel boss: `session_01GHNBrrDAhFP7gZXs4Ap9TK`
 - Surprise boss: `session_01GHNBrqtCApg5LvFLes2fbo`
 - Core: `session_01GHNBrspisUmr33CiDjJ1pk`
+
+## Controls (rebinding), added 2026-11-28
+
+`shared/js/input.js` now reads rebindable bindings (Keyboard 1, Keyboard 2, one shared pad
+layout; saved in localStorage `rumble.controls.v1`). The screen is `shared/js/controls-menu.js`,
+lazy-loaded by input.js. Any `[data-open-controls]` button opens it, and so does pad View on any
+MenuNav menu. Modeled on RocketBonk's controls menu. Tests: `tools/controls-test.js`,
+`tools/menunav-qc.js`. Modes not on this branch yet (Boost Runner, mode 5) get the bindings
+automatically. They only need a `data-open-controls` button in their menu. Mode key tables in
+the Turbo Party, Deflect Duel and Car Fighter menus are still static text (TODO for those teams).

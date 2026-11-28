@@ -13,7 +13,7 @@
    Optional launch flag (handy for testing):
      --start=turbo-party/index.html?demo    open a page other than the hub
    ===================================================================== */
-const { app, BrowserWindow, protocol, net, shell } = require("electron");
+const { app, BrowserWindow, protocol, net, shell, dialog } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -72,6 +72,8 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: "Rocket Rumble",
+    // The Rocket Rumble logo, shown in the window corner and on the taskbar.
+    icon: path.join(__dirname, "build", "icon.png"),
     backgroundColor: "#070b1a", // matches the hub, so there's no white flash
     autoHideMenuBar: true,
     show: false,
@@ -85,8 +87,19 @@ function createWindow() {
     },
   });
 
-  // Show the window only once the first frame is ready (no flicker).
+  // Show the window once the first frame is ready (no flicker). As a safety
+  // net, show it anyway after 2 seconds: if the first frame never arrives,
+  // a hidden window would make the game look like it "did nothing" on
+  // double-click (and the one-copy-at-a-time lock would then swallow every
+  // later click too).
   win.once("ready-to-show", () => win.show());
+  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 2000);
+
+  // If the game page can't load, say so on screen instead of a blank window.
+  win.webContents.on("did-fail-load", (e, code, desc, url) => {
+    if (!win.isVisible()) win.show();
+    dialog.showErrorBox("Rocket Rumble couldn't load", `${desc} (${code})\n${url}\n\nGame files folder:\n${GAMES_DIR}`);
+  });
 
   // Stay inside the game: links to other websites open in the normal browser.
   win.webContents.setWindowOpenHandler(({ url }) => {

@@ -95,7 +95,7 @@
     };
 
     const card = UI.card(`
-      <a class="back" href="${TP.Rumble.HUB_URL}">← All modes</a>
+      <a class="back" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
       <h1><span class="a">CAR</span> <span class="b">FIGHTER</span></h1>
       <p class="tagline">Scrapyard Floodlight League. One on one on the turntable: rams, swipes,
         flips and boost dashes. Best of 3 rounds, 60 seconds each.</p>
@@ -109,7 +109,8 @@
       <div class="actions">
         <span class="muted" id="padinfo"></span>
         <span class="muted">Press <kbd>M</kbd> to mute</span>
-        <button class="btn" id="start">Fight!</button>
+        <button class="btn" id="start" data-nav-primary>Fight!</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
       </div>`);
 
     // Show/hide the difficulty picker as the controller changes.
@@ -184,9 +185,9 @@
           </div>`).join("")}
       </div>
       <div class="actions">
-        <a class="back" href="${TP.Rumble.HUB_URL}">← All modes</a>
+        <a class="back" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
         <button class="btn ghost" id="menu">Menu</button>
-        <button class="btn" id="rematch">${demo ? "Watch again" : "Rematch"}</button>
+        <button class="btn" id="rematch" data-nav-primary>${demo ? "Watch again" : "Rematch"}</button>
       </div>`);
     const rematch = card.querySelector("#rematch");
     rematch.focus({ preventScroll: true });

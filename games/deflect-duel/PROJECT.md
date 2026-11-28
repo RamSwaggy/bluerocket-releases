@@ -109,6 +109,58 @@ on the base branch until the Director verifies v2 and swaps it in.
 - Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
 - The tunables in `TP.DUEL_CFG`.
 
+## Round 3 roadmap: genre gap check (Reece, 2026-11-28)
+
+Reece asked for the same gap check that Turbo Party got. References are the ball-deflection
+and arena-fighter genres (Lethal League-style duelling, platform fighters, car-ball games).
+**Use genre conventions only. Never copy any game's names, characters, stages, moves, art or
+music.** v2's core (speed escalation, aimed and flip strikes, bunts, flying bots) is solid. The
+gaps are mostly content, depth and presentation.
+
+### Gaps compared with the genre
+
+| Area | Deflect Duel now | Genre standard | Gap |
+|---|---|---|---|
+| Arenas | 1 box with pillars | 4–8 stages, each with its own shape, hazards and look | **Big** |
+| Character variety | Every car is identical | Several characters with different stats, hit angles and a unique special | **Big** |
+| Meter and specials | None | A meter built by hits and bunts, spent on a special shot or a defensive burst | **Big** (depth) |
+| Modes | Free-for-all lives (3 or 5) | Teams (2 vs 2), a time or points mode, one-life sudden death, handicaps, a short tournament | Big |
+| Bots | One level | Easy, Normal and Hard (and Expert) | Medium |
+| Onboarding | Controls table only | A practice room (ball launcher, speed dial) and a short interactive tutorial for strikes, flips and bunts | **Big**: the moveset is deep and nothing teaches it |
+| Presentation | Hit-freeze, broadcast camera, speed readout | KO slow-motion and replay, announcer callouts ("200!", "PERFECT"), crowd that reacts, music per stage that swells with ball speed, victory poses | Big |
+| End of match | Results card | Podium with victory poses, match stats (top speed, best rally, flips, bunts), MVP tags | Medium |
+| Feel | No human playtest yet; keyboard W both drives and aims | Separate aim input or a hold-to-aim option; tunables checked by hand | Medium: **do this first** |
+| Cosmetics | Player colours | Paints, ball skins, trails, KO effects, unlocked by play | Later |
+
+### Plan (one builder, in this order; each phase ends merged and verified)
+
+- **Phase 0: feel.** Add an optional keyboard aim (a separate aim-up and aim-down pair, or
+  hold-Hit-to-aim) so W can just drive. The bindings live in shared `input.js`, so request any
+  change from the Director: an optional "aim" action that falls back to up/down when it's
+  unbound. Sanity-check `TP.DUEL_CFG` with scripted human input.
+- **Phase 1: learn and choose.** A practice room (ball launcher, speed dial, infinite lives),
+  a 60–90 s tutorial (strike, aim, flip strike, bunt, clash), Easy/Normal/Hard bots, and modes:
+  Teams 2 vs 2, Time (most KOs), and Sudden Death.
+- **Phase 2: presentation.** KO slow-motion and an instant replay of the last 2 s, announcer
+  callouts as text plus sfx, a crowd that reacts to speed tiers, music that builds with ball
+  speed, a victory podium and match stats with MVP tags.
+- **Phase 3: arenas 1 → 4.** Each arena has a shape twist and one hazard, for example:
+  - moving pillars;
+  - a split-level floor;
+  - a low ceiling with bounce pads;
+  - a rotating centre wall.
+
+  Every arena needs bot support and gets tunnelling tests.
+- **Phase 4: car styles and the meter.** 3–4 car archetypes (for example heavy: a slower
+  swing that adds more speed; light: a quick flip and a wide bunt; trickster: curve shots),
+  each with one special paid for with a meter built by strikes and bunts. Bots use them, and
+  balance is checked with the fun table and seat or style win rates.
+- **Phase 5: cosmetics.** Paints, ball skins, trails and KO effects unlocked by play, saved
+  locally.
+
+Each phase: smoke, rules and fun table pass, `credits-check` passes, screenshots, then message
+the Director "Deflect Duel phase N: ready to merge". Shared changes still go through the Director.
+
 ## Decisions (from Reece)
 
 - 2026-11-27: Deflect Duel was started, then parked as work in progress so Turbo Party could
