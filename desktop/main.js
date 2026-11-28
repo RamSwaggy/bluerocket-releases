@@ -80,6 +80,8 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
+      // It's a game: let title music start without waiting for a click.
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
 

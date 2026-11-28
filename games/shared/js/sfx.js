@@ -213,6 +213,15 @@
       return { stop() { try { src.stop(); } catch (e) { /* already stopped */ } } };
     },
 
+    /* The shared audio context and master volume, for modes that build
+       their own synthesized sounds: connect them to `master` so the
+       shared mute (M) and volume apply. Creates the context if needed;
+       returns { ctx: null, master: null } if audio isn't available. */
+    context() {
+      TP.sfx.unlock();
+      return { ctx, master };
+    },
+
     // Register a music track (see the "Music tracks" note above).
     defineTrack(name, def) { TRACKS[name] = def; },
 
