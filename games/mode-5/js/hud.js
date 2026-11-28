@@ -60,6 +60,8 @@
   .m5-seg::after { content: ""; position: absolute; inset: 0 0 50% 0; background: rgba(255,255,255,.22); }
   .m5-seg.lead { animation: m5-shine 1.6s linear infinite; }
   @keyframes m5-shine { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+  .m5-row.team { grid-template-columns: minmax(96px, 8.5em) 1fr 3.4em; }
+  .m5-tdiv { flex: 0 0 4px; height: 100%; background: #04050d; }
   .m5-half { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: rgba(255,255,255,.4); }
 
   .m5-chips { display: flex; gap: clamp(4px, 1vw, 10px); flex-wrap: wrap; justify-content: center; max-width: 96vw; }
@@ -127,6 +129,8 @@
     opacity: 0; transition: opacity .3s, transform .3s; }
   .m5-hint.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
   .m5-hint b { color: var(--m5-gold); }
+  .m5-hint { border-width: 2px; }
+  .m5-hint .who { font-weight: 900; margin-right: 4px; }
 
   /* ----- Round / match cards ----- */
   /* The results card never covers the floor's middle: on wide screens it's
@@ -140,7 +144,7 @@
   .m5-card-wrap.side { justify-content: flex-end; align-items: center; padding: 16px max(16px, env(safe-area-inset-right)) 16px 16px; }
   .m5-card-wrap.side .m5-card { width: min(380px, 38vw); max-height: calc(100vh - 32px); border-radius: 22px; transform: translateX(110%); }
   .m5-card-wrap.sheet { justify-content: center; align-items: flex-end; }
-  .m5-card-wrap.sheet .m5-card { width: 100%; max-width: 640px; max-height: 54vh; border-radius: 22px 22px 0 0;
+  .m5-card-wrap.sheet .m5-card { width: 100%; max-width: 640px; max-height: 54vh; border-radius: 22px 22px 0 0; background: rgba(12, 15, 36, .98);
     padding-bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(110%); }
   .m5-card-wrap.show .m5-card { transform: none; }
   /* Big screens: scale the whole side panel up so it reads from the couch. */
@@ -192,6 +196,9 @@
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
 
+  // Colour words for team names ("Team Blue–Green"), by player index.
+  const COLOR_WORDS = ["Blue", "Orange", "Green", "Pink"];
+
   class Hud {
     constructor(opts = {}) {
       this.camera = opts.camera || null;
@@ -228,6 +235,25 @@
 
     setCamera(camera) { this.camera = camera; }
 
+    // Players (indices) in team t, and that team's name from its colours.
+    teamMembers(t) { return (this.players || []).filter((p) => (p.team ?? 0) === t).map((p) => p.index).sort(); }
+    // "Team Blue–Green" (or "Blue–Green" when short, for tight spots).
+    teamName(t, short) { return (short ? "" : "Team ") + this.teamMembers(t).map((i) => COLOR_WORDS[i % 4]).join("–"); }
+    teamGradient(t) {
+      const c = this.teamMembers(t).map((i) => CSS()[i % 4]);
+      return `linear-gradient(90deg, ${c[0]}, ${c[c.length - 1]})`;
+    }
+
+    // Two rows (one per team) with a bar; `vals[t]` shown, `w(t)` = bar width %.
+    teamRows(vals, w, fmt, winner) {
+      return [0, 1].sort((a, b) => (vals[b] || 0) - (vals[a] || 0)).map((t) => `
+        <div class="m5-row team ${t === winner ? "win" : ""}">
+          <span class="nm" style="background:${this.teamGradient(t)};-webkit-background-clip:text;background-clip:text;color:transparent">${esc(this.teamName(t, true))}</span>
+          <span class="track"><span class="fill" data-w="${w(t).toFixed(1)}" style="background:${this.teamGradient(t)};color:${CSS()[this.teamMembers(t)[0] % 4]}"></span></span>
+          <span class="val">${fmt(vals[t] || 0)}</span>
+        </div>`).join("");
+    }
+
     // New match: clear anything left over from the last one.
     reset() {
       this.hideCard();
@@ -253,12 +279,16 @@
       const ps = this.players || [];
       this.barEl.innerHTML = "";
       this.chipsEl.innerHTML = "";
-      let lastTeam = null;
+      let lastTeam = null, lastTeamSegs = false;
+      this.segs = [];
       this.segs = ps.map((p) => {
         const i = p.index ?? 0;
         if (this.teams && p.team !== lastTeam) {
           lastTeam = p.team;
-          el("span", "m5-team", this.chipsEl).textContent = `TEAM ${(p.team ?? 0) + 1}`;
+          el("span", "m5-team", this.chipsEl).textContent = this.teamName(p.team ?? 0).toUpperCase();
+          // A dark divider in the bar between the two teams' segments.
+          if (this.segs && lastTeamSegs) el("div", "m5-tdiv", this.barEl);
+          lastTeamSegs = true;
         }
         const seg = el("div", "m5-seg", this.barEl);
         seg.style.background = CSS()[i % 4];
@@ -349,8 +379,20 @@
       }
       if (this.hintTimer > 0) {
         this.hintTimer -= dt;
-        if (this.hintTimer <= 0) this.hintEl.classList.remove("show");
+        if (this.hintTimer <= 0) { this.hintEl.classList.remove("show"); this.hintGap = 0.35; }
+      } else if (this.hintQueue && this.hintQueue.length) {
+        // Small gap between hints so each one reads as new.
+        this.hintGap = (this.hintGap || 0) - dt;
+        if (this.hintGap <= 0) { const h = this.hintQueue.shift(); this.hint(h.text, h.seconds, h.player); }
       }
+    }
+
+    // Queue a hint (Gameplay's tutorial hints arrive in bursts).
+    queueHint(text, seconds = 3.5, player = null) {
+      this.hintQueue = this.hintQueue || [];
+      if (this.hintQueue.some((h) => h.text === text) || this.hintEl.dataset.text === text && this.hintTimer > 0) return;
+      this.hintQueue.push({ text, seconds, player });
+      if (this.hintQueue.length > 4) this.hintQueue.shift();   // never fall far behind
     }
 
     measureSafeArea() {
@@ -427,9 +469,22 @@
     }
 
     /* ---------- Hint pill ---------- */
-    hint(text, seconds = 3.5) {
+    // player (optional): the hint is for that player, shown with their colour and name.
+    hint(text, seconds = 3.5, player = null) {
       // Allow **bold** in hint text for key words.
-      this.hintEl.innerHTML = esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+      let html = esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+      const p = player != null && (this.players || []).find((q) => q.index === TP.M5.pi(player));
+      if (p) {
+        const c = CSS()[p.index % 4];
+        html = `<span class="who" style="color:${c}">${esc(p.name)}</span> ${html}`;
+        this.hintEl.style.borderColor = c;
+        this.hintEl.style.boxShadow = `0 0 18px ${c}55`;
+      } else {
+        this.hintEl.style.borderColor = "";
+        this.hintEl.style.boxShadow = "";
+      }
+      this.hintEl.innerHTML = html;
+      this.hintEl.dataset.text = text;
       this.hintEl.classList.add("show");
       this.hintTimer = seconds;
     }
@@ -437,6 +492,16 @@
     /* ---------- Round end card ---------- */
     roundCard(e = {}, state = TP.M5.match || {}) {
       this.layoutCard();
+      if (e.teams && e.teamScores) {
+        const w = e.winner, round = e.round || state.round;
+        const glow = w >= 0 ? CSS()[this.teamMembers(w)[0] % 4] : "#fff";
+        this.openCard(`
+          <div class="kicker">${round ? `Round ${round}` : "Round over"} · Teams</div>
+          <h2 style="--glow:${glow};${w >= 0 ? `background:${this.teamGradient(w)};-webkit-background-clip:text;background-clip:text;color:transparent` : "color:#fff"}">${w >= 0 ? esc(this.teamName(w, true)) + " take it!" : "Dead heat!"}</h2>
+          ${this.teamRows(e.teamScores, (t) => Math.min(100, e.teamScores[t] || 0), (v) => Math.round(v) + "%", w)}
+          ${e.teamWins ? `<div class="foot">Rounds won: ${[0, 1].map((t) => `<b>${esc(this.teamName(t, true))} ${e.teamWins[t] || 0}</b>`).join(" · ")}</div>` : ""}`);
+        return;
+      }
       const ps = this.players || [];
       const pcts = toPercents(e.scores || state.scores) || ps.map(() => 0);
       const winner = e.winner;
@@ -465,6 +530,7 @@
       const ps = this.players || [];
       const st = TP.M5.match || {};
       const oneRound = (st.rounds || 0) <= 1 || !e.roundWins;
+      if (e.teams) return this.teamMatchCard(e, oneRound);
       const nameOf = (i) => { const p = ps.find((q, k) => (q.index ?? k) === i); return p ? p.name : `P${i + 1}`; };
       const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.player ?? s.index));
       const champ = order[0];
@@ -498,6 +564,28 @@
         ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
           ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
             ${keys.map((k) => `<td>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
+    }
+
+    // Match card for 2v2: team rows (rounds won, or final floor for one round)
+    // and the per-player stats table.
+    teamMatchCard(e, oneRound) {
+      const w = e.winner;
+      const st = TP.M5.match || {};
+      const tot = [0, 1].map((t) => (e.standings || []).filter((x) => x.team === t).reduce((a, x) => a + (x.totalPct || 0), 0));
+      const vals = oneRound ? tot : (e.teamWins || [0, 0]);
+      const most = Math.max(1, ...vals);
+      const glow = w >= 0 ? CSS()[this.teamMembers(w)[0] % 4] : "#fff";
+      const stats = e.stats || [];
+      const ps = this.players || [];
+      this.openCard(`
+        <div class="kicker">Match over · Teams</div>
+        <h2 style="--glow:${glow};${w >= 0 ? `background:${this.teamGradient(w)};-webkit-background-clip:text;background-clip:text;color:transparent` : "color:#fff"}">${w >= 0 ? esc(this.teamName(w, true)) + " win!" : "It's a draw!"}</h2>
+        <div class="m5-row head"><span>Team</span><span>${oneRound ? "Final floor" : "Rounds won"}</span><span style="text-align:right">${oneRound ? "%" : "Wins"}</span></div>
+        ${this.teamRows(vals, (t) => (oneRound ? Math.min(100, vals[t]) : (vals[t] / most) * 100), (v) => (oneRound ? Math.round(v) + "%" : v), w)}
+        ${stats.length ? `<table class="m5-stats"><tr><th>Player</th><th>Best fill</th><th>Fills</th><th>Pops</th></tr>
+          ${ps.map((p) => `<tr><td style="color:${CSS()[p.index % 4]};font-weight:800">${esc(p.name)}</td>
+            <td>${stats[p.index] ? Math.round(stats[p.index].bestFill * 10) / 10 + "%" : "–"}</td>
+            <td>${stats[p.index] ? stats[p.index].fills : "–"}</td><td>${stats[p.index] ? stats[p.index].pops : "–"}</td></tr>`).join("")}</table>` : ""}`);
     }
 
     // Side panel on wide screens, bottom sheet on tall ones.
@@ -579,7 +667,7 @@
       on("suddenDeath", () => {
         this.banner("SUDDEN DEATH", { sub: "Tie-break round · most floor wins", color: "#ff3d6e", glow: "#ff3d6e", hold: 2.4 });
       });
-      on("hint", (e) => this.hint(e.text || "", e.seconds || 3.5));
+      on("hint", (e) => this.queueHint(e.text || "", e.seconds || 3.5, e.player ?? null));
       /* Round over: a quick "TIME!", then ~2 s of the clean final floor
          (overhead camera) while the score bar counts up from zero and the
          winner's chip lights up, THEN the card slides in from the side.
@@ -590,7 +678,10 @@
         this.timerEl.classList.remove("warn", "od");
         this.banner("TIME!", { color: "#ffffff", glow: "#7dd3fc", hold: 0.8 });
         this.countUp = { t: 0, dur: 1.6, final: toPercents(e.scores) || [] };
-        this.segs.forEach((s) => s.chip.classList.toggle("win", (s.chip.dataset.i | 0) === e.winner));
+        this.segs.forEach((s) => {
+          const i = s.chip.dataset.i | 0;
+          s.chip.classList.toggle("win", e.teams ? e.teams[i] === e.winner : i === e.winner);
+        });
         const st = TP.M5.match || {};
         const wins = e.roundWins || st.roundWins || [];
         const need = Math.floor((st.rounds || 1) / 2) + 1;

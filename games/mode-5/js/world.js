@@ -57,6 +57,18 @@
     flashTime: 0.35,        // seconds a freshly revealed cell flashes white-hot
   };
 
+  /* Each arena has its own mood so the rotation feels fresh: sky/fog
+     colour, light-wall and edge accents, floor tint, grout and apron grid. */
+  const MOODS = {
+    plaza: { sky: 0x04050d, wall: 0x7dd3fc, line: 0xc9f1ff, edge: 0x9be7ff, hemi: 0x8fa8ff, floor: 0x0b0e1c,
+             grout: [0.05, 0.07, 0.12], grid: "rgba(90,120,255,0.18)" },
+    split: { sky: 0x0a0414, wall: 0xc084fc, line: 0xf0d4ff, edge: 0xe879f9, hemi: 0xc8a0ff, floor: 0x120b20,
+             grout: [0.10, 0.05, 0.13], grid: "rgba(200,90,255,0.18)" },
+    rings: { sky: 0x020b0d, wall: 0x5eead4, line: 0xccfff5, edge: 0x67e8f9, hemi: 0x8ffff0, floor: 0x071417,
+             grout: [0.04, 0.10, 0.10], grid: "rgba(60,220,200,0.16)" },
+  };
+  TP.M5.MOODS = MOODS;
+
   // Brighter, more saturated "neon" versions of the four shared player colours.
   // (Index = player index.) Kept close to TP.PLAYER_COLORS so players recognise them.
   const NEON = [0x3d8bff, 0xff7a1f, 0x2ee86a, 0xff4fb0];
@@ -103,20 +115,24 @@
       this.arena = arena;
       this.grid = grid;
       this.size = arena.size || 96;
+      this.mood = MOODS[arena.id] || MOODS.plaza;
+      this.circle = arena.shape === "circle";
+      this.radius = arena.radius || this.size / 2;
       this.n = grid.N || grid.n || 72;
       this.cell = this.size / this.n;    // world units per cell
       this.time = 0;
       this.group = new THREE.Group();    // everything we add lives here (easy dispose)
       scene.add(this.group);
 
-      scene.background = new THREE.Color(LOOK.sky);
+      scene.background = new THREE.Color(this.mood.sky);
       // Low fog: the far edge of the arena and the city fade into the night.
-      scene.fog = new THREE.Fog(LOOK.sky, this.size * 0.9, this.size * 2.6);
+      scene.fog = new THREE.Fog(this.mood.sky, this.size * 0.9, this.size * 2.6);
 
       this.buildLights();
       this.buildFloor();
       this.buildWalls();
       this.buildObstacles();
+      this.buildDecks();
       this.buildRamps();
       this.buildPads();
       this.buildSurroundings();
@@ -142,7 +158,7 @@
        --------------------------------------------------------------- */
     buildLights() {
       const S = this.size;
-      this.group.add(new THREE.HemisphereLight(0x8fa8ff, 0x0a0a18, 0.55));
+      this.group.add(new THREE.HemisphereLight(this.mood.hemi, 0x0a0a18, 0.55));
 
       const key = new THREE.DirectionalLight(0xdfe8ff, 1.15);
       key.position.set(S * 0.25, S * 0.9, S * 0.45);
@@ -169,7 +185,9 @@
           blending: THREE.AdditiveBlending, depthWrite: false,
         }));
         pool.rotation.x = -Math.PI / 2;
-        pool.position.set(cx * S * 0.5, 0.03, cz * S * 0.5);
+        // Round arenas: pull the pools in so they stay on the floor.
+        const k = this.circle ? this.radius * 0.6 : S * 0.5;
+        pool.position.set(cx * k, 0.03, cz * k);
         this.group.add(pool);
         this.rims.push(pool);
       });
@@ -206,10 +224,13 @@
         uTime: { value: 0 },
         uGridN: { value: n },
         uGlow: { value: LOOK.glow },
+        uSize: { value: this.size },
+        uRadius: { value: this.circle ? this.radius : 0 },   // 0 = square arena
+        uGrout: { value: new THREE.Vector3(...this.mood.grout) },
       };
       this.floorUniforms = uniforms;
 
-      const mat = new THREE.MeshStandardMaterial({ color: LOOK.floor, roughness: 0.3, metalness: 0.35 });
+      const mat = new THREE.MeshStandardMaterial({ color: this.mood.floor, roughness: 0.3, metalness: 0.35 });
       mat.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, uniforms);
         // Pass the plane's UV through to the fragment shader ourselves (the
@@ -221,19 +242,24 @@
           .replace("#include <common>", `#include <common>
             varying vec2 vPaintUv;
             uniform sampler2D paintMap;
-            uniform float uTime, uGridN, uGlow;
+            uniform float uTime, uGridN, uGlow, uSize, uRadius;
+            uniform vec3 uGrout;
             vec4 m5Paint; float m5Painted; float m5Wet; float m5Tile; float m5Edge;`)
           // 1) Base colour: tint the floor with the paint, draw faint grout lines on bare floor.
           .replace("#include <color_fragment>", `#include <color_fragment>
             m5Paint = texture2D(paintMap, vPaintUv);
-            m5Painted = step(0.02, m5Paint.a);
-            m5Wet = step(0.9, m5Paint.a);
+            // Round arenas: outside the wall is not floor (no paint, no tiles).
+            vec2 m5w = vec2(vPaintUv.x - 0.5, 0.5 - vPaintUv.y) * uSize;
+            float m5In = uRadius > 0.0 ? step(length(m5w), uRadius) : 1.0;
+            m5Painted = step(0.02, m5Paint.a) * m5In;
+            m5Wet = step(0.9, m5Paint.a) * m5In;
             vec2 m5f = fract(vPaintUv * uGridN);
             m5Edge = min(min(m5f.x, 1.0 - m5f.x), min(m5f.y, 1.0 - m5f.y)); // 0 at tile edge, .5 centre
             m5Tile = smoothstep(0.0, 0.14, m5Edge);                         // bevel: dark rim per tile
             diffuseColor.rgb = mix(diffuseColor.rgb, m5Paint.rgb * (0.30 - 0.18 * m5Wet), m5Painted);
             float m5Grout = 1.0 - smoothstep(0.0, 0.035, m5Edge);
-            diffuseColor.rgb += vec3(0.05, 0.07, 0.12) * m5Grout * (1.0 - m5Painted);`)
+            diffuseColor.rgb += uGrout * m5Grout * (1.0 - m5Painted) * m5In;
+            diffuseColor.rgb *= mix(0.25, 1.0, m5In);`)
           // 2) Glow: painted tiles emit their colour; wet trails pulse with a moving ripple.
           .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
             float m5Level = m5Paint.a * (0.55 + 0.45 * m5Tile);
@@ -356,14 +382,28 @@
         g.fillStyle = grd; g.fillRect(0, 0, w, h);
       });
       const wallMat = new THREE.MeshBasicMaterial({
-        color: LOOK.wall, map: fade, transparent: true, blending: THREE.AdditiveBlending,
+        color: this.mood.wall, map: fade, transparent: true, blending: THREE.AdditiveBlending,
         depthWrite: false, side: THREE.DoubleSide, fog: false,
       });
       const curbMat = new THREE.MeshStandardMaterial({ color: 0x151a33, roughness: 0.6, metalness: 0.3 });
-      const lineMat = new THREE.MeshBasicMaterial({ color: 0xc9f1ff });
+      const lineMat = new THREE.MeshBasicMaterial({ color: this.mood.line });
       this.wallMat = wallMat;
 
-      for (let side = 0; side < 4; side++) {
+      if (this.circle) {
+        // Round arena: one cylinder of light, a round curb and a bright rim line.
+        const R = this.radius;
+        const wall = new THREE.Mesh(new THREE.CylinderGeometry(R, R, H, 128, 1, true), wallMat);
+        wall.position.y = H / 2;
+        this.group.add(wall);
+        const curb = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.6, R + 0.6, 0.5, 128, 1, true), curbMat);
+        curb.position.y = 0.25;
+        this.group.add(curb);
+        const line = new THREE.Mesh(new THREE.TorusGeometry(R + 0.05, 0.06, 6, 160), lineMat);
+        line.rotation.x = Math.PI / 2;
+        line.position.y = 0.52;
+        this.group.add(line);
+      }
+      for (let side = 0; side < (this.circle ? 0 : 4); side++) {
         const g = new THREE.Group();
         g.rotation.y = (side * Math.PI) / 2;
         const wall = new THREE.Mesh(new THREE.PlaneGeometry(S, H), wallMat);
@@ -383,7 +423,9 @@
       // the rim lights, so each corner "belongs" to a colour).
       [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([cx, cz], i) => {
         const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, 4.5, 1.2), curbMat);
-        post.position.set(cx * (S / 2 + 0.6), 2.25, cz * (S / 2 + 0.6));
+        // On a round arena the posts stand on the wall at the four diagonals.
+        const k = this.circle ? (this.radius + 0.8) / Math.SQRT2 : S / 2 + 0.6;
+        post.position.set(cx * k, 2.25, cz * k);
         this.group.add(post);
         const cap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.35, 1.3), new THREE.MeshBasicMaterial({ color: NEON[i] }));
         cap.position.set(post.position.x, 4.6, post.position.z);
@@ -403,8 +445,8 @@
        --------------------------------------------------------------- */
     buildObstacles() {
       const bodyMat = new THREE.MeshStandardMaterial({ color: 0x232b55, roughness: 0.35, metalness: 0.4, emissive: 0x0b1030 });
-      const edgeMat = new THREE.LineBasicMaterial({ color: 0x9be7ff });
-      const bandMat = new THREE.MeshBasicMaterial({ color: 0x9be7ff });
+      const edgeMat = new THREE.LineBasicMaterial({ color: this.mood.edge });
+      const bandMat = new THREE.MeshBasicMaterial({ color: this.mood.edge });
       const capMat = new THREE.MeshBasicMaterial({ color: 0x5fd4ff, transparent: true, opacity: 0.85 });
       for (const o of this.arena.obstacles || []) {
         const h = o.h || 4;
@@ -444,6 +486,46 @@
         const top = new THREE.Mesh(new THREE.CircleGeometry(p.r * 0.8, 40), capMat);
         top.rotation.x = -Math.PI / 2;
         top.position.set(p.x, h + 0.02, p.z);
+        this.group.add(top);
+      }
+    }
+
+    /* ---------------------------------------------------------------
+       Decks: raised flat platforms you can paint on. The sides are a dark
+       block with glowing edges and a light band; the TOP is a plane using
+       the very same paint material as the floor, with its UVs set to the
+       floor coordinates underneath, so deck cells show their paint (and
+       wet stripes, flashes, sweeps) at deck height.
+       --------------------------------------------------------------- */
+    buildDecks() {
+      const decks = this.arena.decks || [];
+      if (!decks.length) return;
+      const half = this.size / 2;
+      const sideMat = new THREE.MeshStandardMaterial({ color: 0x1a1f3d, roughness: 0.45, metalness: 0.35, emissive: 0x070a1c });
+      const edgeMat = new THREE.LineBasicMaterial({ color: this.mood.edge });
+      const bandMat = new THREE.MeshBasicMaterial({ color: this.mood.edge, transparent: true, opacity: 0.7 });
+      for (const d of decks) {
+        const block = new THREE.Mesh(new THREE.BoxGeometry(d.w, d.h, d.d), sideMat);
+        block.position.set(d.x, d.h / 2 - 0.01, d.z);
+        this.group.add(block);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(block.geometry), edgeMat);
+        edges.position.copy(block.position);
+        this.group.add(edges);
+        // Light band around the sides, a third of the way up.
+        const band = new THREE.Mesh(new THREE.BoxGeometry(d.w + 0.05, 0.16, d.d + 0.05), bandMat);
+        band.position.set(d.x, d.h * 0.35, d.z);
+        this.group.add(band);
+
+        const geo = new THREE.PlaneGeometry(d.w, d.d, 1, 1);
+        const pos = geo.attributes.position, uv = geo.attributes.uv;
+        for (let k = 0; k < pos.count; k++) {
+          // Plane is laid flat with rotation.x = -90°, so local y becomes world -z.
+          const wx = d.x + pos.getX(k), wz = d.z - pos.getY(k);
+          uv.setXY(k, (wx + half) / this.size, (half - wz) / this.size);
+        }
+        const top = new THREE.Mesh(geo, this.floor.material);
+        top.rotation.x = -Math.PI / 2;
+        top.position.set(d.x, d.h + 0.02, d.z);
         this.group.add(top);
       }
     }
@@ -499,7 +581,7 @@
       this.padRings = [];
       (this.arena.pads || []).forEach((p, i) => {
         const g = new THREE.Group();
-        g.position.set(p.x, 0.04, p.z);
+        g.position.set(p.x, (p.y || 0) + 0.04, p.z);
         const ring = new THREE.Mesh(new THREE.RingGeometry(2.7, 3.0, 40),
           new THREE.MeshBasicMaterial({ color: NEON[i % 4], transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
         ring.rotation.x = -Math.PI / 2;
@@ -527,7 +609,7 @@
       const S = this.size;
       const apronTex = canvasTex(64, 64, (g, w, h) => {
         g.fillStyle = "#06070f"; g.fillRect(0, 0, w, h);
-        g.strokeStyle = "rgba(90,120,255,0.18)"; g.lineWidth = 2;
+        g.strokeStyle = this.mood.grid; g.lineWidth = 2;
         g.strokeRect(0, 0, w, h);
       });
       apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
@@ -563,6 +645,9 @@
       const rng = mulberry(7);
       for (let k = 0; k < 46; k++) {
         const a = (k / 46) * Math.PI * 2 + rng() * 0.08;
+        // Leave a gap on the camera's side (+Z): buildings there end up right
+        // in front of the lens on tall screens.
+        if (Math.cos(a) > 0.55) continue;
         const r = S * (1.05 + rng() * 0.55);
         const w = 6 + rng() * 10, d = 6 + rng() * 10, h = 10 + rng() * 34;
         const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildMat);
@@ -874,9 +959,12 @@
        Round winner celebration: a tall light beam in the winner's colour
        on their car, with rings rising up it, until the next countdown.
        --------------------------------------------------------------- */
-    celebrate(player) {
+    celebrate(players) {
       this.endCelebration();
-      if (player == null || player < 0) return;
+      players = [].concat(players).filter((p) => p != null && p >= 0);
+      this.cels = players.map((p) => this.makeBeam(p));
+    }
+    makeBeam(player) {
       const color = NEON[player % 4];
       const g = new THREE.Group();
       const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 60, 24, 1, true), new THREE.MeshBasicMaterial({
@@ -894,20 +982,22 @@
         rings.push(r);
       }
       this.group.add(g);
-      this.cel = { player, g, rings, t: 0 };
+      return { player, g, rings, t: 0 };
     }
     endCelebration() {
-      if (!this.cel) return;
-      this.group.remove(this.cel.g);
-      this.cel.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
-      this.cel = null;
+      for (const c of this.cels || []) {
+        this.group.remove(c.g);
+        c.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      }
+      this.cels = [];
     }
     updateCelebration(dt) {
-      const c = this.cel;
-      if (!c) return;
+      for (const c of this.cels || []) this.updateBeam(c, dt);
+    }
+    updateBeam(c, dt) {
       c.t += dt;
       const car = this.cars && this.cars[c.player];
-      if (car) c.g.position.set(car.pos.x, 0, car.pos.z);
+      if (car) c.g.position.set(car.pos.x, car.pos.y || 0, car.pos.z);
       c.rings.forEach((r, k) => {
         const u = (c.t * 0.6 + k / 3) % 1;          // 0 → 1 up the beam
         r.position.y = u * 22;
@@ -926,7 +1016,9 @@
       const air = car.onGround === false ? 1 : 0;
       m.glow.material.opacity += ((car.out ? 0 : air ? 0.15 : car.boosting ? 0.85 : 0.55) - m.glow.material.opacity) * Math.min(1, dt * 10);
       // Underglow and ring stay on the floor even when the car jumps.
-      const lift = car.mesh.position.y || 0;
+      // Height above the surface it last drove on (floor, deck or ramp).
+      if (car.onGround !== false || m.groundY === undefined) m.groundY = car.mesh.position.y || 0;
+      const lift = (car.mesh.position.y || 0) - m.groundY;
       m.glow.position.y = 0.06 - lift;
       m.ring.position.y = 0.08 - lift;
       m.ring.visible = !car.out;
@@ -990,7 +1082,7 @@
 
     setOverdrive(on) {
       this.overdrive = on;
-      if (!on) this.wallMat.color.setHex(LOOK.wall);
+      if (!on) this.wallMat.color.setHex(this.mood.wall);
     }
 
     // Convert a world point to grid cell coordinates (handy for effects).
@@ -1009,7 +1101,11 @@
       on("fill", (e) => this.queueFill(e.player, e.cx, e.cz, e.cellsList));
       on("overdrive", () => this.setOverdrive(true));
       on("roundCountdown", () => { this.setOverdrive(false); this.overview(false); this.resetPaint(); this.endCelebration(); });
-      on("roundEnd", (e) => { this.overview(true); this.celebrate(e.winner); });
+      // In teams, `winner` is a team: light up both of its players.
+      on("roundEnd", (e) => {
+        this.overview(true);
+        this.celebrate(e.teams ? e.teams.map((t, i) => (t === e.winner ? i : -1)) : e.winner);
+      });
       on("bump", (e) => { if (e.hard || e.impact > 9) this.shake(0.5); });
       on("pop", () => this.shake(0.35));
       on("land", (e) => { if (e.airtime > 0.8) this.shake(0.25); });
@@ -1059,8 +1155,12 @@
   //    dir = atan2(fx, fz))
   function lookArena(a) {
     return {
+      id: a.id,
       name: a.name,
       size: a.size || a.half * 2,
+      shape: a.shape || "square",
+      radius: a.radius,
+      decks: a.decks || [],
       obstacles: a.obstacles || [],
       pillars: a.pillars || [],
       ramps: (a.ramps || []).map((r) => ({ x: r.x, z: r.z, w: r.W, d: r.L, h: r.h, dir: Math.atan2(r.fx, r.fz) })),
@@ -1132,7 +1232,7 @@
         live.add(p.id);
         if (!this.pickupMeshes.has(p.id)) {
           const g = this.stage.buildPickup(p.kind);
-          g.position.set(p.x, 0, p.z);
+          g.position.set(p.x, p.y || 0, p.z);
           this.scene.add(g);
           this.pickupMeshes.set(p.id, g);
         }
