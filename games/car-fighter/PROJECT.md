@@ -98,6 +98,13 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - Easy, Normal and Hard bots
   - display info for character select
   Smoke test with Haulback vs Skitter: PASS. All pairings are within 40–60%.
+- Art JOB 3 (M2) is merged (`5ce0465`):
+  - 3 bodies (`bodies.js`) and damage looks (dents, then flying parts, then smoke)
+  - combo counter and signature flash
+  - synthesised sfx and fight music (`sfx-fight.js`)
+  - character select, and TP.MenuNav on every menu
+  Boss check: smoke PASS (haulback vs skitter, and skitter vs rivet on Hard), screenshots of
+  select and fight look right, no errors.
 - QC's frames tool needs updates for per-car tables, multi-hit moves and cross-ups (QC JOB 3).
 - QC JOB 2 is merged (`a2b5ecf`): `tools/car-fighter-human.js`. 10 of 11 PASS.
   **Open bug (Gameplay):** the Tow Hook throw never comes out when E and R are pressed on
