@@ -595,7 +595,7 @@
         if (arena < 0) arena = Math.floor(Math.random() * Math.max(1, arenas.length));
         TP.M5.startMatch({
           players: slots, rounds: o.rounds, roundTime: o.roundLength,
-          arena, botLevel: o.difficulty, teams: o.teams,
+          arena, botLevel: o.difficulty, teams: o.teams === "2v2",   // Gameplay wants true/false
         });
       }
     },

@@ -84,7 +84,13 @@
 
     /* ---------- Flat shapes on the floor: rings and discs ----------
        grow from r0 to r1 over `life` seconds while fading out. */
-    flat(kind, x, z, color, r0, r1, life, opacity = 0.9, y = 0.12) {
+    // Surface height at (x, z): floor, deck or ramp (Gameplay's arena knows).
+    groundY(x, z) {
+      const a = TP.M5.match && TP.M5.match.arena;
+      return a && a.groundHeightAt ? a.groundHeightAt(x, z) : 0;
+    }
+
+    flat(kind, x, z, color, r0, r1, life, opacity = 0.9, y = this.groundY(x, z) + 0.12) {
       let item = this.flatPool.pop();
       if (!item) {
         const mat = new THREE.MeshBasicMaterial({
@@ -111,7 +117,7 @@
       this.flat("disc", x, z, color, r * 0.3, r * 1.15, 0.45, 0.75);
       this.flat("ring", x, z, 0xffffff, r * 0.5, r * 1.4, 0.35, 0.8);
       const n = Math.round(10 + r * 3);
-      const p = new THREE.Vector3(x, 0.4, z);
+      const p = new THREE.Vector3(x, this.groundY(x, z) + 0.4, z);
       for (let k = 0; k < n; k++) {
         const a = rand(0, Math.PI * 2), s = rand(3, 7 + r * 1.5);
         this.blob(p, new THREE.Vector3(Math.cos(a) * s, rand(3, 8), Math.sin(a) * s), color, rand(0.14, 0.3), rand(0.5, 0.9));
@@ -124,7 +130,7 @@
       this.flat("ring", x, z, color, 1, r, 0.7, 1);
       this.flat("ring", x, z, 0xffffff, 0.5, r * 0.7, 0.5, 0.7);
       this.flat("disc", x, z, color, 1, r * 0.8, 0.5, 0.35);
-      const p = new THREE.Vector3(x, 0.5, z);
+      const p = new THREE.Vector3(x, this.groundY(x, z) + 0.5, z);
       this.fx.burst(p, [color, 0xffffff, color], { count: Math.round(24 + big * 36), speed: 9 + big * 6, up: 12, gravity: 16, size: 0.3, life: 1.2 });
       this.fx.confetti(p, { count: Math.round(20 + big * 40) });
     }
@@ -133,7 +139,7 @@
     popSplash(x, z, color) {
       this.flat("ring", x, z, color, 0.5, 7, 0.4, 1);
       this.flat("ring", x, z, 0xffffff, 0.3, 4, 0.25, 1);
-      const p = new THREE.Vector3(x, 0.6, z);
+      const p = new THREE.Vector3(x, this.groundY(x, z) + 0.6, z);
       for (let k = 0; k < 18; k++) {
         const a = rand(0, Math.PI * 2), s = rand(5, 12);
         this.blob(p, new THREE.Vector3(Math.cos(a) * s, rand(4, 10), Math.sin(a) * s), color, rand(0.16, 0.32), rand(0.5, 0.8));
@@ -222,7 +228,7 @@
           const h = car.heading || 0, fx = Math.sin(h), fz = Math.cos(h);
           // Spawn at the roller (nose of the car), across its width.
           const side = rand(-0.9, 0.9) * (car.boosting ? 1.5 : 1);
-          const p = new THREE.Vector3(car.pos.x + fx * 2.3 + fz * side, 0.35, car.pos.z + fz * 2.3 - fx * side);
+          const p = new THREE.Vector3(car.pos.x + fx * 2.3 + fz * side, (car.pos.y || 0) + 0.35, car.pos.z + fz * 2.3 - fx * side);
           // Thrown up and slightly sideways, keeping some of the car's motion.
           const vel = new THREE.Vector3(car.vel.x * 0.25 + fz * side * 2 + rand(-1, 1), rand(2, 5), car.vel.z * 0.25 - fx * side * 2 + rand(-1, 1));
           this.blob(p, vel, color, rand(0.1, 0.2), rand(0.35, 0.55));
@@ -252,9 +258,11 @@
         }
         b.vel.y -= 22 * dt;
         b.m.position.addScaledVector(b.vel, dt);
-        if (b.m.position.y < 0.08) {
+        const gy = b.flat ? b.gy : this.groundY(b.m.position.x, b.m.position.z) + 0.08;
+        if (b.m.position.y < gy) {
+          b.gy = gy;
           // Hit the floor: stop, flatten into a puddle.
-          b.m.position.y = 0.08;
+          b.m.position.y = gy;
           b.vel.set(0, 0, 0);
           b.flat = true;
         }
