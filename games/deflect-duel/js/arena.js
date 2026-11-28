@@ -77,6 +77,25 @@
     return tex;
   }
 
+  /* A see-through grid tile for the box's walls and ceiling: thin lines
+     around the edge of a transparent square, repeated every 2 units. */
+  function gridTexture() {
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, 128, 128);
+    g.strokeStyle = "rgba(160,175,255,0.9)";
+    g.lineWidth = 3;
+    g.strokeRect(1.5, 1.5, 125, 125);
+    // A tiny dot in each corner where lines cross, like rivets.
+    g.fillStyle = "rgba(255,120,230,0.9)";
+    for (const [x, y] of [[0, 0], [128, 0], [0, 128], [128, 128]]) { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    return tex;
+  }
+
   /* A flat glowing strip lying on the floor, used for neon markings.
      (WebGL lines are always 1 pixel thick, so strips look better.) */
   function floorStrip(len, width, color, opacity) {
@@ -104,7 +123,8 @@
     // half-filled config still draws something sensible.
     const W = cfg.arenaW ?? 44;
     const D = cfg.arenaD ?? 28;
-    const H = cfg.wallH ?? 1.4;
+    // Wall height: up to the ceiling in the closed box (v2), else the low v1 walls.
+    const H = cfg.arenaH || cfg.wallH || 1.4;
     const pillars = cfg.pillars ? (cfg.pillarList || []) : [];
     const T = 1.0;                       // wall thickness (all of it sits OUTSIDE the play area)
 
@@ -193,64 +213,161 @@
     }
 
     /* ---------- Walls ----------
-       Four boxes whose INNER faces sit exactly on the play-area edge
-       (x = ±W/2, z = ±D/2). The thickness goes outwards. Each wall has a
-       pink neon strip along the top and a softer cyan strip at the base. */
+       Two looks, picked by the config:
+         • Low walls (v1, no cfg.arenaH): four solid boxes, pink neon on top.
+         • A closed box (v2, cfg.arenaH = ceiling height): walls run up to
+           the ceiling. The far wall is solid, the side walls are tinted
+           glass, and the NEAR wall (the side the broadcast camera looks
+           through, +Z) is just a faint grid, so it never blocks the view.
+           Glowing strips trace every edge of the box, and the ceiling is
+           a light see-through grid.
+       Either way the INNER faces sit exactly on the play-area edge
+       (x = ±W/2, z = ±D/2, ceiling at y = arenaH); thickness goes outwards. */
+    const BOX = !!cfg.arenaH;
     const wallMat = keep(new THREE.MeshStandardMaterial({ color: COL.wall, roughness: 0.5, metalness: 0.3, emissive: 0x0a0c22 }));
     const topMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonA }));
     const baseMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonB, transparent: true, opacity: 0.6 }));
-    const walls = [
-      // [centre x, centre z, length along x, length along z]
-      [0, -(D / 2 + T / 2), W + T * 2, T],
-      [0, D / 2 + T / 2, W + T * 2, T],
-      [-(W / 2 + T / 2), 0, T, D],
-      [W / 2 + T / 2, 0, T, D],
-    ];
-    for (const [cx, cz, lx, lz] of walls) {
-      const wall = new THREE.Mesh(keep(new THREE.BoxGeometry(lx, H, lz)), wallMat);
-      wall.position.set(cx, H / 2, cz);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      group.add(wall);
-      const top = new THREE.Mesh(keep(new THREE.BoxGeometry(lx + 0.02, 0.12, lz + 0.02)), topMat);
-      top.position.set(cx, H + 0.06, cz);
-      group.add(top);
-      const base = new THREE.Mesh(keep(new THREE.BoxGeometry(lx + 0.03, 0.08, lz + 0.03)), baseMat);
-      base.position.set(cx, 0.05, cz);
-      group.add(base);
+    if (!BOX) {
+      const walls = [
+        // [centre x, centre z, length along x, length along z]
+        [0, -(D / 2 + T / 2), W + T * 2, T],
+        [0, D / 2 + T / 2, W + T * 2, T],
+        [-(W / 2 + T / 2), 0, T, D],
+        [W / 2 + T / 2, 0, T, D],
+      ];
+      for (const [cx, cz, lx, lz] of walls) {
+        const wall = new THREE.Mesh(keep(new THREE.BoxGeometry(lx, H, lz)), wallMat);
+        wall.position.set(cx, H / 2, cz);
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        group.add(wall);
+        const top = new THREE.Mesh(keep(new THREE.BoxGeometry(lx + 0.02, 0.12, lz + 0.02)), topMat);
+        top.position.set(cx, H + 0.06, cz);
+        group.add(top);
+        const base = new THREE.Mesh(keep(new THREE.BoxGeometry(lx + 0.03, 0.08, lz + 0.03)), baseMat);
+        base.position.set(cx, 0.05, cz);
+        group.add(base);
+      }
+    } else {
+      const gridTex = keep(gridTexture());
+      // A grid panel: the texture repeats once every 2 units, whatever the size.
+      const gridPanel = (w, h, opacity) => {
+        const geo = keep(new THREE.PlaneGeometry(w, h));
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w / 2, uv.getY(i) * h / 2);
+        return new THREE.Mesh(geo, keep(new THREE.MeshBasicMaterial({
+          map: gridTex, color: 0x8fa0ff, transparent: true, opacity, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        })));
+      };
+
+      // Far wall (z = -D/2): solid and dark, so the action reads against it.
+      const far = new THREE.Mesh(keep(new THREE.BoxGeometry(W + T * 2, H, T)), wallMat);
+      far.position.set(0, H / 2, -(D / 2 + T / 2));
+      far.receiveShadow = true;
+      group.add(far);
+      const farGrid = gridPanel(W, H, 0.55);
+      farGrid.position.set(0, H / 2, -D / 2 + 0.02);
+      group.add(farGrid);
+
+      // Side walls (x = ±W/2): tinted glass with the grid on it.
+      const glassMat = keep(new THREE.MeshStandardMaterial({
+        color: 0x1a2260, transparent: true, opacity: 0.32, roughness: 0.2, metalness: 0.5,
+        depthWrite: false, side: THREE.DoubleSide,
+      }));
+      for (const sx of [-1, 1]) {
+        const glass = new THREE.Mesh(keep(new THREE.PlaneGeometry(D, H)), glassMat);
+        glass.rotation.y = sx * -Math.PI / 2;
+        glass.position.set(sx * W / 2, H / 2, 0);
+        group.add(glass);
+        const g = gridPanel(D, H, 0.4);
+        g.rotation.y = sx * -Math.PI / 2;
+        g.position.set(sx * (W / 2 - 0.02), H / 2, 0);
+        group.add(g);
+      }
+
+      // Near wall (z = +D/2): only a faint grid, the camera looks through it.
+      const near = gridPanel(W, H, 0.08);
+      near.position.set(0, H / 2, D / 2);
+      group.add(near);
+
+      // Ceiling (y = H): a see-through grid, a little brighter than the near wall.
+      const ceil = gridPanel(W, D, 0.22);
+      ceil.rotation.x = Math.PI / 2;
+      ceil.position.set(0, H, 0);
+      group.add(ceil);
+
+      // Glowing edges on all 12 edges of the box: cyan along the floor,
+      // pink everywhere else (ceiling edges and the four corners).
+      const edge = (lx, ly, lz, x, y, z, mat) => {
+        const m = new THREE.Mesh(keep(new THREE.BoxGeometry(lx, ly, lz)), mat);
+        m.position.set(x, y, z);
+        group.add(m);
+      };
+      const e = 0.14;
+      for (const sz of [-1, 1]) {
+        edge(W, 0.08, e, 0, 0.05, sz * D / 2, baseMat);
+        edge(W, e, e, 0, H, sz * D / 2, topMat);
+      }
+      for (const sx of [-1, 1]) {
+        edge(e, 0.08, D, sx * W / 2, 0.05, 0, baseMat);
+        edge(e, e, D, sx * W / 2, H, 0, topMat);
+        for (const sz of [-1, 1]) edge(e, H, e, sx * W / 2, H / 2, sz * D / 2, topMat);
+      }
+      // A low glowing kick-strip along the bottom of the near side, so its
+      // edge still reads even though the wall itself is see-through.
+      edge(W, 0.3, 0.06, 0, 0.15, D / 2, keep(new THREE.MeshBasicMaterial({ color: COL.neonB, transparent: true, opacity: 0.35 })));
     }
 
     /* ---------- Pillars ----------
        Round posts at the exact {x, z, r} from the config. Dark body, a
-       glowing cyan ring on the floor at the base, and a lit cap. Their
-       glow brightens for a moment when the ball bounces off them. */
+       glowing cyan ring on the floor at the base, and a lit band. In the
+       closed box they run floor to ceiling (with a halo on the ceiling
+       too). Their glow brightens for a moment when the ball bounces off. */
     const pillarFx = [];   // per pillar: { x, z, r, capMat, ringMat, pulse }
-    const pillarH = H + 1.2;
+    const pillarH = BOX ? H : H + 1.2;
     for (const p of pillars) {
       const body = new THREE.Mesh(
         keep(new THREE.CylinderGeometry(p.r, p.r, pillarH, 40)),
         keep(new THREE.MeshStandardMaterial({ color: COL.pillar, roughness: 0.4, metalness: 0.4, emissive: 0x0b0e2a }))
       );
       body.position.set(p.x, pillarH / 2, p.z);
-      body.castShadow = true;
+      body.castShadow = !BOX;   // tall pillars would throw huge shadows across the box
       body.receiveShadow = true;
       group.add(body);
 
-      // Glowing band near the top and a lit cap.
-      const capMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonB }));
-      const band = new THREE.Mesh(keep(new THREE.CylinderGeometry(p.r + 0.03, p.r + 0.03, 0.14, 40, 1, true)), capMat);
-      band.position.set(p.x, pillarH - 0.35, p.z);
-      group.add(band);
-      const cap = new THREE.Mesh(keep(new THREE.CylinderGeometry(p.r * 0.7, p.r * 0.7, 0.06, 32)), capMat);
-      cap.position.set(p.x, pillarH + 0.03, p.z);
-      group.add(cap);
+      // Glowing bands (and a lit cap when the pillar has a top you can see).
+      // Transparent so the glow can dim along with the body (pillar x-ray).
+      const capMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonB, transparent: true }));
+      const bandGeo = keep(new THREE.CylinderGeometry(p.r + 0.03, p.r + 0.03, 0.14, 40, 1, true));
+      const bandYs = BOX ? [1.2, H * 0.5, H - 1.2] : [pillarH - 0.35];
+      for (const y of bandYs) {
+        const band = new THREE.Mesh(bandGeo, capMat);
+        band.position.set(p.x, y, p.z);
+        group.add(band);
+      }
+      if (!BOX) {
+        const cap = new THREE.Mesh(keep(new THREE.CylinderGeometry(p.r * 0.7, p.r * 0.7, 0.06, 32)), capMat);
+        cap.position.set(p.x, pillarH + 0.03, p.z);
+        group.add(cap);
+      }
 
-      // Halo ring on the floor around the base.
+      // Halo ring on the floor around the base (and on the ceiling in the box).
       const ring = floorRing(p.r + 0.05, p.r + 0.55, COL.neonB, 0.35);
       ring.position.set(p.x, Y + 0.004, p.z);
       group.add(ring);
+      if (BOX) {
+        const top = new THREE.Mesh(ring.geometry, ring.material);
+        top.rotation.x = Math.PI / 2;
+        top.position.set(p.x, H - 0.01, p.z);
+        group.add(top);
+      }
 
-      pillarFx.push({ x: p.x, z: p.z, r: p.r, capMat, ringMat: ring.material, pulse: 0, color: new THREE.Color(COL.neonB) });
+      // The body can fade to see-through when it blocks the camera's view
+      // (see updatePillarFade). Transparent from the start so fading never
+      // needs a shader rebuild mid-match.
+      body.material.transparent = true;
+      pillarFx.push({ x: p.x, z: p.z, r: p.r, body, fade: 1, capMat, ringMat: ring.material, pulse: 0, color: new THREE.Color(COL.neonB) });
     }
 
     /* ---------- Stand blocks outside the walls (decoration) ----------
@@ -278,8 +395,8 @@
       group.add(s);
     }
 
-    /* ---------- Wall flashes ----------
-       When the ball bounces, a bright patch blooms on the wall at the
+    /* ---------- Bounce flashes ----------
+       When the ball bounces, a bright patch blooms on the surface at the
        contact point and fades out. Patches are pooled and reused. */
     const flashGeo = keep(new THREE.PlaneGeometry(1, 1));
     const flashes = [];   // { mesh, life, max }
@@ -300,15 +417,36 @@
     }
 
     /* flashWall(pos, normal, css)
-         pos    — where the ball touched (world space, any y)
+         pos    — where the ball touched (world space)
          normal — the surface normal pointing back INTO the arena
+                  ({x, z} for walls; a big y means the floor or ceiling)
          css    — colour string (e.g. the ball owner's "#3b82f6")
        If the touch is on a pillar, that pillar's glow also flares. */
     function flashWall(pos, normal, css) {
       const color = new THREE.Color(css || "#ffffff");
-      const n = new THREE.Vector3(normal ? normal.x : 0, 0, normal ? normal.z : 1);
+      const n = new THREE.Vector3(normal ? normal.x || 0 : 0, normal ? normal.y || 0 : 0, normal ? normal.z || 0 : 1);
       if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
       n.normalize();
+      // Patch height on a tall wall: centred on the ball, kept on the wall.
+      const py = BOX ? Math.max(1.6, Math.min(H - 1.6, pos.y ?? H / 2)) : H / 2;
+      const ph = BOX ? 3.2 : H * 1.1;
+
+      const f = getFlash();
+      f.life = f.max = 0.45;
+      f.mesh.material.color.copy(color);
+      f.mesh.material.opacity = 1;
+      f.mesh.visible = true;
+
+      // Floor or ceiling bounce (normal mostly up or down).
+      if (Math.abs(n.y) > Math.abs(n.x) && Math.abs(n.y) > Math.abs(n.z)) {
+        const y = n.y > 0 ? 0.04 : (BOX ? H - 0.04 : 0.04);
+        f.mesh.position.set(pos.x, y, pos.z);
+        f.mesh.lookAt(pos.x, y + (n.y > 0 ? 1 : -1), pos.z);
+        f.baseScale = 3.2;
+        f.mesh.scale.set(f.baseScale * 0.6, 3.2, 1);
+        f.heightScale = 3.2;
+        return;
+      }
 
       // Pillar hit? (contact point close to a pillar's surface)
       let onPillar = null;
@@ -316,18 +454,13 @@
         const dist = Math.hypot(pos.x - p.x, pos.z - p.z);
         if (dist < p.r + 2.0) { onPillar = p; break; }
       }
-
-      const f = getFlash();
-      f.life = f.max = 0.45;
-      f.mesh.material.color.copy(color);
-      f.mesh.material.opacity = 1;
-      f.mesh.visible = true;
       if (onPillar) {
         // Snap the patch onto the pillar surface, facing outwards.
         const dx = pos.x - onPillar.x, dz = pos.z - onPillar.z;
         const len = Math.hypot(dx, dz) || 1;
-        f.mesh.position.set(onPillar.x + (dx / len) * (onPillar.r + 0.04), H * 0.6, onPillar.z + (dz / len) * (onPillar.r + 0.04));
-        f.mesh.lookAt(f.mesh.position.x + dx, f.mesh.position.y, f.mesh.position.z + dz);
+        const y = BOX ? py : H * 0.6;
+        f.mesh.position.set(onPillar.x + (dx / len) * (onPillar.r + 0.04), y, onPillar.z + (dz / len) * (onPillar.r + 0.04));
+        f.mesh.lookAt(f.mesh.position.x + dx, y, f.mesh.position.z + dz);
         f.baseScale = Math.min(2.2, onPillar.r * 1.4);
         onPillar.pulse = 1;
         onPillar.color.copy(color);
@@ -336,11 +469,41 @@
         let x = pos.x, z = pos.z;
         if (Math.abs(n.x) > Math.abs(n.z)) x = n.x > 0 ? -W / 2 + 0.03 : W / 2 - 0.03;
         else z = n.z > 0 ? -D / 2 + 0.03 : D / 2 - 0.03;
-        f.mesh.position.set(x, H / 2, z);
-        f.mesh.lookAt(x + n.x, H / 2, z + n.z);
+        f.mesh.position.set(x, py, z);
+        f.mesh.lookAt(x + n.x, py, z + n.z);
         f.baseScale = 3.2;
       }
-      f.mesh.scale.set(f.baseScale * 0.6, H * 1.1, 1);
+      f.heightScale = ph;
+      f.mesh.scale.set(f.baseScale * 0.6, ph, 1);
+    }
+
+    /* ---------- Pillar x-ray ----------
+       From the broadcast camera a pillar can stand right between you and
+       the ball. When it hides the ball or a car, it fades to faint glass
+       (its glowing bands stay, so you still see where it is). */
+    function updatePillarFade(dt) {
+      if (!duel || !duel.camera || !pillarFx.length) return;
+      const cam = duel.camera.position;
+      // Things worth seeing: the ball and every car on the field.
+      const targets = [];
+      if (duel.ball) targets.push(duel.ball.pos);
+      (duel.players || []).forEach((p, i) => { if (!p.out && p.dead <= 0 && duel.cars[i]) targets.push(duel.cars[i].pos); });
+      for (const p of pillarFx) {
+        let hides = false;
+        for (const tg of targets) {
+          // Top-down: how close does the camera→target line pass the pillar's centre?
+          const dx = tg.x - cam.x, dz = tg.z - cam.z;
+          const len2 = dx * dx + dz * dz || 1;
+          const u = ((p.x - cam.x) * dx + (p.z - cam.z) * dz) / len2;   // 0 at camera, 1 at target
+          if (u <= 0 || u >= 1) continue;                                // pillar not between them
+          const px = cam.x + dx * u - p.x, pz = cam.z + dz * u - p.z;
+          if (px * px + pz * pz < (p.r + 1.3) * (p.r + 1.3)) { hides = true; break; }
+        }
+        const want = hides ? 0.16 : 1;
+        p.fade += (want - p.fade) * (1 - Math.exp(-dt * 10));
+        p.body.material.opacity = p.fade;
+        p.body.material.depthWrite = p.fade > 0.95;   // see-through: don't hide what's behind
+      }
     }
 
     /* ---------- Per-frame animation ---------- */
@@ -355,12 +518,18 @@
       serveGlow.material.opacity = 0.04 + 0.04 * (0.5 + 0.5 * Math.sin(t * 2.2)) + serveFlash * 0.25;
       serveRing.scale.setScalar(1 + serveFlash * 0.25);
 
+      updatePillarFade(dt);
       // Pillars: idle shimmer, plus a flare (in the ball's colour) that fades.
       for (const p of pillarFx) {
         p.pulse = Math.max(0, p.pulse - dt * 2.5);
         const base = new THREE.Color(COL.neonB);
         p.capMat.color.copy(base).lerp(p.color, p.pulse).multiplyScalar(1 + p.pulse * 0.6);
-        p.ringMat.opacity = 0.3 + 0.08 * Math.sin(t * 3 + p.x) + p.pulse * 0.6;
+        // When the pillar is see-through (it's in front of the action), its
+        // cap, bands and floor halo dim too, so nothing bright sits in the
+        // foreground. They keep a faint outline so you still see the pillar.
+        const dim = 0.2 + 0.8 * p.fade;
+        p.capMat.opacity = dim;
+        p.ringMat.opacity = (0.3 + 0.08 * Math.sin(t * 3 + p.x) + p.pulse * 0.6) * (0.15 + 0.85 * p.fade);
         p.ringMat.color.copy(base).lerp(p.color, p.pulse);
       }
 
@@ -405,6 +574,7 @@
 
   /* =====================================================================
      MATCH EFFECTS — everything that makes a hit feel like a hit.
+     (Camera framing, shake and zoom are in camera.js.)
 
      Built once per match by build() when it's given the duel. Nothing in
      here changes the rules: it only READS TP.duel (ball, players, cars,
@@ -413,7 +583,10 @@
        onHit(car, ball, speedFrac, smash)  flash, shockwave, sparks, shake
        onSwing(car)                        (the swipe itself is drawn per frame)
        onKO(victim, owner)                 explosion, screen flash, slow-mo
-       onWallBounce(pos, normal)           small sparks, a little shake
+       onClash(carA, carB, ball)           the biggest flash: both colours, "CLASH!"
+       onBunt(car, ball)                   flip reset: soft thunk, ring, under-wheel glow
+       onBounce(pos, normal)               sparks (v2: floor, walls, ceiling, pillars)
+       onWallBounce(pos, normal)           the same, under its v1 name
        onServe()                           serve circle flares, trail resets
        onRespawn(car)                      a light beam where the car appears
        onMatchEnd(result)                  confetti over the winner
@@ -507,12 +680,35 @@
     floorGlow.rotation.x = -Math.PI / 2;
     floorGlow.position.y = 0.03;
     group.add(floorGlow);
+    // A soft dark disc right under the ball: a "shadow" that works at any height.
+    const shadow = new THREE.Mesh(keep(new THREE.CircleGeometry(1, 32)), keep(new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0.5, depthWrite: false,
+    })));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.025;
+    shadow.renderOrder = -1;
+    group.add(shadow);
+    // A faint line from the floor up to a high ball (1 unit tall, scaled to fit).
+    const heightLine = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.05, 0.05, 1, 6, 1, true)), keep(glowMat(0xffffff, 0.2)));
+    heightLine.visible = false;
+    group.add(heightLine);
+    /* Speed streak: a stretched glow along the ball's velocity, so a very
+       fast ball reads as a bolt rather than a dot. During a hit-freeze a
+       thin "lead line" also shows which way the ball is about to fly. */
+    const streak = new THREE.Mesh(keep(new THREE.SphereGeometry(1, 16, 10)), keep(glowMat(0xffffff, 0)));
+    streak.visible = false;
+    group.add(streak);
+    const leadLine = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.07, 0.07, 1, 6, 1, true)), keep(glowMat(0xffffff, 0)));
+    leadLine.visible = false;
+    group.add(leadLine);
+    const velDir = new THREE.Vector3();
+    const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
     /* The trail: a flat ribbon through the ball's recent positions,
        brightest at the ball and fading to nothing. Points older than the
        trail's lifetime drop off, so a faster ball leaves a LONGER trail. */
     const TRAIL_N = 48;
-    const trail = [];   // newest first: { x, z, age }
+    const trail = [];   // newest first: { x, y, z, age }
     const trailGeo = keep(new THREE.BufferGeometry());
     const tPos = new Float32Array(TRAIL_N * 2 * 3);
     const tCol = new Float32Array(TRAIL_N * 2 * 3);
@@ -530,18 +726,25 @@
     trailMesh.frustumCulled = false; // its bounds change every frame
     group.add(trailMesh);
 
+    const segDir = new THREE.Vector3(), toCam = new THREE.Vector3(), side = new THREE.Vector3();
     function updateTrail(dt, frozen, color, frac) {
       const b = duel.ball;
-      const life = 0.12 + 0.28 * frac;                 // seconds a point lives
+      /* Trail length in world units grows with speed but is capped, so a
+         200+ ball leaves a long clean streak instead of a line across the
+         whole arena. Point lifetime = length ÷ speed. */
+      const spd = Math.max(1, b.speed || 0);
+      const lenWanted = Math.min(22, 3 + spd * 0.12);
+      // (At least 3 frames' worth, so a slow computer still draws a streak.)
+      const life = Math.max(0.05, 3 * dt, Math.min(0.4, lenWanted / spd));
       // The ball jumped further than it could ever move in a frame (a
       // serve, or a test placing it): start a fresh trail, no streak.
-      if (trail.length && Math.hypot(trail[0].x - b.pos.x, trail[0].z - b.pos.z) > 5) trail.length = 0;
+      if (trail.length && Math.hypot(trail[0].x - b.pos.x, trail[0].y - b.pos.y, trail[0].z - b.pos.z) > 5) trail.length = 0;
       if (!frozen) {
         for (const p of trail) p.age += dt;
         while (trail.length && trail[trail.length - 1].age > life) trail.pop();
         const head = trail[0];
-        if (!head || Math.hypot(head.x - b.pos.x, head.z - b.pos.z) > 0.08) {
-          trail.unshift({ x: b.pos.x, z: b.pos.z, age: 0 });
+        if (!head || Math.hypot(head.x - b.pos.x, head.y - b.pos.y, head.z - b.pos.z) > 0.08) {
+          trail.unshift({ x: b.pos.x, y: b.pos.y, z: b.pos.z, age: 0 });
           if (trail.length > TRAIL_N) trail.pop();
         }
       }
@@ -552,19 +755,27 @@
       // Width: almost the ball's size at the head, tapering to a point.
       const w0 = R * (0.75 + 0.45 * frac);
       const bright = 0.8 + 0.6 * frac;
+      const camPos = duel.camera ? duel.camera.position : null;
       for (let i = 0; i < n; i++) {
         // Direction of the ribbon here (from the next older point).
         const p = trail[i];
         const q = trail[Math.min(n - 1, i + 1)], o = trail[Math.max(0, i - 1)];
-        let dx = o.x - q.x, dz = o.z - q.z;
-        const len = Math.hypot(dx, dz) || 1;
-        dx /= len; dz /= len;
+        segDir.set(o.x - q.x, o.y - q.y, o.z - q.z);
+        if (segDir.lengthSq() < 1e-8) segDir.set(1, 0, 0);
+        segDir.normalize();
+        // The ribbon's width points across the travel direction AND across
+        // the line to the camera, so it always faces the viewer (never
+        // edge-on), whichever way the ball flies in 3D.
+        if (camPos) toCam.set(camPos.x - p.x, camPos.y - p.y, camPos.z - p.z).normalize();
+        else toCam.set(0, 1, 0);
+        side.crossVectors(segDir, toCam);
+        if (side.lengthSq() < 1e-6) side.set(-segDir.z, 0, segDir.x);
+        side.normalize();
         const k = i / (n - 1);                        // 0 at the ball → 1 at the tail
-        const w = w0 * (1 - k);
-        const px = -dz * w, pz = dx * w;              // sideways from the travel direction
+        side.multiplyScalar(w0 * (1 - k));
         const j = i * 6;
-        tPos[j] = p.x + px; tPos[j + 1] = ballY; tPos[j + 2] = p.z + pz;
-        tPos[j + 3] = p.x - px; tPos[j + 4] = ballY; tPos[j + 5] = p.z - pz;
+        tPos[j] = p.x + side.x; tPos[j + 1] = p.y + side.y; tPos[j + 2] = p.z + side.z;
+        tPos[j + 3] = p.x - side.x; tPos[j + 4] = p.y - side.y; tPos[j + 5] = p.z - side.z;
         const f = Math.pow(1 - k, 1.6) * bright;      // fade (additive: darker = more see-through)
         for (const off of [j, j + 3]) {
           tCol[off] = color.r * f; tCol[off + 1] = color.g * f; tCol[off + 2] = color.b * f;
@@ -583,16 +794,23 @@
       if (!b || !duel.ballMesh) return;
       const frac = speedFrac();
       const neutral = b.neutral;
+      /* "Heat": 1 for a freshly struck ball, sliding to 0 as an owned ball
+         cools back into a neutral one (v2 rules). The glow softens and the
+         colour drifts towards white as it cools. Read from ball.heat if the
+         rules provide it; otherwise owned = 1, neutral = 0. */
+      const heat = neutral ? 0 : Math.max(0, Math.min(1, b.heat ?? 1));
       // Owner colour, or white for a neutral ball.
-      if (neutral || b.owner === null) tmpColor.copy(WHITE);
-      else tmpColor.setHex(TP.PLAYER_COLORS[duel.players[b.owner].seat]);
-      // Neutral ball pulses gently so it reads as "anyone's".
-      const pulse = neutral ? 0.6 + 0.4 * Math.sin(t * 6) : 1;
+      if (b.owner === null || b.owner === undefined) tmpColor.copy(WHITE);
+      else tmpColor.setHex(TP.PLAYER_COLORS[duel.players[b.owner].seat]).lerp(WHITE, neutral ? 1 : 0.6 * (1 - heat));
+      // Neutral ball pulses gently so it reads as "anyone's"; a cooling
+      // ball starts to pulse too, as a warning that it's about to go neutral.
+      const pulse = neutral ? 0.6 + 0.4 * Math.sin(t * 6) : 1 - 0.35 * (1 - heat) * (0.5 + 0.5 * Math.sin(t * 10));
 
       ballFlash = Math.max(0, ballFlash - rawDt * 4);
       // The rules' ball mesh: brighter with speed, white-hot right after a hit.
       const m = duel.ballMesh.material;
-      m.emissiveIntensity = (0.45 + 0.7 * frac) * pulse + ballFlash * 2.5;
+      m.emissiveIntensity = (0.45 + 0.7 * frac * (0.4 + 0.6 * heat)) * pulse + ballFlash * 2.5;
+      if (!neutral && heat < 1) m.color.lerp(WHITE, 0.6 * (1 - heat));
       if (ballFlash > 0) m.color.lerp(WHITE, ballFlash * 0.8);
       duel.ballMesh.scale.setScalar(1 + ballFlash * 0.35);
 
@@ -603,13 +821,57 @@
       halo.material.opacity = (0.45 + 0.4 * frac) * pulse + ballFlash * 0.5;
       halo.scale.setScalar(R * (3.4 + 3 * frac + ballFlash * 3));
 
-      floorRingB.position.x = floorGlow.position.x = b.pos.x;
-      floorRingB.position.z = floorGlow.position.z = b.pos.z;
+      /* Reading the ball's height: a ring and glow on the floor straight
+         below it (they grow and fade as the ball rises, like a shadow), a
+         dark shadow disc, and a faint vertical line once it's up high. */
+      const h = Math.max(0, b.pos.y - R);          // gap between the ball and the floor
+      const lift = Math.min(1, h / 8);             // 0 on the floor → 1 at 8 units up
+      floorRingB.position.x = floorGlow.position.x = shadow.position.x = b.pos.x;
+      floorRingB.position.z = floorGlow.position.z = shadow.position.z = b.pos.z;
       floorRingB.material.color.copy(tmpColor);
-      floorRingB.material.opacity = 0.55 * pulse + 0.25 * frac;
+      floorRingB.material.opacity = (0.55 * pulse + 0.25 * frac) * (1 - 0.4 * lift);
+      floorRingB.scale.setScalar(1 + 0.6 * lift);
       floorGlow.material.color.copy(tmpColor);
-      floorGlow.material.opacity = 0.3 + 0.35 * frac;
-      floorGlow.scale.setScalar(R * (4 + 3 * frac));
+      floorGlow.material.opacity = (0.3 + 0.35 * frac) * (1 - 0.6 * lift);
+      floorGlow.scale.setScalar(R * (4 + 3 * frac) * (1 + 0.5 * lift));
+      shadow.material.opacity = 0.5 * (1 - 0.6 * lift);
+      shadow.scale.setScalar(R * 2.2 * (1 + 0.8 * lift));
+      const showLine = h > 2.5;
+      heightLine.visible = showLine;
+      if (showLine) {
+        heightLine.position.set(b.pos.x, (b.pos.y - R) / 2, b.pos.z);
+        heightLine.scale.set(1, b.pos.y - R, 1);
+        heightLine.material.color.copy(tmpColor);
+        heightLine.material.opacity = 0.22 * Math.min(1, (h - 2.5) / 2);
+      }
+
+      // Streak and lead line along the velocity.
+      const v = b.vel;
+      const spd = b.speed || (v ? v.length() : 0);
+      const showStreak = !neutral && v && spd > 30;
+      streak.visible = !!showStreak;
+      leadLine.visible = false;
+      if (showStreak) {
+        velDir.copy(v).normalize();
+        const len = R + spd * 0.028;                 // 210 → about 6.8 units long
+        // Stretch a sphere along its Y axis, turned to point along the velocity,
+        // and slide it back so it trails behind the ball.
+        streak.quaternion.setFromUnitVectors(Y_AXIS, velDir);
+        streak.scale.set(R * 0.9, len / 2, R * 0.9);
+        streak.position.copy(b.pos).addScaledVector(velDir, -len / 2 + R * 0.5);
+        streak.material.color.copy(tmpColor);
+        streak.material.opacity = (0.25 + 0.35 * Math.min(1, spd / 150)) * (0.4 + 0.6 * heat);
+        if (duel.freezeLeft > 0.15) {
+          // The standoff: show where it's going.
+          const ll = 6 + spd * 0.06;
+          leadLine.visible = true;
+          leadLine.quaternion.copy(streak.quaternion);
+          leadLine.scale.set(1, ll, 1);
+          leadLine.position.copy(b.pos).addScaledVector(velDir, ll / 2 + R);
+          leadLine.material.color.copy(tmpColor);
+          leadLine.material.opacity = 0.35 + 0.25 * Math.sin(t * 18);
+        }
+      }
 
       updateTrail(dt, frozen, tmpColor, frac);
     }
@@ -618,6 +880,10 @@
     // Flat expanding rings (shockwaves), pooled.
     const waveGeo = keep(new THREE.RingGeometry(0.82, 1, 56));
     const waves = [];   // { mesh, t, dur, r0, r1, op }
+    /* shockwave(pos, color, startRadius, endRadius, seconds, opacity, floorY)
+       With floorY it's a flat ring lying at that height (KOs, serves,
+       respawns). Without, it stands up facing the camera at the ball's
+       height (hits), so it reads as a burst whichever way the ball flies. */
     function shockwave(pos, color, r0, r1, dur, op, y) {
       let w = waves.find((q) => q.t >= q.dur);
       if (!w) {
@@ -630,7 +896,17 @@
       }
       Object.assign(w, { t: 0, dur, r0, r1, op });
       w.mesh.material.color.set(color);
-      w.mesh.position.set(pos.x, y ?? ballY, pos.z);
+      // A standing ring is bigger than the ball is high, so its lower half
+      // would vanish under the floor: let it draw over everything instead.
+      w.mesh.material.depthTest = y !== undefined;
+      w.mesh.renderOrder = y !== undefined ? 0 : 5;
+      if (y !== undefined) {
+        w.mesh.position.set(pos.x, y, pos.z);
+        w.mesh.rotation.set(-Math.PI / 2, 0, 0);
+      } else {
+        w.mesh.position.set(pos.x, pos.y ?? ballY, pos.z);
+        if (duel.camera) w.mesh.quaternion.copy(duel.camera.quaternion);
+      }
       w.mesh.scale.setScalar(r0);
       w.mesh.visible = true;
     }
@@ -650,7 +926,7 @@
       }
       Object.assign(p, { t: 0, dur, s0, s1 });
       p.sprite.material.color.set(color);
-      p.sprite.position.set(pos.x, ballY, pos.z);
+      p.sprite.position.set(pos.x, pos.y ?? ballY, pos.z);
       p.sprite.visible = true;
     }
 
@@ -709,6 +985,7 @@
     const arcGeoB = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.7, (C.hitRange ?? 3.6), 28, 1, 0, Math.PI * 0.9));
     const reachGeo = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.08, (C.hitRange ?? 3.6), 64));
     const shieldGeo = keep(new THREE.RingGeometry(1.95, 2.2, 48));
+    const resetGeo = keep(new THREE.PlaneGeometry(2.4, 3.6));
     function getCarFx(car) {
       let f = carFx.get(car);
       if (f) return f;
@@ -732,11 +1009,18 @@
       shield.position.y = 0.1;
       shield.visible = false;
       car.mesh.add(shield);
-      f = { pivot, arcA, arcB, reach, shield };
+      // Flip-reset cue: a glowing pad under the wheels. It sits in the
+      // car BODY's group so it tilts with the car in the air.
+      const resetGlow = flat(resetGeo, 0);
+      resetGlow.position.y = 0.05;
+      resetGlow.visible = false;
+      ((car.mesh.userData && car.mesh.userData.body) || car.mesh).add(resetGlow);
+      f = { pivot, arcA, arcB, reach, shield, resetGlow, resetT: 0 };
       carFx.set(car, f);
       return f;
     }
 
+    let frameDt = 0;
     function updateCars() {
       duel.players.forEach((p, i) => {
         const car = duel.cars[i];
@@ -757,6 +1041,12 @@
           f.arcB.material.opacity = 0.35 * fade;
           f.reach.material.opacity = 0.35 * fade;
         }
+        // Flip reset: the under-wheel glow flickers bright, then fades.
+        if (f.resetT > 0) {
+          f.resetT = Math.max(0, f.resetT - frameDt * 1.4);
+          f.resetGlow.visible = f.resetT > 0;
+          f.resetGlow.material.opacity = 0.85 * f.resetT * (0.75 + 0.25 * Math.sin(t * 40));
+        }
         // Invulnerable after a respawn: a pulsing ring around the car.
         const safe = p.invuln > 0 && !p.out && p.dead <= 0;
         f.shield.visible = safe;
@@ -768,37 +1058,48 @@
     }
 
     /* =================== Camera: shake and zoom ===================
-       "Trauma" goes up on big moments and drains away; the shake is
-       trauma squared, so small bumps barely move and big ones really
-       rattle. The camera is nudged sideways (not turned), so the arena
-       never tilts. Zoom narrows the field of view for a smash or KO. */
-    let trauma = 0, zoom = 0, base = null;
-    const addShake = (amount) => { trauma = Math.min(1.2, trauma + amount); };
-    function updateCamera(rawDt) {
-      const cam = duel.camera;
-      if (!cam) return;
-      if (!base) base = { pos: cam.position.clone(), fov: cam.fov };
-      trauma = Math.max(0, trauma - rawDt * 1.6);
-      zoom = Math.max(0, zoom - rawDt * 2.2);
-      const s = trauma * trauma * 1.1;
-      cam.position.set(
-        base.pos.x + s * (Math.sin(t * 61) + 0.5 * Math.sin(t * 97)) * 0.6,
-        base.pos.y + s * Math.sin(t * 73) * 0.3,
-        base.pos.z + s * (Math.sin(t * 53 + 1.3) + 0.5 * Math.sin(t * 89)) * 0.6
-      );
-      // Ease in/out so the zoom feels like a punch, not a jump.
-      const z = zoom * zoom * (3 - 2 * zoom);
-      cam.fov = base.fov - 6 * z;
-      cam.updateProjectionMatrix();
+       The shake ("trauma") and the zoom punch live in camera.js
+       (TP.DuelCamera), together with the broadcast framing. These two
+       helpers just pass our big moments on to it. */
+    const addShake = (amount) => { if (TP.DuelCamera) TP.DuelCamera.shake(duel.camera, amount); };
+    const punch = (amount) => { if (TP.DuelCamera) TP.DuelCamera.punch(duel.camera, amount); };
+
+    // Sparks where the ball touched a wall, the floor, the ceiling or a pillar.
+    function bounceSparks(pos) {
+      const b = duel.ball;
+      // Put the exact bounce point into the trail, so a fast ball's streak
+      // bends at the wall instead of cutting through it between frames.
+      if (trail.length) trail.unshift({ x: pos.x, y: pos.y ?? ballY, z: pos.z, age: 0 });
+      const frac = speedFrac();
+      const color = b.owner === null || b.owner === undefined ? 0xffffff : TP.PLAYER_COLORS[duel.players[b.owner].seat];
+      const at = new THREE.Vector3(pos.x, pos.y ?? ballY, pos.z);
+      fx.burst(at, [color, 0xffffff], { count: Math.round(5 + 10 * frac), speed: 5 + 8 * frac, up: 1, gravity: 18, life: 0.4, size: 0.18 });
+      if (frac > 0.25) addShake(0.08 + 0.25 * frac);
+    }
+
+    /* The standoff: a long hit-freeze (fast balls) pushes the camera in on
+       the striker and rolls the speed readout up over the freeze. Short
+       freezes (slow balls) skip the push-in. */
+    let lastStandoffAt = -1;
+    function standoff(car, seconds) {
+      if (!(seconds > 0)) return;
+      if (TP.HUD.rollSpeed) TP.HUD.rollSpeed(Math.min(1.1, Math.max(0.15, seconds * 0.85)));
+      const k = Math.max(0, Math.min(1, (seconds - 0.15) / 0.8));
+      if (k > 0 && TP.DuelCamera) TP.DuelCamera.focus(duel.camera, car, k);
+      lastStandoffAt = t;
     }
 
     /* =================== Hooks (called by the rules) =================== */
     const hooks = {
-      onHit(car, ball, frac, smash) {
+      // A strike connected. frac: 0 at base speed → 1 at max. smash: struck while boosting.
+      onHit(car, ball, frac, smash, info) {
         const color = carColor(car);
         const pos = ball.pos;
         ballFlash = 1;
-        // Impact pop and a shockwave on the floor plane at ball height.
+        // Freeze length: from the rules if they pass it (info.freeze), else
+        // read it straight off the duel (the rules set it just before this hook).
+        standoff(car, (info && info.freeze) ?? duel.freezeLeft);
+        // Impact pop and a shockwave standing up to face the camera.
         pop(pos, 0xffffff, R * 2, R * (6 + 5 * frac), 0.22);
         shockwave(pos, color, R, R * (4 + 5 * frac), 0.45, 0.9);
         // Sparks in the hitter's colour, more and faster with speed.
@@ -807,43 +1108,86 @@
         });
         addShake(0.25 + 0.55 * frac);
         if (smash) {
-          // A Smash: a second, much bigger white ring, more sparks, a punch-in zoom.
+          // A Smash: a second, much bigger white ring, a ring across the
+          // floor below, more sparks, a punch-in zoom and a light screen flash.
           shockwave(pos, 0xffffff, R * 1.5, R * (10 + 6 * frac), 0.6, 1);
           shockwave(pos, color, R, R * 14, 0.8, 0.6, 0.05);
           pop(pos, color, R * 4, R * 14, 0.35);
           fx.burst(pos, [color, 0xffe14d, 0xffffff], { count: 30, speed: 20, up: 3, gravity: 14, life: 0.7, size: 0.3 });
           addShake(0.5);
-          zoom = 1;
+          punch(1);
           if (TP.HUD.flash) TP.HUD.flash(carCss(car), 0.18);
         }
       },
 
       onSwing() { /* the swipe is drawn every frame from swingT (updateCars) */ },
 
+      // If the rules announce a freeze separately: (seconds, car).
+      onFreeze(seconds, car) {
+        if (t - lastStandoffAt < 0.05) return;   // onHit already handled this one
+        standoff(car || null, seconds);
+      },
+
+      // Two strikes landed together: both cars bounce off, the ball stays put.
+      // The biggest flash in the game, in BOTH strikers' colours.
+      onClash(carA, carB, ball) {
+        const pos = (ball && ball.pos) || duel.ball.pos;
+        const cA = carA ? carColor(carA) : 0xffffff;
+        const cB = carB ? carColor(carB) : 0xffffff;
+        ballFlash = 1;
+        pop(pos, 0xffffff, R * 3, R * 20, 0.45);
+        pop(pos, 0xffe14d, R * 2, R * 12, 0.3);
+        shockwave(pos, cA, R, R * 10, 0.6, 0.9);
+        shockwave(pos, cB, R * 0.6, R * 7.5, 0.5, 0.9);
+        shockwave(pos, 0xffffff, R * 2, R * 14, 0.8, 0.6);
+        fx.burst(pos, [cA, cB, 0xffffff, 0xffe14d], { count: 50, speed: 22, up: 2, gravity: 12, life: 0.8, size: 0.3 });
+        addShake(0.9);
+        punch(0.6);
+        if (TP.HUD.flash) TP.HUD.flash("#ffffff", 0.4);
+        TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
+      },
+
+      /* A bunt = a WHEELS-TOUCH FLIP RESET: the car's underside touched
+         the ball, and its jump and flip are back. No hit-freeze, so this is
+         deliberately soft: a dull thunk, a small ring at the contact, and a
+         glow under the car's wheels telling its driver "you can jump again". */
+      onBunt(car, ball) {
+        const pos = (ball && ball.pos) || duel.ball.pos;
+        const color = car ? carColor(car) : 0xffffff;
+        ballFlash = 0.35;
+        shockwave(pos, color, R * 0.8, R * 3.2, 0.35, 0.55);
+        fx.burst(pos, [color, 0xffffff], { count: 8, speed: 3, up: 2, gravity: 9, life: 0.45, size: 0.14 });
+        if (car) {
+          const f = getCarFx(car);
+          f.resetT = 1;             // the under-wheel glow, fading over ~0.7 s
+        }
+        if (TP.sfx) TP.sfx.play("bump");   // a soft thunk (shared sound)
+      },
+
+      // v2: any bounce (floor, walls, ceiling, pillars). The coloured patch
+      // on the surface itself comes from arena.flashWall, which the rules
+      // call separately; this adds the sparks.
+      onBounce(pos) { bounceSparks(pos); },
+      // v1 name for the same thing.
+      onWallBounce(pos) { bounceSparks(pos); },
+
       onKO(victim, owner) {
         const vColor = carColor(victim);
         const oColor = owner ? carColor(owner) : 0xffffff;
         const pos = victim.pos.clone();
-        pos.y = 0.8;
+        pos.y = Math.max(0.8, pos.y + 0.6);   // the car may be in the air
         // The car blows apart in its own colour, with the owner's colour mixed in.
         fx.explosion(pos, vColor);
         fx.burst(pos, [oColor, 0xffffff], { count: 22, speed: 15, up: 5, life: 0.9, size: 0.34 });
+        // Rings across the floor below it, plus a burst facing the camera.
         shockwave(pos, oColor, 1, 13, 0.9, 0.9, 0.06);
         shockwave(pos, vColor, 0.5, 7, 0.6, 1, 0.08);
+        shockwave(pos, 0xffffff, 1, 9, 0.5, 0.8);
         pop(pos, 0xffffff, 3, 16, 0.4);
         addShake(1.0);
-        zoom = Math.max(zoom, 0.7);
+        punch(0.7);
         koSlow = true;           // the KO pause plays as slow motion
         if (TP.HUD.flash) TP.HUD.flash(owner ? carCss(owner) : "#ffffff", 0.32);
-      },
-
-      onWallBounce(pos, normal) {
-        const b = duel.ball;
-        const frac = speedFrac();
-        const color = b.owner === null ? 0xffffff : TP.PLAYER_COLORS[duel.players[b.owner].seat];
-        const at = new THREE.Vector3(pos.x, ballY, pos.z);
-        fx.burst(at, [color, 0xffffff], { count: Math.round(5 + 10 * frac), speed: 5 + 8 * frac, up: 1, gravity: 18, life: 0.4, size: 0.18 });
-        if (frac > 0.25) addShake(0.08 + 0.25 * frac);
       },
 
       onServe() {
@@ -862,7 +1206,7 @@
         const car = result && duel.cars[result.winner];
         if (!car) return;
         const pos = car.pos.clone();
-        pos.y = 1;
+        pos.y = Math.max(1, pos.y + 1);
         fx.confetti(pos);
         fx.confetti(pos, { count: 40 });
         beam(car, carColor(car), 2.5, 2.2, 14);
@@ -874,8 +1218,8 @@
        compiles it, which can hitch the very first hit. So for the first
        couple of frames every pooled effect is drawn once, invisibly
        (opacity 0), to get that out of the way during the countdown. */
-    shockwave({ x: 0, z: 0 }, 0xffffff, 1, 1, 0.05, 0);
-    pop({ x: 0, z: 0 }, 0xffffff, 0.01, 0.01, 0.05);
+    shockwave({ x: 0, y: 1, z: 0 }, 0xffffff, 1, 1, 0.05, 0);
+    pop({ x: 0, y: 1, z: 0 }, 0xffffff, 0.01, 0.01, 0.05);
     let warmFrames = 2;
 
     /* =================== Every frame =================== */
@@ -891,10 +1235,14 @@
         for (const p of pops) p.sprite.material.opacity = 0;
       }
       updateBall(fdt, rawDt, frozen);
+      frameDt = rawDt;
       updateCars();
       updatePools(fdt);
       fx.update(fdt);
-      updateCamera(rawDt);
+      // The broadcast camera. main.js should call TP.DuelCamera.update()
+      // itself; until it does, this keeps the camera working (and stands
+      // aside automatically once main.js takes over).
+      if (TP.DuelCamera) TP.DuelCamera.auto(duel.camera, duel, rawDt);
     }
 
     function dispose() {
