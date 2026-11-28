@@ -50,7 +50,7 @@ TP.M5 = TP.M5 || {};
       maxTrail: 3.6,         // gives up and goes home after this long out
       defend: 0.5,           // chance it notices a threat at all
       margin: -0.3,          // extra seconds of safety it wants when defending
-      hunt: 14,              // how far it will go to cut a trail
+      hunt: 10,              // how far it will go to cut a trail
       ram: 0.2,              // chance it takes a ram chance
       ramp: 0,               // ramp-jump preference (0 = never)
       boostWaste: 0.5,       // chance per think it just boosts for fun
@@ -60,11 +60,11 @@ TP.M5 = TP.M5 || {};
     },
     normal: {
       think: 0.3, sizes: [13, 19, 26], greed: 0.85, maxTrail: 4.6, defend: 0.85, margin: 0.35,
-      hunt: 26, ram: 0.6, ramp: 0.5, boostWaste: 0.1, reserve: 25, noise: 0.07, mistake: 0.1,
+      hunt: 18, ram: 0.6, ramp: 0.5, boostWaste: 0.1, reserve: 25, noise: 0.07, mistake: 0.1,
     },
     hard: {
-      think: 0.15, sizes: [16, 24, 32], greed: 1.15, maxTrail: 5.1, defend: 1, margin: 0.75,
-      hunt: 40, ram: 1, ramp: 0.8, boostWaste: 0, reserve: 35, noise: 0, mistake: 0,
+      think: 0.15, sizes: [18, 26, 34], greed: 1.15, maxTrail: 5.4, defend: 1, margin: 0.75,
+      hunt: 28, ram: 1, ramp: 0.8, boostWaste: 0, reserve: 35, noise: 0, mistake: 0,
     },
   };
   TP.M5.BOT_LEVELS = LEVELS;
@@ -165,7 +165,10 @@ TP.M5 = TP.M5 || {};
        ------------------------------------------------------------------ */
     think() {
       const m = this.match, g = m.grid, car = this.car, p = car.index, L = this.L;
-      const trail = g.hasTrail(p);
+      // "Out with a trail" = we've left home and have wet paint behind us.
+      // (Wet paint at the edge of our turf while we're still home doesn't
+      // count: there's no loop to close yet.)
+      const trail = g.hasTrail(p) && m.out[p];
       const age = m.trailAge[p];
       // Re-check the way up to a raised target from where we actually are
       // (we may have been knocked off a ramp halfway up).
@@ -230,7 +233,11 @@ TP.M5 = TP.M5 || {};
     }
 
     /* Could a rival reach my trail before I get home (plus my safety
-       margin)? Easy bots don't always notice. */
+       margin)? Only rivals that are actually coming toward the trail (or
+       are already right next to it) count: with four cars in the arena
+       someone is always within a couple of seconds of you, and running
+       home from every one of them means never finishing a loop.
+       Easy bots don't always notice. */
     _trailInDanger() {
       if (Math.random() > this.L.defend) return false;
       const g = this.match.grid, car = this.car;
@@ -238,12 +245,17 @@ TP.M5 = TP.M5 || {};
       const myT = home ? dist2D(car.pos.x, car.pos.z, home.x, home.z) / SPEED : 3;
       const cells = this._wetCells(car.index, 2);
       for (const o of this._rivals()) {
-        let best = Infinity;
+        let best = Infinity, bx = 0, bz = 0;
         for (const c of cells) {
           const pt = g.centerOf(c);
-          best = Math.min(best, dist2D(o.pos.x, o.pos.z, pt.x, pt.z));
+          const d = dist2D(o.pos.x, o.pos.z, pt.x, pt.z);
+          if (d < best) { best = d; bx = pt.x; bz = pt.z; }
         }
-        const theirT = best / Math.max(14, o.speed2D() + 4);
+        if (best === Infinity) continue;
+        // How fast is the rival closing on that nearest trail cell?
+        const closing = best > 0.1 ? (o.vel.x * (bx - o.pos.x) + o.vel.z * (bz - o.pos.z)) / best : 0;
+        if (best > 7 && closing < 5) continue;   // not coming our way
+        const theirT = best / Math.max(8, closing);
         if (theirT < myT + this.L.margin) return true;
       }
       return false;
@@ -316,7 +328,7 @@ TP.M5 = TP.M5 || {};
           const d = dist2D(car.pos.x, car.pos.z, pt.x, pt.z);
           if (d > L.hunt) continue;
           const myT = d / mySpeed;
-          if (myT < theirT + 0.3 && myT < bestT && !m.arena.solidAt(pt.x, pt.z, 1)) { best = pt; bestT = myT; }
+          if (myT < theirT - 0.2 && myT < bestT && !m.arena.solidAt(pt.x, pt.z, 1)) { best = pt; bestT = myT; }
         }
         // 2) Cut-off point on their way home.
         if (!best && home && L.ram > 0.5) {
@@ -368,7 +380,7 @@ TP.M5 = TP.M5 || {};
         const c = g.nearest(pt.x, pt.z, (k) => g.isHome(k, p), 30);
         return c < 0 ? null : g.centerOf(c);
       };
-      const maxLen = L.maxTrail * (L.reserve ? 19 : 15);
+      const maxLen = L.maxTrail * (L.reserve >= 35 ? 21 : L.reserve ? 19 : 15);
 
       /* Where can a loop start? Right here, or (when we're deep inside our
          own colour, so a loop from here would just repaint our own floor)
@@ -516,7 +528,12 @@ TP.M5 = TP.M5 || {};
       for (const cd of shortlist) {
         const gain = cd.exact ? cd.gain : cd.kind === "ramp" ? cd.quick + g.estimateLoop(p, cd.pts.slice(-2)) : g.estimateLoop(p, cd.pts);
         cd.gain = gain;
-        const s = (gain * riskFactor(cd)) / timeOf(cd);
+        // Gain counts a bit more than linearly: one big loop beats two
+        // small ones of the same total (fewer trips out = fewer chances to
+        // be popped, and big fills swing the game). Tiny loops (under
+        // about 0.6% of the floor) aren't worth planning at all.
+        if (gain < 30 && cd.kind === "loop") continue;
+        const s = (Math.pow(gain, 1.5) * riskFactor(cd)) / timeOf(cd);
         if (s > bestScore) { bestScore = s; best = cd; }
       }
       // Weaker bots sometimes just pick something.

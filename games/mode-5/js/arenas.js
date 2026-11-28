@@ -51,9 +51,12 @@ TP.M5 = TP.M5 || {};
   // Rotate a ramp / point 90° about the centre: (x, z) → (-z, x).
   const rot90 = (r) => ({ ...r, x: -r.z, z: r.x, fx: -r.fz, fz: r.fx });
   const pinwheel = (r) => { const out = [r]; for (let i = 1; i < 4; i++) out.push(rot90(out[i - 1])); return out; };
-  // Four spawns in the quadrants, each car facing the middle.
+  /* Four spawns in the quadrants. Each car faces 35° off the middle
+     (all turned the same way, like a pinwheel), so holding the gas from
+     the start runs across open floor instead of into the centre pillar. */
+  const SPAWN_TURN = (35 * Math.PI) / 180;
   const quadrantSpawns = (d) => [[-d, -d], [d, -d], [-d, d], [d, d]].map(([x, z]) => ({
-    x, z, heading: Math.atan2(-x, -z),
+    x, z, heading: Math.atan2(-x, -z) + SPAWN_TURN,
   }));
 
   TP.M5.ARENAS = [
