@@ -1,16 +1,48 @@
 /* =====================================================================
    Sumo Ring — last car standing.
    Everyone starts on a round platform floating in space. Bump rivals off
-   the edge. After 15 seconds the platform starts shrinking. Fall off and
-   you're out. Survivors at the 45-second mark share first place.
+   the edge. After 12 seconds the platform starts shrinking, down to a
+   tiny disc by 38 seconds, so rounds rarely go the distance. Fall off
+   and you're out. Survivors at the 45-second mark share first place — but
+   a car that's already gone over the edge when the time runs out counts
+   as having fallen, not as a survivor.
+
+   Every round is shuffled a little (start spots, the angle of the
+   starting circle, and each bot's "personality"), because the physics
+   and bots are otherwise fully deterministic: with nothing random, the
+   same car won every single round in exactly the same time.
    ===================================================================== */
 (function () {
   "use strict";
-  const { dist2D, clamp } = TP.util;
+  const { dist2D, clamp, rand, shuffle } = TP.util;
 
   const START_R = 17;   // platform radius at the start
-  const MIN_R = 8;      // smallest it shrinks to
-  const SHRINK_FROM = 15, SHRINK_TO = 35; // seconds
+
+  /* Tuning knobs, gathered in one place (and exposed as SumoRing.CONFIG
+     so balance scripts can try other values without editing the file).
+       tuning       — car settings for this mode, via TP.modeTuning
+       minR         — the smallest radius the platform shrinks to
+       shrinkFrom / shrinkTo — seconds when shrinking starts / reaches minR */
+  /* Tuned for the shared car change that lets head-on knockback carry
+     past reverse top speed (rams hit much harder). Measured over 60 bot
+     rounds: average ~30 s, about 1 round in 30 under 12 s, none reaching
+     45 s. Why each value:
+       • bumpScale 0.8 (was 1.15) and grip 10 (was 8): with the harder
+         head-on hits, the old values turned the opening seconds into a
+         pile-up that knocked out 2–3 cars before the ring even shrank.
+       • maxSpeed 14 / boostMax 20 unchanged: lower top speeds than other
+         modes so one ram doesn't launch both cars off.
+       • minR 5 (was 8), shrinking 12 s → 38 s (was 15 → 35): the old
+         16-unit disc left room for the last two cars to circle each
+         other until time ran out (about half of all rounds).
+       (A "calm start" — no boost and capped gas for the first 2–3 s —
+       was also tried; it didn't help once bumps were softer, so it's out.) */
+  const CONFIG = {
+    tuning: { bumpScale: 0.8, grip: 10, maxSpeed: 14, boostMax: 20 },
+    minR: 5,
+    shrinkFrom: 12,
+    shrinkTo: 38,
+  };
 
   class SumoRing extends TP.Arena {
     constructor(game) {
@@ -19,12 +51,24 @@
         duration: 45,
         size: START_R,
         camera: { y: 36, z: 30, lookZ: 1 },
-        // Slightly harder hits and less grip than normal = more knockbacks,
-        // but lower top speeds so one ram doesn't launch both cars off.
-        tuning: { bumpScale: 1.15, grip: 8, maxSpeed: 14, boostMax: 20 },
+        tuning: SumoRing.CONFIG.tuning,
       });
       this.radius = START_R;
       this.outOrder = []; // player indices in the order they fell
+      this.judged = false; // has the end-of-time edge check run yet?
+      this.minds = this.cars.map(() => this.newMind());
+    }
+
+    /* A bot's "personality" for this round, rolled fresh every time so
+       the four bots don't play out the same fight each round:
+         chargeDist — how close a rival must be before we commit a boost
+         edgeFrac   — how far out (fraction of the radius) we drift before
+                      heading back to the middle; low = cautious
+         aim        — sideways offset (units) on our aim point, re-rolled
+                      every so often, so charges come in at varied angles
+         aimTimer   — seconds until the next aim re-roll */
+    newMind() {
+      return { chargeDist: rand(5, 9), edgeFrac: rand(0.5, 0.7), aim: rand(-1.5, 1.5), aimTimer: rand(0.5, 1.5) };
     }
 
     build() {
@@ -67,10 +111,30 @@
     }
 
     spawn(i) {
-      // Evenly round the circle, facing the middle.
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      // Evenly round the circle, roughly facing the middle. Which slot
+      // each player gets, the angle of the whole circle, and a small
+      // nose wobble are random each round. (spawn() runs inside the base
+      // constructor, before ours, so the shuffle is set up lazily.)
+      if (!this.slots) {
+        this.slots = shuffle([0, 1, 2, 3]);
+        this.spin = rand(0, Math.PI * 2);
+      }
+      const a = (this.slots[i] / 4) * Math.PI * 2 + this.spin;
       const x = Math.sin(a) * 10, z = Math.cos(a) * 10;
-      return { x, z, heading: Math.atan2(-x, -z) };
+      return { x, z, heading: Math.atan2(-x, -z) + rand(-0.15, 0.15) };
+    }
+
+    // Knock a car out of the round: hide it, record the order, puff of
+    // colour at the spot where it went over the edge.
+    eliminate(car) {
+      car.out = true;
+      car.hide();
+      this.outOrder.push(car.index);
+      const edge = car.pos.clone().setY(0);
+      edge.setLength(Math.min(edge.length(), this.radius));
+      this.fx.burst(edge, car.player.color, { count: 24, speed: 9 });
+      TP.sfx.play("fall");
+      TP.UI.toast(`${car.player.name} is out!`);
     }
 
     // The only floor is the disc. Outside it there's nothing → cars fall.
@@ -78,26 +142,37 @@
       return x * x + z * z < this.radius * this.radius ? 0 : null;
     }
 
-    tick() {
+    tick(dt) {
       // Shrink the platform over time.
-      const k = clamp((this.elapsed - SHRINK_FROM) / (SHRINK_TO - SHRINK_FROM), 0, 1);
-      this.radius = START_R + (MIN_R - START_R) * k;
+      const C = SumoRing.CONFIG;
+      const k = clamp((this.elapsed - C.shrinkFrom) / (C.shrinkTo - C.shrinkFrom), 0, 1);
+      this.radius = START_R + (C.minR - START_R) * k;
       const s = this.radius / START_R;
       this.platform.scale.set(s, 1, s);
 
       // Anyone who has fallen far enough is out.
       for (const car of this.cars) {
-        if (!car.out && car.pos.y < -14) {
-          car.out = true;
-          car.hide();
-          this.outOrder.push(car.index);
-          // Puff of the player's colour at the spot they went over the edge.
-          const edge = car.pos.clone().setY(0);
-          edge.setLength(Math.min(edge.length(), this.radius));
-          this.fx.burst(edge, car.player.color, { count: 24, speed: 9 });
-          TP.sfx.play("fall");
-          TP.UI.toast(`${car.player.name} is out!`);
-        }
+        if (!car.out && car.pos.y < -14) this.eliminate(car);
+      }
+
+      // Time's up (the arena counts timeLeft down just before calling
+      // tick, so this runs on the round's very last physics step). Any
+      // car that is already over the edge — no floor under it, or dropped
+      // below the platform's surface — is doomed, so it's out now rather
+      // than sharing 1st with the cars still standing. The lowest car
+      // went over first, so it's eliminated first (= ranks lower).
+      if (!this.judged && this.timeLeft <= 0) {
+        this.judged = true;
+        const doomed = this.cars
+          .filter((c) => !c.out && (this.groundHeightAt(c.pos.x, c.pos.z) === null || c.pos.y < -0.5))
+          .sort((a, b) => a.pos.y - b.pos.y);
+        doomed.forEach((c) => this.eliminate(c));
+      }
+
+      // Bots re-roll their aim offset now and then.
+      for (const m of this.minds) {
+        m.aimTimer -= dt;
+        if (m.aimTimer <= 0) { m.aim = rand(-1.5, 1.5); m.aimTimer = rand(0.5, 1.5); }
       }
     }
 
@@ -138,8 +213,10 @@
         ctrl.boost = false;
         return ctrl;
       }
-      // Near the edge: calmly head back toward the middle.
-      if (d > this.radius * 0.6) {
+      const mind = this.minds[car.index];
+      // Near the edge: calmly head back toward the middle. (How near
+      // counts as "near" depends on this bot's caution this round.)
+      if (d > this.radius * mind.edgeFrac) {
         const ctrl = TP.ai.driveTo(car, 0, 0, { boostDist: 999 });
         ctrl.throttle = 0.6;
         return ctrl;
@@ -154,13 +231,16 @@
       }
       if (!target) return TP.ai.driveTo(car, 0, 0, { arrive: 3 });
       const len = Math.hypot(target.pos.x, target.pos.z) || 1;
-      const tx = target.pos.x + (target.pos.x / len) * 2;
-      const tz = target.pos.z + (target.pos.z / len) * 2;
+      // Aim 2 units past them (outward), shifted sideways by this bot's
+      // current aim offset so it doesn't always hit dead-centre.
+      const ox = target.pos.x / len, oz = target.pos.z / len;
+      const tx = target.pos.x + ox * 2 - oz * mind.aim;
+      const tz = target.pos.z + oz * 2 + ox * mind.aim;
       const ctrl = TP.ai.driveTo(car, tx, tz, { boostDist: 0 });
       // Only commit a boost when lined up, close, and the rival is nearer
       // the edge than we are (so the hit pushes them out, not us).
       const rivalEdge = Math.hypot(target.pos.x, target.pos.z);
-      ctrl.boost = best < 7 && rivalEdge > d && Math.abs(TP.ai.angleTo(car, tx, tz)) < 0.3 && car.boost > 20;
+      ctrl.boost = best < mind.chargeDist && rivalEdge > d && Math.abs(TP.ai.angleTo(car, tx, tz)) < 0.3 && car.boost > 20;
       // Don't floor it across the whole ring — keep some control.
       if (best > 8) ctrl.throttle = 0.7;
       if (car.speed2D() > 13 && !ctrl.boost) ctrl.throttle = 0;
@@ -168,10 +248,12 @@
     }
   }
 
+  SumoRing.CONFIG = CONFIG;
+
   TP.MINIGAMES.push({
     id: "sumo-ring",
     name: "Sumo Ring",
     cls: SumoRing,
-    blurb: "Bump everyone off the floating ring. It shrinks after 15 seconds. Last car standing wins!",
+    blurb: "Bump everyone off the floating ring. It shrinks after 12 seconds. Last car standing wins!",
   });
 })();

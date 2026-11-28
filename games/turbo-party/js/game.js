@@ -16,6 +16,8 @@
 
   // Coins paid for 1st, 2nd, 3rd, 4th in a minigame.
   const PAYOUT = [10, 6, 3, 0];
+  // Coins each player gets when the WHOLE field ties (see Game.payouts).
+  const ALL_TIE_PAYOUT = 3;
   const PLACE_NAMES = ["1st", "2nd", "3rd", "4th"];
 
   // Music speed per phase (beats per minute).
@@ -31,6 +33,30 @@
   ];
 
   class Game {
+    /* Turn a minigame ranking (groups of tied player indices, best first,
+       e.g. [[2], [0, 1], [3]]) into who gets what. Director's ruling:
+         • EVERYONE tied (e.g. 0-0-0-0, nobody did anything): each player
+           gets ALL_TIE_PAYOUT coins and nobody is credited with a win —
+           otherwise a dead round would hand all four a "Minigame Ace" win.
+         • Partial tie: tied players all get the higher place's payout
+           (two players tied for 2nd both get 2nd-place coins, and the next
+           player is 4th). A tie for 1st counts as a win for each of them.
+       Returns [{ index, place, gain, win }] in ranking order. Kept as a
+       pure function (no side effects) so it's easy to test on its own. */
+    static payouts(ranking) {
+      const out = [];
+      if (ranking.length === 1 && ranking[0].length > 1) {
+        for (const i of ranking[0]) out.push({ index: i, place: 0, gain: ALL_TIE_PAYOUT, win: false });
+        return out;
+      }
+      let place = 0; // 0-based place of the current group
+      for (const group of ranking) {
+        for (const i of group) out.push({ index: i, place, gain: PAYOUT[place], win: place === 0 });
+        place += group.length; // ties use up the places they share
+      }
+      return out;
+    }
+
     /* config = { turns, bonuses, slots: [{ name, controller }, ×4] } */
     constructor(config) {
       this.turns = config.turns;
@@ -147,19 +173,14 @@
       arena.dispose();
       TP.sfx.setTempo(BOARD_BPM);
 
-      // Pay out by place. Tied players all get the higher place's reward.
+      // Pay out by place (rules in Game.payouts below).
       const rows = [];
-      let place = 0;
-      for (const group of ranking) {
-        for (const i of group) {
-          const p = this.players[i];
-          const gain = PAYOUT[place];
-          p.coins += gain;
-          p.stats.coinsEarned += gain;
-          if (place === 0) p.stats.minigameWins++;
-          rows.push({ p, place, gain });
-        }
-        place += group.length;
+      for (const r of Game.payouts(ranking)) {
+        const p = this.players[r.index];
+        p.coins += r.gain;
+        p.stats.coinsEarned += r.gain;
+        if (r.win) p.stats.minigameWins++;
+        rows.push({ p, place: r.place, gain: r.gain });
       }
 
       ui.setPlayers(this.players);
