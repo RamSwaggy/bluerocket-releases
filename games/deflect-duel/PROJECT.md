@@ -118,3 +118,8 @@ From the `games` folder:
   moveset" (from the Core session), and a side-angle broadcast camera. See `DESIGN.md`. v1 stays
   on the hub as Play while v2 is built. Genre conventions only, with no other game's names or
   look.
+- 2026-11-28 (Reece, via the Director): "Bunting should be a flip reset (touching with 4 wheels)."
+  A bunt is no longer a button. When the car touches the ball with its underside (all four
+  wheels), the ball pops up gently and slows, the toucher keeps or takes ownership, there's no
+  hit-freeze, and the car gets its jump and flip back. Hit in the air with no direction is a
+  normal straight strike. `DESIGN.md` is updated.
