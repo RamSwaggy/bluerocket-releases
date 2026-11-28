@@ -139,6 +139,14 @@
             : `${data.victim.name} is OUT!`,
           data.owner ? data.owner.css : "", 1.6);
         break;
+      case "bunt":
+        TP.sfx.play("swing");
+        TP.HUD.toast("BUNT", data.player.css, 0.7);
+        break;
+      case "clash":
+        TP.sfx.play("hit", 1);
+        TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
+        break;
       case "stalemate":
         TP.HUD.toast("Nobody hit it: re-serve", "", 1.2);
         break;
