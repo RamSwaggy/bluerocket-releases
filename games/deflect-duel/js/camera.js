@@ -17,6 +17,7 @@
    Effects (arena.js) call:
      TP.DuelCamera.shake(duel.camera, 0.4);   // add trauma (0..1-ish)
      TP.DuelCamera.punch(duel.camera, 1);     // zoom punch (0..1)
+     TP.DuelCamera.focus(duel.camera, car, k); // push in on a striker during a long freeze
 
    Safety net: if main.js doesn't call update(), arena.js calls
    TP.DuelCamera.auto() every frame instead, so the camera still works.
@@ -56,6 +57,8 @@
         zoom: 0,
         t: 0,
         explicitAt: -1e9,      // when main.js last called update() (ms)
+        focus: null,           // { car, strength } — the freeze punch-in on a striker
+        release: 0,            // seconds of quick easing back out after a punch-in
       };
     }
     return camera.userData.duelCam;
@@ -148,13 +151,34 @@
     s.zoom = Math.max(0, s.zoom - dt * 2.2);
 
     const want = desiredFrame(camera, duel);
+    const frozen = duel.freezeLeft > 0;
+
+    /* Freeze punch-in: during a long hit-freeze the shot pushes in on the
+       striker and the ball (the standoff), scaled by how long the freeze
+       is. When the freeze ends it eases back out quickly, so the shot is
+       wide again by the time the ball is flying. */
+    let rate = frozen ? SHOT.easeFrozen : SHOT.ease;
+    if (s.focus && frozen) {
+      const k = s.focus.strength;
+      const car = s.focus.car;
+      const b = duel.ball;
+      if (car && car.pos && b) {
+        tmp.set((car.pos.x + b.pos.x) / 2, Math.max(1.4, (car.pos.y + b.pos.y) / 2 + 0.6), (car.pos.z + b.pos.z) / 2);
+        want.target.lerp(tmp, 0.85 * k);
+      }
+      want.dist = Math.max(SHOT.minDist * 0.45, want.dist * (1 - 0.6 * k));
+      rate = 7;                      // get in fast: the freeze is short
+    } else if (s.focus && !frozen) {
+      s.focus = null;
+      s.release = 0.5;
+    }
+    if (s.release > 0) { s.release -= dt; rate = Math.max(rate, 5); }
+
     if (!s.target) {
       // First frame: snap straight to the shot.
       s.target = want.target.clone();
       s.dist = want.dist;
     } else {
-      const frozen = duel.freezeLeft > 0;
-      const rate = frozen ? SHOT.easeFrozen : SHOT.ease;
       const k = 1 - Math.exp(-rate * dt);   // frame-rate independent easing
       s.target.lerp(want.target, k);
       s.dist += (want.dist - s.dist) * k;
@@ -191,6 +215,14 @@
       if (!camera) return;
       const s = state(camera);
       s.zoom = Math.max(s.zoom, Math.min(1, amount));
+    },
+
+    /* Push in on a striker for the coming hit-freeze. strength 0..1 (the
+       effects scale it by the freeze length). Ends by itself when the
+       freeze does. */
+    focus(camera, car, strength) {
+      if (!camera || !car || !(strength > 0)) return;
+      state(camera).focus = { car, strength: Math.min(1, strength) };
     },
 
     // Jump straight to the shot next frame (e.g. after a rematch).

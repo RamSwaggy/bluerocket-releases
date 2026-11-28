@@ -11,6 +11,56 @@
   let lastHud = "";
   let nav = null;   // gamepad/arrow-key navigation on the current card (TP.MenuNav)
 
+  /* ---------- Rolling speed number ----------
+     The shown number eases from where it was to the new speed over a
+     short time, like a fruit-machine counter, so a big jump reads as a
+     climb. A drop (a serve) snaps down quickly. */
+  const speedRoll = { shown: 0, from: 0, to: 0, t0: 0, dur: 0.18, nextDur: 0 };
+  // Colour stops along the way to top speed (fraction of max → colour).
+  const RAMP = [[0, [255, 255, 255]], [0.12, [125, 211, 252]], [0.3, [255, 225, 77]], [0.5, [255, 159, 26]], [0.72, [255, 59, 59]], [1, [255, 79, 216]]];
+  function rampColor(f) {
+    f = Math.max(0, Math.min(1, f));
+    for (let i = 1; i < RAMP.length; i++) {
+      const [f1, c1] = RAMP[i], [f0, c0] = RAMP[i - 1];
+      if (f <= f1) {
+        const k = (f - f0) / (f1 - f0);
+        return `rgb(${c0.map((v, j) => Math.round(v + (c1[j] - v) * k)).join(",")})`;
+      }
+    }
+    return "rgb(255,79,216)";
+  }
+  function drawSpeed(speed, ownerCss) {
+    const box = document.getElementById("speed");
+    if (!box) return;
+    const now = performance.now() / 1000;
+    const r = speedRoll;
+    if (Math.abs(speed - r.to) > 0.5) {
+      // A new target: roll from what's on screen now.
+      r.from = r.shown;
+      r.to = speed;
+      r.t0 = now;
+      r.dur = speed < r.shown ? 0.15 : (r.nextDur || 0.18);
+      r.nextDur = 0;
+    }
+    const k = Math.min(1, (now - r.t0) / r.dur);
+    const ease = 1 - Math.pow(1 - k, 3);            // fast at first, settles at the end
+    r.shown = r.from + (r.to - r.from) * ease;
+    const rolling = k < 1 && r.to > r.from;
+
+    const max = (TP.duel && TP.duel.cfg && TP.duel.cfg.maxSpeed) || (TP.DUEL_CFG && TP.DUEL_CFG.maxSpeed) || 56;
+    const f = r.shown / max;
+    const val = box.querySelector(".val");
+    val.textContent = String(Math.round(r.shown));
+    const col = rampColor(f);
+    val.style.color = col;
+    // Bigger as it gets faster (30px → 50px), with a glow while it climbs.
+    val.style.fontSize = (30 + 20 * Math.min(1, f)) + "px";
+    val.style.textShadow = rolling ? `0 0 18px ${col}` : (f > 0.5 ? `0 0 10px ${col}` : "none");
+    box.classList.toggle("rolling", rolling);
+    box.style.borderBottom = `4px solid ${ownerCss || "transparent"}`;
+    box.querySelector(".label").style.color = ownerCss && ownerCss !== "#ffffff" ? ownerCss : "";
+  }
+
   // Hook gamepad + arrow-key navigation onto a freshly drawn card,
   // dropping whatever was attached to the previous one.
   function attachNav(card, opts) {
@@ -23,9 +73,12 @@
     esc,
 
     /* Top bar: a chip per player (hearts = lives left) and the ball's
-       speed in the middle. `ballCss` tints the speed by the ball's owner. */
+       speed in the middle. `ballCss` is the ball owner's colour: it tints
+       the speed box's label and underline. The NUMBER rolls up to the new
+       speed (see rollSpeed) and its colour ramps white → cyan → yellow →
+       orange → red → pink as the ball gets faster, growing as it goes. */
     update(players, speed, ballCss) {
-      if (!players) { $("hud").classList.remove("show"); lastHud = ""; return; }
+      if (!players) { $("hud").classList.remove("show"); lastHud = ""; speedRoll.shown = 0; speedRoll.to = 0; return; }
       const half = Math.ceil(players.length / 2);
       const chip = (p) => `
         <div class="chip ${p.lives <= 0 ? "out" : ""}" style="border-color:${p.css}">
@@ -34,13 +87,17 @@
         </div>`;
       const html =
         players.slice(0, half).map(chip).join("") +
-        `<div id="speed"><div class="label">BALL SPEED</div>
-           <div class="val" style="color:${ballCss}">${Math.round(speed)}</div></div>` +
+        `<div id="speed"><div class="label">BALL SPEED</div><div class="val">0</div></div>` +
         players.slice(half).map(chip).join("");
-      // Only touch the DOM when something actually changed (it's per-frame).
+      // Only rebuild the chips when something in them changed (it's per-frame).
       if (html !== lastHud) { $("hud").innerHTML = html; lastHud = html; }
       $("hud").classList.add("show");
+      drawSpeed(speed, ballCss);
     },
+
+    /* The next speed change rolls up over `seconds` (e.g. the length of
+       the hit-freeze that's about to start), instead of the quick default. */
+    rollSpeed(seconds) { speedRoll.nextDur = Math.max(0.1, seconds); },
 
     center(text, sub = "", color = "") {
       $("center-msg").innerHTML = text

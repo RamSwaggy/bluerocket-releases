@@ -686,6 +686,17 @@
     const heightLine = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.05, 0.05, 1, 6, 1, true)), keep(glowMat(0xffffff, 0.2)));
     heightLine.visible = false;
     group.add(heightLine);
+    /* Speed streak: a stretched glow along the ball's velocity, so a very
+       fast ball reads as a bolt rather than a dot. During a hit-freeze a
+       thin "lead line" also shows which way the ball is about to fly. */
+    const streak = new THREE.Mesh(keep(new THREE.SphereGeometry(1, 16, 10)), keep(glowMat(0xffffff, 0)));
+    streak.visible = false;
+    group.add(streak);
+    const leadLine = new THREE.Mesh(keep(new THREE.CylinderGeometry(0.07, 0.07, 1, 6, 1, true)), keep(glowMat(0xffffff, 0)));
+    leadLine.visible = false;
+    group.add(leadLine);
+    const velDir = new THREE.Vector3();
+    const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
     /* The trail: a flat ribbon through the ball's recent positions,
        brightest at the ball and fading to nothing. Points older than the
@@ -712,7 +723,13 @@
     const segDir = new THREE.Vector3(), toCam = new THREE.Vector3(), side = new THREE.Vector3();
     function updateTrail(dt, frozen, color, frac) {
       const b = duel.ball;
-      const life = 0.12 + 0.28 * frac;                 // seconds a point lives
+      /* Trail length in world units grows with speed but is capped, so a
+         200+ ball leaves a long clean streak instead of a line across the
+         whole arena. Point lifetime = length ÷ speed. */
+      const spd = Math.max(1, b.speed || 0);
+      const lenWanted = Math.min(22, 3 + spd * 0.12);
+      // (At least 3 frames' worth, so a slow computer still draws a streak.)
+      const life = Math.max(0.05, 3 * dt, Math.min(0.4, lenWanted / spd));
       // The ball jumped further than it could ever move in a frame (a
       // serve, or a test placing it): start a fresh trail, no streak.
       if (trail.length && Math.hypot(trail[0].x - b.pos.x, trail[0].y - b.pos.y, trail[0].z - b.pos.z) > 5) trail.length = 0;
@@ -820,6 +837,34 @@
         heightLine.scale.set(1, b.pos.y - R, 1);
         heightLine.material.color.copy(tmpColor);
         heightLine.material.opacity = 0.22 * Math.min(1, (h - 2.5) / 2);
+      }
+
+      // Streak and lead line along the velocity.
+      const v = b.vel;
+      const spd = b.speed || (v ? v.length() : 0);
+      const showStreak = !neutral && v && spd > 30;
+      streak.visible = !!showStreak;
+      leadLine.visible = false;
+      if (showStreak) {
+        velDir.copy(v).normalize();
+        const len = R + spd * 0.028;                 // 210 → about 6.8 units long
+        // Stretch a sphere along its Y axis, turned to point along the velocity,
+        // and slide it back so it trails behind the ball.
+        streak.quaternion.setFromUnitVectors(Y_AXIS, velDir);
+        streak.scale.set(R * 0.9, len / 2, R * 0.9);
+        streak.position.copy(b.pos).addScaledVector(velDir, -len / 2 + R * 0.5);
+        streak.material.color.copy(tmpColor);
+        streak.material.opacity = (0.25 + 0.35 * Math.min(1, spd / 150)) * (0.4 + 0.6 * heat);
+        if (duel.freezeLeft > 0.15) {
+          // The standoff: show where it's going.
+          const ll = 6 + spd * 0.06;
+          leadLine.visible = true;
+          leadLine.quaternion.copy(streak.quaternion);
+          leadLine.scale.set(1, ll, 1);
+          leadLine.position.copy(b.pos).addScaledVector(velDir, ll / 2 + R);
+          leadLine.material.color.copy(tmpColor);
+          leadLine.material.opacity = 0.35 + 0.25 * Math.sin(t * 18);
+        }
       }
 
       updateTrail(dt, frozen, tmpColor, frac);
@@ -1016,6 +1061,9 @@
     // Sparks where the ball touched a wall, the floor, the ceiling or a pillar.
     function bounceSparks(pos) {
       const b = duel.ball;
+      // Put the exact bounce point into the trail, so a fast ball's streak
+      // bends at the wall instead of cutting through it between frames.
+      if (trail.length) trail.unshift({ x: pos.x, y: pos.y ?? ballY, z: pos.z, age: 0 });
       const frac = speedFrac();
       const color = b.owner === null || b.owner === undefined ? 0xffffff : TP.PLAYER_COLORS[duel.players[b.owner].seat];
       const at = new THREE.Vector3(pos.x, pos.y ?? ballY, pos.z);
@@ -1023,13 +1071,28 @@
       if (frac > 0.25) addShake(0.08 + 0.25 * frac);
     }
 
+    /* The standoff: a long hit-freeze (fast balls) pushes the camera in on
+       the striker and rolls the speed readout up over the freeze. Short
+       freezes (slow balls) skip the push-in. */
+    let lastStandoffAt = -1;
+    function standoff(car, seconds) {
+      if (!(seconds > 0)) return;
+      if (TP.HUD.rollSpeed) TP.HUD.rollSpeed(Math.min(1.1, Math.max(0.15, seconds * 0.85)));
+      const k = Math.max(0, Math.min(1, (seconds - 0.15) / 0.8));
+      if (k > 0 && TP.DuelCamera) TP.DuelCamera.focus(duel.camera, car, k);
+      lastStandoffAt = t;
+    }
+
     /* =================== Hooks (called by the rules) =================== */
     const hooks = {
       // A strike connected. frac: 0 at base speed → 1 at max. smash: struck while boosting.
-      onHit(car, ball, frac, smash) {
+      onHit(car, ball, frac, smash, info) {
         const color = carColor(car);
         const pos = ball.pos;
         ballFlash = 1;
+        // Freeze length: from the rules if they pass it (info.freeze), else
+        // read it straight off the duel (the rules set it just before this hook).
+        standoff(car, (info && info.freeze) ?? duel.freezeLeft);
         // Impact pop and a shockwave standing up to face the camera.
         pop(pos, 0xffffff, R * 2, R * (6 + 5 * frac), 0.22);
         shockwave(pos, color, R, R * (4 + 5 * frac), 0.45, 0.9);
@@ -1052,6 +1115,12 @@
       },
 
       onSwing() { /* the swipe is drawn every frame from swingT (updateCars) */ },
+
+      // If the rules announce a freeze separately: (seconds, car).
+      onFreeze(seconds, car) {
+        if (t - lastStandoffAt < 0.05) return;   // onHit already handled this one
+        standoff(car || null, seconds);
+      },
 
       // Two strikes landed together: both cars bounce off, the ball stays put.
       // The biggest flash in the game, in BOTH strikers' colours.
