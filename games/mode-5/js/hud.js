@@ -141,7 +141,7 @@
   .m5-card { pointer-events: auto; overscroll-behavior: contain; overflow: auto; padding: clamp(14px, 2.4vw, 24px); background: rgba(12, 15, 36, .93);
     border: 2px solid var(--m5-line); box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset;
     transition: transform .45s cubic-bezier(.2,.9,.25,1); }
-  .m5-card-wrap.side { justify-content: flex-end; align-items: center; padding: 16px max(16px, env(safe-area-inset-right)) 16px 16px; }
+  .m5-card-wrap.side { justify-content: flex-end; align-items: flex-end; /* sits low so it clears the player chips */ padding: 16px max(16px, env(safe-area-inset-right)) 16px 16px; }
   .m5-card-wrap.side .m5-card { width: min(380px, 38vw); max-height: calc(100vh - 32px); border-radius: 22px; transform: translateX(110%); }
   .m5-card-wrap.sheet { justify-content: center; align-items: flex-end; }
   .m5-card-wrap.sheet .m5-card { width: 100%; max-width: 640px; max-height: 54vh; border-radius: 22px 22px 0 0; background: rgba(12, 15, 36, .98);
@@ -176,6 +176,13 @@
   .m5-stats th:first-child, .m5-stats td:first-child { text-align: left; }
   .m5-card .foot { margin-top: 14px; color: #9aa6c8; font-size: 14px; text-align: center; }
   .m5-card .foot b { white-space: nowrap; }   /* never split "Blue 0" across lines */
+  .m5-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+  .m5-act { font: inherit; font-weight: 900; font-style: italic; font-size: 16px; cursor: pointer; border-radius: 12px;
+    padding: 10px 18px; min-height: 44px; border: 2px solid var(--m5-line); background: #1a2042; color: #f2f5ff;
+    text-decoration: none; display: inline-flex; align-items: center; }
+  .m5-act.primary { border: none; color: #1a0610; background: linear-gradient(90deg, #ffd23f, #ff3d9a); padding: 10px 26px; }
+  .m5-act:focus-visible, .m5-act.rr-nav-focus { outline: 2px solid #ffd23f; outline-offset: 2px; }
+  @media (max-height: 500px) { .m5-actions { margin-top: 8px; } .m5-act { min-height: 36px; padding: 6px 14px; font-size: 14px; } }
   .m5-card .why { margin: -6px 0 12px; color: #c8d0ea; font-size: 14px; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -577,7 +584,8 @@
         }).join("")}
         ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th${k === "distance" ? ' class="opt"' : ""}>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
           ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
-            ${keys.map((k) => `<td${k === "distance" ? ' class="opt"' : ""}>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
+            ${keys.map((k) => `<td${k === "distance" ? ' class="opt"' : ""}>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}
+        ${this.actionsHtml()}`);
     }
 
     // Match card for 2v2: team rows (rounds won, or final floor for one round)
@@ -599,7 +607,8 @@
         ${stats.length ? `<table class="m5-stats"><tr><th>Player</th><th>Best fill</th><th>Fills</th><th>Pops</th></tr>
           ${ps.map((p) => `<tr><td style="color:${CSS()[p.index % 4]};font-weight:800">${esc(p.name)}</td>
             <td>${stats[p.index] ? Math.round(stats[p.index].bestFill * 10) / 10 + "%" : "–"}</td>
-            <td>${stats[p.index] ? stats[p.index].fills : "–"}</td><td>${stats[p.index] ? stats[p.index].pops : "–"}</td></tr>`).join("")}</table>` : ""}`);
+            <td>${stats[p.index] ? stats[p.index].fills : "–"}</td><td>${stats[p.index] ? stats[p.index].pops : "–"}</td></tr>`).join("")}</table>` : ""}
+        ${this.actionsHtml()}`);
     }
 
     // Side panel on wide screens, bottom sheet on tall ones.
@@ -617,8 +626,43 @@
       // Let the bars grow from zero (CSS transition) a moment after showing.
       setTimeout(() => this.cardWrap.querySelectorAll(".fill").forEach((f) => { f.style.width = f.dataset.w + "%"; }), 60);
       setTimeout(() => this.measureSafeArea(), 500);
+      this.wireActions();
+    }
+
+    /* ---------- What next? (match results only) ----------
+       Rematch (same players and options), Menu (back to the title menu),
+       or ← All modes (the Rocket Rumble hub). Mouse/touch, keyboard
+       (Rematch is focused, so Enter/Space press it; Tab moves) and
+       gamepad (shared TP.MenuNav: d-pad + A, Start = Rematch). */
+    actionsHtml() {
+      return `<div class="m5-actions">
+        <button type="button" class="m5-act primary" data-act="rematch" data-nav-primary>Rematch</button>
+        <button type="button" class="m5-act" data-act="menu">Menu</button>
+        <a class="m5-act" href="${esc((TP.Rumble && TP.Rumble.HUB_URL) || "../index.html")}">← All modes</a>
+      </div>`;
+    }
+    wireActions() {
+      const box = this.cardWrap.querySelector(".m5-actions");
+      if (!box) return;
+      box.addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-act]");
+        if (!b) return;
+        const act = b.dataset.act;
+        this.hideCard();
+        if (act === "rematch") { if (TP.M5.restart) TP.M5.restart(); }
+        else if (act === "menu") { TP.M5.emit("quit"); if (TP.M5.Menu) TP.M5.Menu.open(); }
+      });
+      // Arrive a beat after the card so a button still held from play
+      // (boost, jump) doesn't press anything by accident.
+      setTimeout(() => {
+        if (!this.cardWrap.classList.contains("show") || !box.isConnected) return;
+        const first = box.querySelector("[data-act=rematch]");
+        if (first) first.focus({ preventScroll: true });
+        if (TP.MenuNav && !this.cardNav) this.cardNav = TP.MenuNav.attach(box, {});
+      }, 600);
     }
     hideCard() {
+      if (this.cardNav) { this.cardNav.detach(); this.cardNav = null; }
       this.cardWrap.classList.remove("show");
       this.pending = null;
       this.segs.forEach((s) => s.chip.classList.remove("win"));
