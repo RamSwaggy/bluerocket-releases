@@ -17,7 +17,8 @@
      event  — a random surprise (see runEvent)
      shop   — buy an item to use at the start of a later turn
    The trophy sits on one space. Drive onto or past it with 20+ coins
-   and you can buy it; then it moves somewhere else.
+   and you can buy it (once per turn); then it moves at least 10 spaces
+   further along the track.
    ===================================================================== */
 (function () {
   "use strict";
@@ -29,13 +30,17 @@
   const TOKEN_SCALE = 0.55;   // cars are shrunk down on the board
   const STEP_TIME = 0.3;      // seconds to hop one space
   const MAX_ITEMS = 2;
+  // After someone buys the trophy it moves at least this many spaces
+  // ahead of them (counted along the track), so it can't just be re-bought.
+  const MIN_TROPHY_AHEAD = 10;
 
   const SPACE_STYLE = {
     start: { color: 0xffffff, emissive: 0x666666 },
     blue: { color: 0x2f6bff, emissive: 0x0d2a7a },
     red: { color: 0xff3b3b, emissive: 0x6b0d0d },
     boost: { color: 0xffb020, emissive: 0x6b4300 },
-    event: { color: 0x22d3a6, emissive: 0x0b5c48 },
+    // Event is lime, not teal: from the overview camera teal read as "another blue".
+    event: { color: 0x9be22d, emissive: 0x3a5c0a },
     shop: { color: 0xa855f7, emissive: 0x3d1466 },
   };
 
@@ -68,6 +73,7 @@
       this.camOffset = new THREE.Vector3(0, 62, 48);    // camera position relative to focus
       this.camera.position.copy(this.camFocus).add(this.camOffset);
       this.orbit = false; // menu background / intro slowly circles the board
+      this.trophyBoughtThisTurn = false; // reset at the start of every turn
 
       this.buildTrack();
       this.buildDecor();
@@ -206,17 +212,13 @@
         g.add(arrow);
         g.rotation.y = Math.atan2(tangent.x, tangent.z);
       } else if (type === "event") {
-        // Spinning diamond hovering above.
-        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.55), white);
-        m.userData.spin = true;
-        m.position.y = 1.1;
-        g.add(m);
+        // A big "?" painted flat on the disc, readable from the overview camera.
+        // (A floating 3D symbol was tried, but from above it stacks on top of
+        // the decal and makes the space harder to read, not easier.)
+        g.add(this.flatDecal(this.decalTexture("event")));
       } else if (type === "shop") {
-        // Little shopping crate with a lid.
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.7), white);
-        box.position.y = 0.75;
-        box.userData.spin = true;
-        g.add(box);
+        // Same idea with a shopping bag, so shops never look like events.
+        g.add(this.flatDecal(this.decalTexture("shop")));
       } else if (type === "start") {
         // Checkered stripe.
         for (let k = 0; k < 4; k++) {
@@ -240,6 +242,54 @@
         return null;
       }
       return g;
+    }
+
+    /* ---------- Space decals ----------
+       Event and shop symbols are drawn onto a small canvas once per board
+       and shared by every space of that type. A flat picture on the disc
+       reads far better from the high overview camera than a tiny 3D shape. */
+    decalTexture(kind) {
+      this._decals = this._decals || {};
+      if (this._decals[kind]) return this._decals[kind];
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const g = c.getContext("2d");
+      g.fillStyle = "#ffffff";
+      g.strokeStyle = "#ffffff";
+      g.lineJoin = "round";
+      if (kind === "event") {
+        // A chunky question mark.
+        g.font = "900 112px Segoe UI, system-ui, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText("?", 64, 70);
+      } else {
+        // Shopping bag: a rounded body with a loop handle on top.
+        g.lineWidth = 10;
+        g.beginPath();
+        g.arc(64, 44, 20, Math.PI, 0);      // handle
+        g.stroke();
+        g.beginPath();
+        g.moveTo(28, 44); g.lineTo(100, 44); // body: wider at the bottom
+        g.lineTo(108, 112); g.lineTo(20, 112);
+        g.closePath();
+        g.fill();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this._decals[kind] = tex;
+      return tex;
+    }
+
+    // The decal lying flat on top of a space disc.
+    flatDecal(tex) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.4, 2.4),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.37; // just above the disc's top face (0.355)
+      return m;
     }
 
     buildDecor() {
@@ -321,7 +371,9 @@
       g.traverse((o) => { if (o.isMesh && o !== beam) o.castShadow = true; });
       this.trophy = g;
       this.scene.add(g);
-      this.placeTrophy(this.randomTrophySpot(this.spaces[0].pos));
+      // Everyone starts on space 0, so the first trophy uses the same
+      // "far enough ahead" rule measured from the start line.
+      this.placeTrophy(this.randomTrophySpot(0));
     }
 
     placeTrophy(index) {
@@ -330,12 +382,65 @@
       this.trophy.position.set(p.x, 2.2, p.z);
     }
 
-    // A good new spot for the trophy: far from `awayFrom`, never on the
-    // start or a shop.
-    randomTrophySpot(awayFrom) {
-      const ok = this.spaces.filter((s) => s.type !== "start" && s.type !== "shop" &&
-        s.pos.distanceTo(awayFrom) > 20);
-      return pick(ok.length ? ok : this.spaces.slice(1)).index;
+    /* How many hops forward it takes to reach every space from `fromIndex`,
+       following the board's `next` links (so the fork's two ways are both
+       explored). It's a breadth-first search, so each number is the
+       SHORTEST forward route — the fewest spaces anyone starting here
+       could drive to get there, whichever way they take at the fork.
+       Returns an array: distances[spaceIndex] = hops (0 for fromIndex). */
+    spacesAhead(fromIndex) {
+      const dist = new Array(this.spaces.length).fill(Infinity);
+      dist[fromIndex] = 0;
+      const queue = [fromIndex];
+      while (queue.length) {
+        const i = queue.shift();
+        for (const n of this.spaces[i].next) {
+          if (dist[n] === Infinity) {
+            dist[n] = dist[i] + 1;
+            queue.push(n);
+          }
+        }
+      }
+      return dist;
+    }
+
+    /* Is the Risky Shortcut "directly ahead" of someone on `fromIndex`?
+       True if they're already on it, or if the very next stretch of road
+       they come to is the fork (they reach it in under MIN_TROPHY_AHEAD
+       spaces). In both cases a trophy on the shortcut would be an easy
+       grab, so the trophy isn't allowed to land there. */
+    shortcutAhead(fromIndex) {
+      if (this.spaces[fromIndex].shortcut) return true;
+      return this.spacesAhead(fromIndex)[this.forkIndex] < MIN_TROPHY_AHEAD;
+    }
+
+    /* Where the trophy may move to, given the buyer is on `fromIndex`.
+       Rules (the Director's ruling, approved by Reece):
+         • at least MIN_TROPHY_AHEAD spaces ahead of the buyer, counted
+           along the track by the shortest route (not straight-line
+           distance — two spaces can be close on screen but far apart
+           on the road, and vice versa);
+         • never on the shortcut when the shortcut is directly ahead;
+         • never on the start space or a shop (those have their own
+           effects and it reads oddly to have the trophy there).
+       Returns a list of space indices. */
+    trophySpotsFrom(fromIndex) {
+      const ahead = this.spacesAhead(fromIndex);
+      const noShortcut = this.shortcutAhead(fromIndex);
+      return this.spaces
+        .filter((s) => s.type !== "start" && s.type !== "shop")
+        .filter((s) => ahead[s.index] >= MIN_TROPHY_AHEAD && ahead[s.index] !== Infinity)
+        .filter((s) => !(noShortcut && s.shortcut))
+        .map((s) => s.index);
+    }
+
+    // Pick a random legal new spot for the trophy (see trophySpotsFrom).
+    // The board is a 30-space loop, so there are always plenty of legal
+    // spots; the fallback only exists so a future board edit can't crash.
+    randomTrophySpot(fromIndex) {
+      const ok = this.trophySpotsFrom(fromIndex);
+      if (ok.length) return pick(ok);
+      return pick(this.spaces.filter((s) => s.index !== fromIndex && s.type !== "start")).index;
     }
 
     /* ---------- The 3D die: a cube that floats above the active car ----------
@@ -503,11 +608,20 @@
       ui.center(`${player.name}'s turn`, "", player.css);
       await TP.sched.wait(0.9);
       ui.center("");
+      // Fresh turn, so this player may buy the trophy again (max one per turn).
+      this.trophyBoughtThisTurn = false;
 
       /* ---------- Use an item? ---------- */
       let rollMode = "normal";
       if (player.items.length) {
-        const labels = ["Just roll", ...player.items.map((id) => `${ITEMS[id].icon} ${ITEMS[id].name}`)];
+        // Items that would do nothing right now are shown greyed out with the
+        // reason, and humans can't pick them (see itemUnusable).
+        const labels = ["Just roll", ...player.items.map((id) => {
+          const why = this.itemUnusable(player, id);
+          return why
+            ? { label: `${ITEMS[id].icon} ${ITEMS[id].name}`, disabled: why }
+            : `${ITEMS[id].icon} ${ITEMS[id].name}`;
+        })];
         const pickIdx = await this.choose(player, "Use an item?", labels, this.botItemChoice(player));
         if (pickIdx > 0) {
           const id = player.items.splice(pickIdx - 1, 1)[0];
@@ -588,6 +702,22 @@
     }
 
     // Apply an item. Returns a roll mode for the dice ("normal"/"double"/"turbo").
+    /* Why an item can't usefully be used right now, or "" if it can.
+       Shown as the greyed-out reason in the "Use an item?" menu. */
+    itemUnusable(player, id) {
+      if (id === "steal") {
+        // Pickpocket takes from the richest rival; pointless if they're all broke.
+        const anyCoins = this.players.some((p) => p !== player && p.coins > 0);
+        if (!anyCoins) return "rivals are broke";
+      }
+      if (id === "warp") {
+        // Warp drops you on the space just before the trophy: no use if you're already there.
+        const before = this.spaces.find((s) => s.next.includes(this.trophyIndex));
+        if (before && before.index === player.space) return "already there";
+      }
+      return "";
+    }
+
     async useItem(player, id) {
       const ui = TP.UI;
       const item = ITEMS[id];
@@ -652,6 +782,9 @@
 
       switch (s.type) {
         case "start":
+          // Same payout as a blue space, but its own wording.
+          this.addCoins(player, 3, "Start line! +3 coins");
+          break;
         case "blue":
           this.addCoins(player, 3, "Blue space! +3 coins");
           break;
@@ -685,16 +818,23 @@
         { title: "Flat tyre!", run: () => this.addCoins(player, -5, "Flat tyre! −5 coins") },
         {
           title: "Pit-lane swap!",
-          run: () => {
+          run: async () => {
             // Swap board positions with a random rival.
             const other = pick(rivals);
             [player.space, other.space] = [other.space, player.space];
             this.parkToken(other.index);
             this.parkToken(player.index);
-            this.fx.burst(this.tokens[player.index].pos, 0x22d3a6, { count: 16 });
-            this.fx.burst(this.tokens[other.index].pos, 0x22d3a6, { count: 16 });
+            this.fx.burst(this.tokens[player.index].pos, SPACE_STYLE.event.color, { count: 16 });
+            this.fx.burst(this.tokens[other.index].pos, SPACE_STYLE.event.color, { count: 16 });
             TP.UI.toast(`Swapped places with ${other.name}!`);
             TP.sfx.play("boost");
+            // Landed on the trophy by swapping? Offer it as if you'd driven
+            // there. (Only the player whose turn it is gets the offer; the
+            // rival swapped away is just along for the ride.)
+            if (player.space === this.trophyIndex) {
+              await TP.sched.wait(0.8);
+              await this.trophyStop(player);
+            }
           },
         },
         {
@@ -713,10 +853,10 @@
         },
       ];
       const ev = pick(events);
-      TP.UI.center("? EVENT ?", ev.title, "#22d3a6");
+      TP.UI.center("? EVENT ?", ev.title, "#9be22d");
       await TP.sched.wait(1.1);
       TP.UI.center("");
-      ev.run();
+      await ev.run(); // some events (pit-lane swap) can pause for a trophy offer
     }
 
     /* ---------- Shop: buy one item ---------- */
@@ -727,7 +867,11 @@
         return;
       }
       const stock = Object.values(ITEMS);
-      const labels = ["Leave", ...stock.map((it) => `${it.icon} ${it.name} · ${it.price}🪙`)];
+      // Items you can't afford are greyed out with what they cost, and humans
+      // can't select them. "Leave" is always available.
+      const labels = ["Leave", ...stock.map((it) => player.coins >= it.price
+        ? `${it.icon} ${it.name} · ${it.price}🪙`
+        : { label: `${it.icon} ${it.name}`, disabled: `need ${it.price}🪙` })];
       ui.center("SHOP", "Items are used at the start of your turn", "#a855f7");
       const choice = await this.choose(player, `Buy something? You have ${player.coins} coins`, labels, this.botShopChoice(player, stock));
       ui.center("");
@@ -760,6 +904,14 @@
 
     /* ---------- Trophy purchase ---------- */
     async trophyStop(player) {
+      // One trophy per turn. Even with the trophy moving 10+ spaces away,
+      // a big roll (Double Dice goes up to 20, plus a boost pad's 3) could
+      // carry you onto it again before your turn ends.
+      if (this.trophyBoughtThisTurn) {
+        TP.UI.toast("Only one trophy per turn — come back next time!");
+        await TP.sched.wait(0.9);
+        return;
+      }
       if (player.coins < TROPHY_COST) {
         TP.UI.toast(`Trophy costs ${TROPHY_COST} coins — you have ${player.coins}`);
         await TP.sched.wait(0.9);
@@ -770,6 +922,7 @@
 
       player.coins -= TROPHY_COST;
       player.trophies += 1;
+      this.trophyBoughtThisTurn = true;
       TP.sfx.play("trophy");
       this.fx.confetti(this.trophy.position);
       TP.UI.center("🏆 TROPHY!", `${player.name} has ${player.trophies}`, "#ffcc33");
@@ -777,8 +930,9 @@
       await TP.sched.wait(1.6);
       TP.UI.center("");
 
-      // Move the trophy somewhere far away, and show where it went.
-      this.placeTrophy(this.randomTrophySpot(this.spaces[player.space].pos));
+      // Move the trophy at least 10 spaces ahead of the buyer (see
+      // trophySpotsFrom for the full rules), and show where it went.
+      this.placeTrophy(this.randomTrophySpot(player.space));
       TP.UI.toast("The trophy moved!");
       const cam = this.camFocus.clone();
       this.camFocus.set(this.trophy.position.x, 0, this.trophy.position.z);
@@ -789,13 +943,29 @@
     }
 
     /* Show a left/right choice and wait for the player to pick.
-       Bots just take `botPick` after a short "thinking" pause. */
+       Bots just take `botPick` after a short "thinking" pause.
+
+       Each option is either a plain string, or { label, disabled } where
+       `disabled` is a short reason ("need 14🪙"). Disabled options are drawn
+       greyed out with their reason, and left/right skips straight over them,
+       so a human can only ever confirm an enabled option. The first option
+       (Leave / Skip / Just roll) should always be enabled. */
     async choose(player, title, options, botPick) {
-      let sel = 0;
+      const off = (i) => typeof options[i] === "object" && !!options[i].disabled;
+      // Step from `from` in direction `dir` (+1 / -1) to the next enabled
+      // option, wrapping around. If somehow nothing else is enabled, stay put.
+      const step = (from, dir) => {
+        for (let n = 1; n <= options.length; n++) {
+          const i = (from + dir * n + options.length * n) % options.length;
+          if (!off(i)) return i;
+        }
+        return from;
+      };
+      let sel = off(0) ? step(0, 1) : 0;
       TP.UI.choice(title, options, sel);
       if (player.controller === "bot") {
         await TP.sched.wait(0.8);
-        sel = botPick;
+        sel = botPick; // bot logic is unchanged; it already avoids unaffordable picks
         TP.UI.choice(title, options, sel);
         await TP.sched.wait(0.5);
       } else {
@@ -803,10 +973,11 @@
         TP.UI.hint(`<kbd>${k.steer}</kbd> choose · <kbd>${k.confirm}</kbd> confirm`);
         await TP.sched.until(() => {
           const c = TP.Input.get(player.controller);
-          if (c.leftPressed) sel = (sel + options.length - 1) % options.length;
-          if (c.rightPressed) sel = (sel + 1) % options.length;
-          if (c.leftPressed || c.rightPressed) { TP.UI.choice(title, options, sel); TP.sfx.play("tick"); }
-          return c.confirmPressed;
+          const before = sel;
+          if (c.leftPressed) sel = step(sel, -1);
+          if (c.rightPressed) sel = step(sel, 1);
+          if (sel !== before) { TP.UI.choice(title, options, sel); TP.sfx.play("tick"); }
+          return c.confirmPressed && !off(sel);
         });
         TP.UI.hint("");
       }

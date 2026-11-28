@@ -45,7 +45,7 @@ On the board, Jump/Confirm makes your car hit the die. Steer left/right picks op
 | Orange arrow | Boost pad: zoom 3 more spaces |
 | Teal diamond | Random event: sponsor deal, flat tyre, pit-lane swap or toll booth |
 | Purple crate | Shop: buy one item (you can hold 2) |
-| 🏆 Trophy (gold beam) | Drive onto or past it with 20+ coins to buy it. It then moves elsewhere. |
+| 🏆 Trophy (gold beam) | Drive onto or past it with 20+ coins to buy it (one per turn). It then moves at least 10 spaces further along the track. |
 
 **The Risky Shortcut.** At the red sign, the bottom of the loop, you choose: the main road, or a
 shortcut straight across the middle. The shortcut is about half the distance, but it's packed
