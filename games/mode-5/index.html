@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rocket Rumble · Mode 5</title>
+  <!-- Bare milestone-1 page shell. Art and UI owns this page from here on. -->
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #080a14; color: #fff;
+                 font-family: system-ui, sans-serif; }
+    #game { display: block; width: 100%; height: 100%; }
+    #hud { position: fixed; top: 8px; left: 0; right: 0; text-align: center; font-weight: 700;
+           text-shadow: 0 2px 4px #000; pointer-events: none; }
+    #banner { position: fixed; top: 40%; left: 0; right: 0; text-align: center; font-size: 40px;
+              font-weight: 900; text-shadow: 0 3px 8px #000; pointer-events: none; }
+    #back { position: fixed; bottom: 8px; left: 10px; color: #aab; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud"></div>
+  <div id="banner"></div>
+  <a id="back" href="../index.html">← All modes</a>
+
+  <!-- Plain scripts (not ES modules) so the page runs from file://. -->
+  <script src="../shared/vendor/three.min.js"></script>
+  <script src="../shared/js/util.js"></script>
+  <script src="../shared/js/sfx.js"></script>
+  <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
+
+  <!-- Mode rules (Gameplay) -->
+  <script src="js/events.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/arenas.js"></script>
+  <script src="js/paint.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/match.js"></script>
+  <!-- Look and sound (Art and UI) go here: world, vfx, hud, menu, audio -->
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "rocket-rumble",
+  "productName": "Rocket Rumble",
+  "version": "0.1.0",
+  "description": "Rocket Rumble: one rocket car, a pile of ways to play.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --x64",
+    "dist:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.rocketrumble.game",
+    "productName": "Rocket Rumble",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "package.json"],
+    "extraResources": [
+      { "from": "../games", "to": "games", "filter": ["**/*", "!tools/**", "!TEAMS.md", "!**/PROJECT.md", "!**/DESIGN.md"] }
+    ],
+    "win": { "target": "portable", "signAndEditExecutable": false },
+    "portable": { "artifactName": "RocketRumble-${version}-portable.exe" },
+    "linux": { "target": "dir" }
+  }
+}
