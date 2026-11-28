@@ -93,6 +93,8 @@ window.TP = window.TP || {};
     };
   }
 
+  // Is move frame t inside an optional [from, to) window?
+  const inWindow = (w, t) => !!w && t >= w[0] && t < w[1];
   const headingFor = (facing) => (facing > 0 ? Math.PI / 2 : -Math.PI / 2);
   const sign = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
 
@@ -140,7 +142,8 @@ window.TP = window.TP || {};
       p = p || {};
       const def = TP.fighterDef(p.fighter);
       const car = new TP.Car(scene, { index, color: TP.PLAYER_COLORS[index] });
-      const controller = p.controller || "bot";
+      // "off" (an empty hub seat) is played by a bot, like "bot".
+      const controller = !p.controller || p.controller === "off" ? "bot" : p.controller;
       const f = {
         index,
         id: def.id,
@@ -150,6 +153,9 @@ window.TP = window.TP || {};
         car,
         controller,
         bot: null,
+        // Per-car rule overrides (DESIGN §6): sidestep timing, knockback taken.
+        sidestep: Object.assign({}, RULES.sidestep, def.sidestep),
+        knockbackMul: def.knockbackMul || 1,
         maxHealth: def.health,
         health: def.health,
         // Optional starting meter (tests, training mode). Kept between rounds.
@@ -302,6 +308,11 @@ window.TP = window.TP || {};
       f.moveFrame = 0;
       f.moveSerial++;
       f.slamLanded = false;
+      f.hitsDone = [];          // multi-hit moves: which hits have landed
+      f.shockLeft = 0;          // landing shockwave: frames it's still out
+      f.shockDone = false;
+      f.passedAt = null;        // cross-up moves: move frame it passed the opponent
+      f.moveFacing = f.facing;  // facing when the move started
       f.moveConnected = false;
       f.moveBlocked = false;
       f.stateFramesLeft = TP.moveFrames(m);
@@ -320,7 +331,7 @@ window.TP = window.TP || {};
     // A move that never touched anything announces a whiff when it ends.
     function endMove(f) {
       const m = f.moves[f.move];
-      if (m && !f.moveConnected && (m.box || (m.flags && m.flags.throw))) {
+      if (m && !f.moveConnected && (m.box || m.shock || (m.flags && m.flags.throw))) {
         emit("whiff", { attacker: f.index, move: f.move, damage: 0, stun: 0, x: f.car.pos.x, y: f.car.pos.y, z: f.car.pos.z });
       }
       f.move = null;
@@ -333,7 +344,7 @@ window.TP = window.TP || {};
       f.move = null;
       f.moveFrame = 0;
       f.sidestepDir = dir;
-      f.stateFramesLeft = RULES.sidestep.frames;
+      f.stateFramesLeft = f.sidestep.frames;
       consume(f, "up");
       consume(f, "down");
     }
@@ -448,19 +459,44 @@ window.TP = window.TP || {};
       }
     }
 
-    function moveAttack(f) {
+    function moveAttack(f, o) {
       const m = f.moves[f.move];
       const car = f.car;
       const t = f.moveFrame;
-      if (m.drive && t >= m.drive.from && t < m.drive.to) car.vel.x = f.facing * m.drive.speed;
+      // A cross-up move stops driving once it's through the opponent.
+      const driving = m.drive && t >= m.drive.from && t < m.drive.to && f.passedAt === null;
+      if (driving) car.vel.x = f.moveFacing * m.drive.speed;
       // Air moves with `hang` hover during startup (a cartoon pause before the dive)...
       if (m.flags.hang && t < m.startup && !car.onGround) { car.vel.y = 0; car.vel.x *= 0.8; }
       // ...and `startVel` is the push given on frame `startVel.at` (default: the first frame).
-      if (m.startVel && t === (m.startVel.at || 0)) {
-        if (m.startVel.vx !== undefined) car.vel.x = f.facing * m.startVel.vx;
-        if (m.startVel.vy !== undefined) { car.vel.y = m.startVel.vy; car.onGround = false; }
+      // `impulses` is a list of them (Quake Drop: up, then slam down).
+      const pushes = m.impulses || (m.startVel ? [m.startVel] : []);
+      for (const imp of pushes) {
+        if (t !== (imp.at || 0)) continue;
+        if (imp.vx !== undefined) car.vel.x = f.facing * imp.vx;
+        if (imp.vy !== undefined) { car.vel.y = imp.vy; car.onGround = imp.vy <= 0 && car.onGround; }
       }
-      const landed = integrate(f, m.drive && t < m.drive.to ? 0 : 10);
+      const landed = integrate(f, driving ? 0 : 10);
+
+      // Cross-up (Slipstream): once this car is through to the far side of
+      // the opponent, it skids, turns round, and its hit arms `crossup.delay`
+      // frames later. The defender's auto-face turns too, so holding the
+      // NEW away blocks it.
+      if (m.crossup && f.passedAt === null && o) {
+        const d = o.car.pos.x - car.pos.x;
+        if (sign(d) === -f.moveFacing && Math.abs(d) > 0.3) {
+          f.passedAt = t;
+          f.facing = -f.moveFacing;
+          car.vel.x *= 0.25;
+          car.heading = headingFor(f.facing);
+        }
+      }
+      // Landing shockwave (Quake Drop): the shock box comes out on the frame it lands.
+      if (m.shock && landed && !f.shockDone) {
+        f.shockDone = true;
+        f.shockLeft = m.shock.frames;
+        car.vel.x = 0;
+      }
       if (landed && m.air) {
         if (f.move === "drop_slam" && t < m.startup + m.active) {
           // The slam hits the floor. This frame still counts (it can hit
@@ -507,7 +543,7 @@ window.TP = window.TP || {};
     }
 
     function moveSidestep(f) {
-      const S = RULES.sidestep;
+      const S = f.sidestep;
       const done = S.frames - f.stateFramesLeft; // frames elapsed
       f.car.vel.z = done < S.moveFrames ? f.sidestepDir * S.speed : 0;
       integrate(f, 10);
@@ -571,7 +607,7 @@ window.TP = window.TP || {};
       switch (f.state) {
         case "idle": case "walk": case "block": case "air":
           driveFree(f, o); break;
-        case "attack": moveAttack(f); break;
+        case "attack": moveAttack(f, o); break;
         case "sidestep": moveSidestep(f); break;
         case "thrown": moveThrown(f); break;
         default: moveLoose(f);
@@ -588,6 +624,7 @@ window.TP = window.TP || {};
       if (f.state !== "attack") return;
       const m = f.moves[f.move];
       f.moveFrame++;
+      if (f.shockLeft > 0) f.shockLeft--;
       if (f.slamLanded) {
         // An "active until it lands" move has landed: jump to its recovery.
         f.slamLanded = false;
@@ -607,6 +644,8 @@ window.TP = window.TP || {};
     function separate() {
       const [a, b] = fighters;
       if (a.state === "thrown" || b.state === "thrown") return;
+      // Pass-through frames (Slipstream's dash): no pushing apart.
+      for (const f of fighters) if (f.state === "attack" && inWindow(f.moves[f.move].passThrough, f.moveFrame)) return;
       const pa = a.car.pos, pb = b.car.pos;
       if (Math.abs(pa.y - pb.y) >= 1.3) return;            // one is over the other
       if (Math.abs(pa.z - pb.z) >= BODY.halfWid * 2) return; // sidestepped past
@@ -657,17 +696,42 @@ window.TP = window.TP || {};
     function invulnerable(v) {
       if (v.state === "knockdown" || v.state === "wakeup" || v.state === "thrown" || v.state === "ko") return true;
       if (v.fallInvuln) return true;
-      if (v.state === "sidestep" && RULES.sidestep.frames - v.stateFramesLeft < RULES.sidestep.invulnFrames) return true;
+      if (v.state === "sidestep" && v.sidestep.frames - v.stateFramesLeft < v.sidestep.invulnFrames) return true;
+      // Moves with invulnerable frames (Slipstream's dash): `invuln: [from, to)` in move frames.
+      if (v.state === "attack" && inWindow(v.moves[v.move].invuln, v.moveFrame)) return true;
       return false;
     }
 
     // Does attacker `a`'s current move touch victim `v` this frame?
+    /* Which hit (if any) attacker `a`'s move has out this frame. Returns
+       the hit's numbers: the move row, with a multi-hit entry's own
+       numbers merged on top, plus `hitIdx`. */
+    function currentHit(a) {
+      const row = a.moves[a.move];
+      const t = a.moveFrame;
+      if (row.hits) {
+        // Multi-hit: each entry { frame, active, ...numbers } is its own hit.
+        for (let i = 0; i < row.hits.length; i++) {
+          const h = row.hits[i];
+          if (a.hitsDone[i] || t < h.frame || t >= h.frame + (h.active || 3)) continue;
+          return Object.assign({}, row, h, { flags: Object.assign({}, row.flags, h.flags), hitIdx: i });
+        }
+        return null;
+      }
+      if (a.moveConnected) return null;
+      if (row.shock) {
+        // Shockwave: out only for a few frames from the moment it lands.
+        return a.shockLeft > 0 ? Object.assign({}, row, { box: row.shock.box, hitIdx: 0 }) : null;
+      }
+      if (t < row.startup || t >= row.startup + row.active) return null;
+      if (row.crossup && (a.passedAt === null || t < a.passedAt + row.crossup.delay)) return null;
+      return Object.assign({}, row, { hitIdx: 0 });
+    }
+
     function detect(a, v) {
       if (a.state !== "attack") return null;
-      const m = a.moves[a.move];
-      if (a.moveConnected) return null;
-      const t = a.moveFrame;
-      if (t < m.startup || t >= m.startup + m.active) return null;
+      const m = currentHit(a);
+      if (!m) return null;
       if (m.flags.throw) return detectThrow(a, v, m);
       if (!m.box || invulnerable(v)) return null;
 
@@ -730,6 +794,8 @@ window.TP = window.TP || {};
     function applyHit(r) {
       const { a, v, m } = r;
       a.moveConnected = true;
+      a.hitsDone[m.hitIdx] = true;
+      const kb = v.knockbackMul;     // heavier cars get pushed less
       // r.moveId, not a.move: in a trade the other hit may already have
       // interrupted this attacker's move.
       const at = { attacker: a.index, victim: v.index, move: r.moveId, x: r.x, y: r.y, z: r.z };
@@ -742,7 +808,7 @@ window.TP = window.TP || {};
         v.state = "blockstun";
         v.move = null;
         v.stateFramesLeft = m.blockstun;
-        v.car.vel.x = a.facing * m.push * RULES.blockPushScale;
+        v.car.vel.x = a.facing * m.push * RULES.blockPushScale * kb;
         a.super = Math.min(RULES.superMax, a.super + m.meter * 0.5);
         pendingHitstop = Math.max(pendingHitstop, Math.max(2, m.hitstop - 1));
         emit("block", Object.assign(at, { damage: dmg, stun: m.blockstun }));
@@ -775,13 +841,13 @@ window.TP = window.TP || {};
         v.airHits++;
         v.state = "juggle";
         v.fallInvuln = true;
-        car.vel.x = a.facing * 4;
+        car.vel.x = a.facing * 4 * kb;
         car.vel.y = -10;
         stun = 0;
       } else if (wasAirborne || m.launch > 0 || m.flags.knockdown) {
         if (wasAirborne) v.airHits++;
         v.state = "juggle";
-        car.vel.x = a.facing * m.push;
+        car.vel.x = a.facing * m.push * kb;
         // In the air: a small pop keeps the juggle going (a knockdown move
         // like Drop Slam spikes them down instead). On the ground: the
         // move's launch, or a little hop for a knockdown move.
@@ -793,7 +859,7 @@ window.TP = window.TP || {};
       } else {
         v.state = "hitstun";
         v.stateFramesLeft = m.hitstun;
-        car.vel.x = a.facing * m.push;
+        car.vel.x = a.facing * m.push * kb;
         stun = m.hitstun;
       }
       emit("hit", Object.assign(at, { damage: dmg, stun }));
@@ -910,7 +976,7 @@ window.TP = window.TP || {};
     function settleFrame() {
       for (const f of fighters) {
         readInput(f, NEUTRAL, false);
-        if (f.state === "attack") { moveAttack(f); advanceMove(f); }
+        if (f.state === "attack") { moveAttack(f, fighters[1 - f.index]); advanceMove(f); }
         else moveFighter(f, fighters[1 - f.index]);
       }
       separate();
