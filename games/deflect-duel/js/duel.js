@@ -101,10 +101,10 @@
     /* Speed ESCALATION (Reece, 2026-11-28: "late rallies get absurd but
        stay readable"). Each strike multiplies the speed AND adds a small
        step, so early rallies stay chaseable and late ones explode:
-       16 → 20.7 → 26.2 → 32.7 → 40.3 → 49 → … → 210 after about 14 strikes. */
+       16 → 22 → 29.3 → 38.3 → 49.2 → 62.5 → … → 210 after about 11 strikes. */
     baseSpeed: 16,       // first strike on a neutral ball (under the car's 17, so you can chase it)
-    speedMult: 1.17,     // every later strike multiplies the speed by this...
-    speedStep: 2,        // ...and then adds this
+    speedMult: 1.22,     // every later strike multiplies the speed by this...
+    speedStep: 2.5,      // ...and then adds this
     maxSpeed: 210,       // top speed, whatever happens (about 4× a car: crosses the arena in ~0.2 s)
     smashBonus: 6,       // a Smash (strike while boosting) adds this flat amount...
     smashMult: 0.15,     // ...plus this share of the new speed, so Smashes scale with the rally
@@ -177,7 +177,7 @@
   function makeBotSkill() {
     return {
       reaction: rand(0.08, 0.2),   // seconds before reacting to a new strike
-      maxReturn: rand(110, 190),   // fastest ball it will even try to strike back (faster = dodge)
+      maxReturn: rand(140, 230),   // fastest ball it will even try to strike back (faster = dodge)
       leadErr: 0.2,                // how far off its swing timing can be, per shot (seconds)
       lead: 0.08,                  // this shot's swing timing (re-rolled per shot)
       aimNoise: rand(4, 14),       // degrees of sloppiness in its aim
@@ -187,7 +187,7 @@
       fumbleFast: rand(0.35, 0.55),// ...plus up to this much more as the ball nears max speed
       needWindow: rand(0.3, 0.45), // seconds of warning it wants (freeze + travel); less = shakier
       fumbleRally: 0.012,          // ...plus this much per strike in the current rally
-      aerial: rand(0.45, 0.9),     // how keen it is to fly up to a high ball (rocket moveset)
+      aerial: rand(0.6, 1.0),      // how keen it is to fly up to a high ball (rocket moveset)
       flipper: rand(0.2, 0.5),     // chance it flips into a low ball instead of swiping
       flipDodge: rand(0.3, 0.7),   // chance it dodges by flipping sideways instead of jumping
       move: null,                  // a committed move: { kind: "flip"|"aerial", until, x, y, z }
@@ -850,7 +850,7 @@
       if (angle === "down") p.stats.strikesDown++;
       if (flip) { p.stats.strikesFlip++; this.stats.flipStrikes = (this.stats.flipStrikes || 0) + 1; }
       if (smash) p.stats.smashes++;
-      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash });
+      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash, carY: +car.pos.y.toFixed(2) });
       this.hooks.onHit(car, b, frac, smash, info);
       this.onEvent("hit", { player: p, speed, frac, smash, info });
     }
@@ -1203,7 +1203,9 @@
       //    if the ball comes into reach on the way.
       if (S.move) {
         const m = S.move;
-        if (this.time > m.until || car.tumbling || (m.kind === "aerial" && car.onGround && this.time > m.start + 0.4)) S.move = null;
+        // Give up when time's out, after a bad landing, or if an aerial
+        // never left the ground (couldn't line up in time).
+        if (this.time > m.until || car.tumbling || (m.kind === "aerial" && car.onGround && this.time > m.start + 1.0)) S.move = null;
         else {
           let ctrl;
           if (m.kind === "flip") {
@@ -1319,6 +1321,14 @@
       const ctrl = { throttle: 0, steer: 0, boost: false, jump: false, hit: false };
 
       if (S.plan === "return") {
+        // A high incoming ball: take off and meet it in the air (an aerial
+        // return), swiping as it comes into reach.
+        const yMeet = b.pos.y + b.vel.y * Math.max(0, tClose);
+        const reachTop = C.strikeY + C.hitRange * 0.8;
+        if (car.onGround && yMeet > reachTop + 0.3 && yMeet < C.arenaH - 1.5 && tClose > 0.35 && car.boost > 15 && Math.random() < S.aerial) {
+          S.move = { kind: "aerial", until: this.time + tClose + 0.6, start: this.time, swing: true };
+          return this._botControls(i);
+        }
         // Face the ball (a return goes back the way it came), roll
         // gently, and swipe just before it reaches striking range.
         const diff = TP.ai.angleTo(car, b.pos.x, b.pos.z);
@@ -1378,18 +1388,22 @@
       const path = this._predictBall();
       const reachTop = C.strikeY + C.hitRange * 0.8;   // highest strike from the ground
 
-      // A high ball I can get under in time: fly up to it (an aerial),
-      // if this bot is the flying sort. Decided once per ball state so it
-      // doesn't dither between driving and flying.
-      if (car.onGround && S && this.state === "play" && b.pos.y > reachTop + 1.5 && S.aerialFor !== b.hitId) {
-        const g = C.gravity * gravityShare(b);
-        const ip = TP.ai.interceptPoint(car, b.pos, b.vel, { gravity: g, floorY: C.ballR, maxT: 1.6 });
-        if (ip && ip.y > reachTop + 0.5 && ip.y < C.arenaH - 1.5 && car.boost > 25) {
-          S.aerialFor = b.hitId;
-          if (Math.random() < S.aerial) {
-            S.move = { kind: "aerial", until: this.time + Math.min(2.2, ip.t + 0.9), start: this.time, swing: true };
-            return this._botControls(i);
-          }
+      // A high ball I can reach in time: fly up to it (an aerial), if this
+      // bot is the flying sort. Scan the ball's predicted path for a point
+      // that's still well above a ground strike and that I could fly to
+      // before the ball gets there (drive + take-off + climb). Re-checked
+      // every 0.4 s, so bots don't dither every step.
+      if (car.onGround && S && this.state === "play" && car.boost > 25 && this.time >= (S.aerialCheckAt || 0)) {
+        S.aerialCheckAt = this.time + 0.4;
+        let spot = null;
+        for (const q of path) {
+          if (q.y < reachTop + 0.8 || q.y > C.arenaH - 1.5) continue;
+          const tNeed = dist2D(car.pos.x, car.pos.z, q.x, q.z) / 20 + 0.3 + (q.y - reachTop) / 8;
+          if (tNeed <= q.t && q.t < 2.4) { spot = q; break; }
+        }
+        if (spot && Math.random() < S.aerial) {
+          S.move = { kind: "aerial", until: this.time + spot.t + 0.8, start: this.time, swing: true };
+          return this._botControls(i);
         }
       }
       let target = path[path.length - 1];
@@ -1475,7 +1489,7 @@
       const r = Math.random();
       if (b.pos.y > 3.2) throttle = r < 0.6 ? -1 : 0;
       else if (target && !target.onGround) throttle = r < 0.6 ? 1 : 0;
-      else throttle = r < 0.15 ? 1 : r < 0.3 ? -1 : 0;
+      else throttle = r < 0.25 ? 1 : r < 0.4 ? -1 : 0;
       return { steer: clamp(steer, -1, 1), throttle };
     }
 

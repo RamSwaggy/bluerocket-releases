@@ -55,7 +55,7 @@ function playOne({ players, lives, maxSec }) {
     maxSpeed: d.cfg.maxSpeed,
     baseSpeed: d.cfg.baseSpeed,
     stats: d.stats,
-    events: d.events.map((e) => ({ type: e.type, player: e.player, speed: e.speed, ballSpeed: e.ballSpeed, threat: e.threat, aerial: e.aerial, flip: e.flip })),
+    events: d.events.map((e) => ({ type: e.type, player: e.player, speed: e.speed, ballSpeed: e.ballSpeed, threat: e.threat, aerial: e.aerial, flip: e.flip, carY: e.carY })),
   };
 }
 
@@ -85,7 +85,7 @@ const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "–");
     const bands = [[0, 40], [40, 100], [100, 160], [160, Infinity]];
     const bandOf = (v) => bands.findIndex(([lo, hi]) => v >= lo && v < hi);
     bands.forEach((_, k) => (connect[k] = { swings: 0, strikes: 0 }));
-    let strikes = 0, aerial = 0, flips = 0, koSpeeds = [];
+    let strikes = 0, aerial = 0, high = 0, flips = 0, koSpeeds = [];
     const wins = new Array(4).fill(0);
     const lengths = [];
     let stuck = 0, top = runs[0].maxSpeed, base = runs[0].baseSpeed;
@@ -108,6 +108,7 @@ const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "–");
         } else if (e.type === "strike") {
           strikes++;
           if (e.aerial) aerial++;
+          if ((e.carY || 0) > 2.5) high++;
           if (e.flip) flips++;
           cur.strikes++;
           cur.top = Math.max(cur.top, e.speed || 0);
@@ -140,6 +141,7 @@ const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "–");
     console.log(`Rallies reaching top tier  ${reachedTop}/${rallies.length} (${pct(reachedTop, rallies.length)})   [aim: sometimes, not most]`);
     console.log(`Rally-ending speed bands   <40: ${endBands[0]}  40–100: ${endBands[1]}  100–160: ${endBands[2]}  160+: ${endBands[3]}`);
     console.log(`Aerial strikes             ${aerial}/${strikes} (${pct(aerial, strikes)})   [aim: ≥20%]`);
+    console.log(`  of which real aerials     ${high}/${strikes} (${pct(high, strikes)}) with the car more than 2.5 up (flying, not a hop)`);
     console.log(`Flip strikes               ${flips} (${f1(flips / M)} per match)`);
     console.log(`Bot connect rate (swipes at an enemy ball, by its speed):`);
     bands.forEach(([lo, hi], k) => console.log(`   ${String(lo).padStart(3)}–${hi === Infinity ? "max" : hi}: ${connect[k].strikes}/${connect[k].swings} (${pct(connect[k].strikes, connect[k].swings)})`));
