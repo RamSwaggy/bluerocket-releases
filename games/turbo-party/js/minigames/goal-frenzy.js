@@ -121,20 +121,45 @@
       /* ---------- Walls and goals ----------
          For each axis: if the ball reaches the boundary inside the goal
          mouth (and low enough to fit under the crossbar) it can go in;
-         otherwise it bounces off the wall. */
+         otherwise it bounces off the wall. Once its centre is past the
+         goal line it's committed: it can only go in (see below). */
       for (const axis of ["x", "z"]) {
         const other = axis === "x" ? "z" : "x";
         const p = b.pos[axis];
+
+        // Ball's centre already past the goal line (so it came in through
+        // the mouth)? Then the pitch-wall rule below must not apply: that's
+        // what used to snap a ball sitting in the goal back out onto the
+        // pitch when it drifted near a post. Instead the goal's side nets
+        // and roof hold it in, and it rolls on until it's fully over the
+        // line, which is the goal.
+        if (Math.abs(p) > HALF) {
+          const lim = GOAL_HALF - BALL_R; // side nets, measured to the ball's centre
+          if (Math.abs(b.pos[other]) > lim) {
+            b.pos[other] = Math.sign(b.pos[other]) * lim;
+            b.vel[other] *= -0.5;
+          }
+          if (b.pos.y > 4 - BALL_R) { // the roof of the net
+            b.pos.y = 4 - BALL_R;
+            if (b.vel.y > 0) b.vel.y *= -0.5;
+          }
+          // Committed: a ball more than half over the line always keeps
+          // rolling in (at least 2 units/s), so it can't stall on the line
+          // or be dragged back out by a defender's bumper. Cars can't enter
+          // the goal, so nobody could clear it properly anyway.
+          if (b.vel[axis] * Math.sign(p) < 2) b.vel[axis] = Math.sign(p) * 2;
+          if (Math.abs(p) > HALF + BALL_R) {
+            const owner = SIDES.findIndex((s) => s.axis === axis && s.sign === Math.sign(p));
+            this.onGoal(owner);
+            return;
+          }
+          continue;
+        }
+
         const inMouth = Math.abs(b.pos[other]) < GOAL_HALF - BALL_R * 0.5 && b.pos.y < 4;
         if (Math.abs(p) > HALF - BALL_R && !inMouth) {
           b.pos[axis] = Math.sign(p) * (HALF - BALL_R);
           b.vel[axis] *= -0.8;
-        }
-        // Fully across the goal line → GOAL.
-        if (Math.abs(p) > HALF + BALL_R) {
-          const owner = SIDES.findIndex((s) => s.axis === axis && s.sign === Math.sign(p));
-          this.onGoal(owner);
-          return;
         }
       }
 

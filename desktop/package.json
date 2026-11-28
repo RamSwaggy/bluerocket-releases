@@ -18,11 +18,11 @@
     "appId": "com.rocketrumble.game",
     "productName": "Rocket Rumble",
     "directories": { "output": "dist" },
-    "files": ["main.js", "package.json"],
+    "files": ["main.js", "package.json", "build/icon.png"],
     "extraResources": [
       { "from": "../games", "to": "games", "filter": ["**/*", "!tools/**", "!TEAMS.md", "!**/PROJECT.md", "!**/DESIGN.md"] }
     ],
-    "win": { "target": "portable", "signAndEditExecutable": false },
+    "win": { "target": "portable", "icon": "build/icon.ico", "signAndEditExecutable": false },
     "portable": { "artifactName": "RocketRumble-${version}-portable.exe" },
     "linux": { "target": "dir" }
   }

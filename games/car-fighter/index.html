@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Car Fighter · Rocket Rumble</title>
+  <style>
+    /* ------------------------------------------------------------------
+       Colour tokens. The first block is copied from the Rocket Rumble
+       hub (games/index.html) so every mode feels like the same game.
+       The second block is Car Fighter's own: the mode accent from the
+       hub card, the two seat colours (TP.PLAYER_CSS[0] and [1]) and the
+       floodlight / gauge colours of the Scrapyard Floodlight League.
+       ------------------------------------------------------------------ */
+    :root {
+      --bg: #070b1a;
+      --panel: rgba(12, 17, 38, 0.88);
+      --panel-2: #18204a;
+      --line: rgba(255, 255, 255, 0.14);
+      --text: #f2f5ff;
+      --muted: #9aa6c8;
+      --accent: #ffcc33;
+      --hot: #ff5a3c;
+
+      --mode: #f87171;          /* Car Fighter's colour on the hub card */
+      --p1: #3b82f6;            /* seat 1 (blue)   */
+      --p2: #f97316;            /* seat 2 (orange) */
+      --health: #ffd84a;        /* health fuel: floodlight yellow */
+      --health-low: #ff5a3c;    /* health under 30%: turns hot red */
+      --lag: #ffffff;           /* the "damage just taken" bar that drains behind */
+      --super: #7df9ff;         /* spark-plug blue for super segments */
+      --boost: #ff9a3c;         /* boost bar: rocket-flame orange */
+      --gauge-bg: rgba(5, 8, 20, 0.85);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+    /* The WebGL canvas fills the window; every piece of text floats above it. */
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    .layer { position: fixed; pointer-events: none; }
+    kbd {
+      display: inline-block; padding: 0 6px; border-radius: 5px; background: #26305a;
+      color: var(--text); font-family: inherit; font-size: 12px; border-bottom: 2px solid #0a0f22;
+    }
+
+    /* =================================================================
+       FIGHT HUD
+       Two mirrored gauge panels along the top, timer in the middle.
+       P2's panel is a mirror image of P1's (row-reverse + right-aligned
+       bars), so both health bars drain away from the centre.
+       ================================================================= */
+    #hud {
+      top: 10px; left: 10px; right: 10px; display: none;
+      grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: start;
+    }
+    #hud.show { display: grid; }
+    .side { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .side.p2 { align-items: flex-end; }
+    .side .who {
+      display: flex; gap: 8px; align-items: baseline; font-weight: 800; font-size: 17px;
+      text-shadow: 0 2px 0 rgba(0,0,0,.6); white-space: nowrap; max-width: 100%;
+    }
+    .side.p2 .who { flex-direction: row-reverse; }
+    .side .who .car { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+    .side .who .name { overflow: hidden; text-overflow: ellipsis; }
+
+    /* Health bar = a fuel gauge: dark tube, white "lag" fill, yellow fill
+       on top, and tick marks every 10% painted over everything. */
+    .gauge {
+      position: relative; width: 100%; height: 22px; border-radius: 6px;
+      background: var(--gauge-bg); border: 2px solid rgba(255,255,255,.28); overflow: hidden;
+      box-shadow: 0 3px 0 rgba(0,0,0,.45);
+    }
+    .gauge .lag, .gauge .fill { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; }
+    .side.p2 .gauge .lag, .side.p2 .gauge .fill { left: auto; right: 0; }
+    .gauge .lag { background: var(--lag); opacity: .85; }
+    .gauge .fill {
+      background: linear-gradient(180deg, #fff3a8 0%, var(--health) 45%, #d99a12 100%);
+      transition: background .3s;
+    }
+    .gauge .fill.low { background: linear-gradient(180deg, #ffb199 0%, var(--health-low) 50%, #b3261a 100%); }
+    .gauge .ticks {
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(5,8,20,.55) calc(10% - 2px) 10%);
+    }
+    /* Seat colour stripe under the gauge so you always know which side is yours. */
+    .gauge::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--seat); }
+
+    /* Row under the health bar: super segments and the boost bar. */
+    .meters { display: flex; gap: 8px; align-items: center; width: 100%; }
+    .side.p2 .meters { flex-direction: row-reverse; }
+    .super { display: flex; gap: 4px; }
+    .side.p2 .super { flex-direction: row-reverse; }
+    /* Each super segment looks like a spark plug: a little rounded cell
+       that fills from the bottom and glows when it's full. */
+    .seg {
+      position: relative; width: 34px; height: 12px; border-radius: 3px;
+      background: var(--gauge-bg); border: 1px solid rgba(255,255,255,.25); overflow: hidden;
+    }
+    .seg i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--super); opacity: .55; }
+    .side.p2 .seg i { left: auto; right: 0; }
+    .seg.full { border-color: var(--super); box-shadow: 0 0 10px var(--super); }
+    .seg.full i { opacity: 1; }
+    .boostbar {
+      flex: 1; height: 6px; border-radius: 3px; background: var(--gauge-bg); overflow: hidden;
+      border: 1px solid rgba(255,255,255,.18); max-width: 160px;
+    }
+    .boostbar i { display: block; height: 100%; width: 100%; background: var(--boost); }
+    .side.p2 .boostbar i { margin-left: auto; }
+
+    /* Centre column: round bulbs either side of the flip-counter timer. */
+    .mid { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .timer {
+      display: flex; gap: 3px;
+    }
+    /* Each digit is a little "flip card": two halves with a split line. */
+    .timer b {
+      position: relative; width: 30px; height: 42px; border-radius: 6px;
+      background: linear-gradient(180deg, #1b2350 0 49%, #10173a 51% 100%);
+      border: 2px solid rgba(255,255,255,.22);
+      font-size: 32px; font-weight: 900; line-height: 38px; text-align: center;
+      box-shadow: 0 3px 0 rgba(0,0,0,.5);
+    }
+    .timer b::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: rgba(0,0,0,.6); }
+    .timer.hurry b { color: var(--hot); }
+    .pips { display: flex; gap: 14px; }
+    .pips .set { display: flex; gap: 4px; }
+    .pips .set.p1 { flex-direction: row-reverse; }   /* fill from the centre outwards */
+    /* A round pip is a bulb on the scoreboard: dark when unlit, glowing in
+       the seat colour once that round is won. */
+    .bulb {
+      width: 13px; height: 13px; border-radius: 50%; background: #1a2040;
+      border: 2px solid rgba(255,255,255,.25);
+    }
+    .bulb.lit { background: var(--seat); border-color: #fff; box-shadow: 0 0 10px var(--seat), 0 0 3px #fff inset; }
+    .bulb.draw { background: #9aa6c8; border-color: #fff; }
+
+    /* ---------- Big centre cards: ROUND 1, 3-2-1, FIGHT!, KO, TIME, DRAW ---------- */
+    #call {
+      top: 34%; left: 0; right: 0; text-align: center;
+      font-size: clamp(40px, min(13vw, 18vh), 120px); font-weight: 900; font-style: italic; letter-spacing: .02em;
+      text-shadow: 0 6px 0 rgba(0,0,0,.5), 0 0 40px rgba(0,0,0,.6);
+      opacity: 0;
+    }
+    #call.show { opacity: 1; animation: slam .28s cubic-bezier(.2, 1.6, .4, 1); }
+    #call .sub { display: block; font-size: clamp(18px, 3.4vw, 28px); font-weight: 700; font-style: normal; margin-top: 4px; letter-spacing: .04em; }
+    @keyframes slam { from { transform: scale(1.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    /* ---------- Bottom hint bar: per-player controls ---------- */
+    #hint {
+      bottom: 12px; left: 12px; right: 12px;
+      display: flex; flex-direction: column; gap: 4px; align-items: center;
+      transition: opacity .6s;
+    }
+    #hint .row {
+      padding: 6px 12px; border-radius: 10px; background: var(--panel);
+      font-size: 13px; color: var(--muted); border-left: 4px solid var(--seat);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+    }
+    #hint .row b { color: var(--text); }
+    #hint.dim { opacity: .35; }
+
+    /* =================================================================
+       MENU and RESULTS: full-screen cards over the 3D stage.
+       ================================================================= */
+    #overlay {
+      inset: 0; display: none; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at 50% 30%, rgba(7,11,26,.25), rgba(7,11,26,.75));
+      pointer-events: auto; padding: 16px; overflow: auto;
+    }
+    #overlay.show { display: flex; }
+    .card {
+      width: min(720px, 100%); max-height: calc(100vh - 32px); overflow: auto; margin: auto;
+      padding: 22px; border-radius: 18px; background: var(--panel);
+      border: 1px solid var(--line); border-top: 5px solid var(--mode);
+      box-shadow: 0 20px 60px rgba(0,0,0,.5); backdrop-filter: blur(6px);
+    }
+    .card h1 {
+      margin: 0; font-size: clamp(38px, 8vw, 64px); font-style: italic; font-weight: 900; line-height: 1;
+      text-shadow: 0 5px 0 rgba(0,0,0,.4), 0 0 40px rgba(248,113,113,.35);
+    }
+    .card h1 .a { color: var(--accent); }
+    .card h1 .b { color: var(--mode); }
+    .card .tagline { color: var(--muted); margin: 8px 0 14px; font-size: 15px; line-height: 1.45; }
+    .card h2 { margin: 0 0 6px; font-size: clamp(30px, 6vw, 44px); font-style: italic; font-weight: 900; }
+    .back {
+      display: inline-block; color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600;
+      margin-bottom: 10px;
+    }
+    .back:hover { color: var(--text); }
+
+    .seats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .slot {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center;
+      padding: 10px; border-radius: 12px; background: var(--panel-2); border-left: 6px solid;
+    }
+    .slot .label { grid-column: 1 / -1; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+    .slot .label b { color: var(--text); font-size: 14px; }
+    .slot .full { grid-column: 1 / -1; }
+    .slot input, .slot select, .row select {
+      width: 100%; font: inherit; font-size: 15px; padding: 7px 8px; border-radius: 8px;
+      border: 1px solid var(--line); background: #0d1330; color: var(--text);
+    }
+    .slot .botonly[hidden] { display: none; }
+    .fighter {
+      grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 10px; background: #0d1330; border: 1px solid var(--line);
+    }
+    .fighter .nm { font-weight: 800; font-style: italic; font-size: 18px; }
+    .fighter .ds { color: var(--muted); font-size: 12px; }
+    .fighter .soon { margin-left: auto; font-size: 11px; color: var(--muted); }
+    .row { display: flex; gap: 10px; align-items: center; margin: 12px 0 0; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .keys { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+    .keys td { padding: 5px 4px; border-top: 1px solid var(--line); color: var(--muted); vertical-align: top; }
+    .keys td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    .btn {
+      font: inherit; font-size: 18px; font-weight: 800; cursor: pointer;
+      padding: 10px 22px; border-radius: 12px; border: none; color: #1a0606; background: var(--mode);
+    }
+    .btn.ghost { background: #26305a; color: var(--text); }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+    .actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+    .actions .back { margin: 0 auto 0 0; }
+
+    /* Results: one row per round. */
+    .rounds { margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
+    .rounds .r {
+      display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px;
+      background: var(--panel-2); border-left: 6px solid var(--seat); font-size: 15px;
+    }
+    .rounds .r .n { color: var(--muted); width: 74px; font-size: 13px; }
+    .rounds .r .w { font-weight: 800; flex: 1; }
+    .rounds .r .how { color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 640px) {
+      .seats { grid-template-columns: 1fr; }
+      .side .who { font-size: 14px; }
+      .side .who .car { display: none; }   /* no room: the name matters more than the car */
+      .seg { width: 22px; }
+      .timer b { width: 24px; height: 34px; font-size: 25px; line-height: 30px; }
+      .gauge { height: 16px; }
+      #hint .row { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD layers. pointer-events are off so they never block the game. -->
+  <div id="hud" class="layer">
+    <div class="side p1" id="side0"></div>
+    <div class="mid">
+      <div class="timer" id="timer"></div>
+      <div class="pips" id="pips"></div>
+    </div>
+    <div class="side p2" id="side1"></div>
+  </div>
+  <div id="call" class="layer"></div>
+  <div id="hint" class="layer"></div>
+  <div id="overlay" class="layer"><div class="card" id="card"></div></div>
+
+  <!-- Three.js is vendored locally so the game works offline and from file:// -->
+  <script src="../shared/vendor/three.min.js"></script>
+
+  <!-- Shared Rocket Rumble engine (owned by the Director). Plain scripts,
+       not ES modules, so double-clicking index.html works. Order matters:
+       each file can use anything defined by the files above it. -->
+  <script src="../shared/js/util.js"></script>
+  <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
+  <script src="../shared/js/sfx.js"></script>
+  <script src="../shared/js/menunav.js"></script>
+
+  <!-- The fight core (Gameplay). No rendering in here: it runs headless too. -->
+  <script src="js/moves.js"></script>
+  <script src="js/fighters.js"></script>
+  <script src="js/fight.js"></script>
+  <script src="js/bot.js"></script>
+
+  <!-- Look and screens (Art and UI). main.js decides whether the menu
+       starts the match (it sets TP.MATCH_MANUAL_START before match.js). -->
+  <script src="js/fx-fight.js"></script>
+  <script src="js/view.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+
+  <!-- Loop and URL options (Gameplay). Last, so everything above exists
+       when it starts a ?demo fight on page load. -->
+  <script src="js/match.js"></script>
+</body>
+</html>

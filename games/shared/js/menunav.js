@@ -12,10 +12,23 @@
    Controls (any connected gamepad; keyboard arrows when not typing):
      D-pad / left stick ... move between buttons, dropdowns and links
                             (picks the nearest one in that direction)
-     ← → on a dropdown .... change its value
-     A (or Enter) ......... press the highlighted button
+     A (or Enter / Space) . press the highlighted button; on a dropdown,
+                            step to its next value (wraps round)
+     ← → on a dropdown .... ALSO change its value, but only when there's
+                            nothing to move to on that side. (They used to
+                            always change the value, which trapped players
+                            in the hub's Players column and quietly
+                            unassigned their controller.)
      B (or Escape) ........ back (opts.onBack, or a [data-nav-back] element)
      Start ................ press the [data-nav-primary] element (e.g. "Play")
+     View / Back (pad 8) .. open the Controls screen (rebinding)
+     ← → on a slider ...... adjust it
+
+   Only the top-most menu listens: while a modal (TP.MenuNav.modal, e.g.
+   the Controls screen) is open, menus underneath ignore input, and while
+   a rebind is capturing (TP.Controls.capturing) every menu ignores input.
+   Anything still held when a menu becomes active again is ignored until
+   released, so the press that closed the modal doesn't also click here.
 
    Mark the main action with data-nav-primary so it's highlighted first.
    Text boxes are skipped by gamepad movement (a pad can't type); they
@@ -46,6 +59,10 @@ window.TP = window.TP || {};
 
   function attach(container, opts = {}) {
     ensureStyle();
+    // True while this menu shouldn't respond: a rebind is listening for a
+    // key/button, or a modal that isn't (and doesn't contain) this menu is open.
+    const blocked = () => (TP.Controls && TP.Controls.capturing) ||
+      (TP.MenuNav.modal && TP.MenuNav.modal !== container && !TP.MenuNav.modal.contains(container));
     let current = null;
     let alive = true;
     const held = {};      // direction/button → seconds held (for repeat + edges)
@@ -82,7 +99,11 @@ window.TP = window.TP || {};
       if (!from) return;
       const a = from.getBoundingClientRect();
       const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
-      let best = null, bestScore = Infinity;
+      // Two passes: first only items inside a 45° cone in the pressed
+      // direction (so ↓ on a mode card goes to the card below, not to a
+      // nearer dropdown off to the side); if the cone is empty, anything
+      // that's at least a little that way.
+      let best = null, bestScore = Infinity, bestInCone = false;
       for (const el of items()) {
         if (el === from || isText(el)) continue;
         const b = el.getBoundingClientRect();
@@ -90,10 +111,19 @@ window.TP = window.TP || {};
         const along = (bx - ax) * dx + (by - ay) * dy;     // distance in the pressed direction
         if (along <= 4) continue;                           // behind or level: skip
         const across = Math.abs((bx - ax) * dy - (by - ay) * dx); // sideways offset
-        const score = along + across * 2.5;
-        if (score < bestScore) { bestScore = score; best = el; }
+        const inCone = across <= along;
+        // Inside the cone: nearest wins (sideways offset counts extra).
+        // Outside it: the one closest to the pressed DIRECTION wins (smallest
+        // angle), so a gap in a grid, like the disabled "coming soon" card,
+        // leads to the diagonal card rather than a far-off column.
+        const score = inCone ? along + across * 2.5 : across / along;
+        // An in-cone item always beats an out-of-cone one.
+        if ((inCone && !bestInCone) || (inCone === bestInCone && score < bestScore)) {
+          bestScore = score; best = el; bestInCone = inCone;
+        }
       }
       if (best) highlight(best);
+      return !!best;
     }
 
     // ← → change a dropdown's value instead of moving away from it.
@@ -108,15 +138,26 @@ window.TP = window.TP || {};
       return true;
     }
 
+    // Arrows always try to MOVE first. Only on a dropdown with nothing to
+    // move to on that side do ← → change its value instead.
     function direction(dx, dy) {
       const el = ensureCurrent();
-      if (el && el.tagName === "SELECT" && dx !== 0 && nudgeSelect(el, dx)) return;
-      move(dx, dy);
+      // Sliders: ← → adjust the value (↑ ↓ still move away).
+      if (el && el.type === "range" && dx !== 0) {
+        if (dx > 0) el.stepUp(); else el.stepDown();
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        play("tick");
+        return;
+      }
+      if (move(dx, dy)) return;
+      if (el && el.tagName === "SELECT" && dx !== 0) nudgeSelect(el, dx);
     }
 
     function press() {
       const el = ensureCurrent();
       if (!el) return;
+      // A on a dropdown: next value, wrapping from the last back to the first.
       if (el.tagName === "SELECT") { nudgeSelect(el, 1) || nudgeSelect(el, -(el.options.length)); return; }
       if (isText(el)) return;
       play("coin");
@@ -154,10 +195,11 @@ window.TP = window.TP || {};
       if (!alive) return;
       const dt = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
-      if (container.isConnected && visible(container)) {
+      if (blocked()) { firstTick = true; }
+      else if (container.isConnected && visible(container)) {
         const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
         // Combine every pad: anyone can drive the menu.
-        let x = 0, y = 0, a = false, b = false, start = false;
+        let x = 0, y = 0, a = false, b = false, start = false, view = false;
         for (const gp of pads) {
           const bt = (i) => gp.buttons[i] && gp.buttons[i].pressed;
           const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
@@ -165,11 +207,11 @@ window.TP = window.TP || {};
           if (bt(15) || ax > 0.55) x = 1;
           if (bt(12) || ay < -0.55) y = -1;
           if (bt(13) || ay > 0.55) y = 1;
-          a = a || bt(0); b = b || bt(1); start = start || bt(9);
+          a = a || bt(0); b = b || bt(1); start = start || bt(9); view = view || bt(8);
         }
         if (firstTick) {
           firstTick = false;
-          const now = { left: x < 0, right: x > 0, up: y < 0, down: y > 0, a, b, start };
+          const now = { left: x < 0, right: x > 0, up: y < 0, down: y > 0, a, b, start, view };
           for (const k of Object.keys(now)) if (now[k]) held[k] = -1;
         }
         if (edge("left", x < 0, dt, true)) direction(-1, 0);
@@ -179,6 +221,7 @@ window.TP = window.TP || {};
         if (edge("a", a, dt, false)) press();
         if (edge("b", b, dt, false)) back();
         if (edge("start", start, dt, false)) primary();
+        if (edge("view", view, dt, false) && !TP.MenuNav.modal && TP.Controls) TP.Controls.openMenu();
       }
       requestAnimationFrame(tick);
     }
@@ -186,14 +229,20 @@ window.TP = window.TP || {};
 
     /* ---------- Keyboard: arrows move (unless typing), Escape = back ---------- */
     function onKey(e) {
-      if (!container.isConnected || !visible(container)) return;
+      if (blocked() || !container.isConnected || !visible(container)) return;
       const typing = isText(document.activeElement);
       const map = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (map[e.key] && !typing && !e.altKey) {
-        // Let a focused dropdown use ↑↓ natively; ←→ nudge it via direction().
-        if (document.activeElement && document.activeElement.tagName === "SELECT" && map[e.key][1] !== 0) return;
+        // Same as a gamepad: arrows move between controls; ←→ change a
+        // dropdown's value only when there's nothing on that side.
         e.preventDefault();
         direction(...map[e.key]);
+      } else if ((e.key === "Enter" || e.code === "NumpadEnter" || e.code === "Space") && !typing) {
+        // Press it ourselves rather than relying on the browser: shared
+        // input.js cancels Enter's and Space's default action in every game
+        // page. Space is Keyboard 1's in-game confirm, so it confirms here too.
+        e.preventDefault();
+        if (!e.repeat) press();
       } else if (e.key === "Escape") {
         back();
       }
@@ -223,5 +272,5 @@ window.TP = window.TP || {};
     };
   }
 
-  TP.MenuNav = { attach };
+  TP.MenuNav = { attach, modal: null };
 })();

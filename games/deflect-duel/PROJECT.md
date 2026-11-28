@@ -1,7 +1,8 @@
 # Deflect Duel: team project file
 
-**Read `../TEAMS.md` first** (team structure, branches, rules). This file is the Deflect Duel
-specifics. The boss keeps it up to date.
+**Read `../TEAMS.md` first** (team structure, branches, rules), then **`DESIGN.md`** (the current
+design, v2). This file is the Deflect Duel specifics. The boss keeps it up to date.
+
 
 ## What it is
 
@@ -40,12 +41,14 @@ characters, art, music or levels.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Deflect Duel (boss) | `team/deflect-duel` |
-| Deflect Duel · Gameplay (systems and feel) | `team/deflect-duel-gameplay` |
-| Deflect Duel · Art and UI (look and screens) | `team/deflect-duel-art` |
-| Deflect Duel · QC (playtest and checks) | `team/deflect-duel-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Deflect Duel (boss) | `session_01GHNBrrDAhFP7gZXs4Ap9TK` | `team/deflect-duel` |
+| Deflect Duel · Gameplay (systems and feel) | `session_01GHNBrpQgRcR4wuJEviMDGG` | `team/deflect-duel-gameplay` |
+| Deflect Duel · Art and UI (look and screens) | `session_01GHNBrqgetkZbzAJt8h3dPM` | `team/deflect-duel-art` |
+| Deflect Duel · QC (playtest and checks) | `session_01GHNBrouPoebhNMp9PjrRtH` | `team/deflect-duel-qc` |
+
+Roles reply to the boss with `send_message` to the boss session ID above.
 
 ## Who owns what
 
@@ -54,8 +57,8 @@ characters, art, music or levels.
 | `js/duel.js` (to write) | ball physics, hitting, ownership, KOs, lives, respawn, hit-freeze timing, bots | arena look, ball glow and trail, swing ring, KO effects, camera shake |
 | `js/main.js` (to write) | match flow and config | menu, results and rematch screens |
 | `js/hud.js`, `index.html` | — | owns these |
-| `../shared/js/input.js`, `car.js` | owns | car model only |
-| `../shared/js/fx.js`, `sfx.js` | — | owns (hit/swing/KO sounds already exist) |
+| `js/arena.js` (to write) | — | arena meshes and lighting |
+| `../shared/` (all of it) | — (ask the boss, who asks the Director) | — (ask the boss, who asks the Director) |
 | `../tools/deflect-duel-*.js` | — (QC owns) | — (QC owns) |
 
 Suggested split for the first build: Gameplay writes `duel.js`'s rules with plain placeholder
@@ -64,17 +67,99 @@ match to the end) as soon as a match can finish.
 
 ## How to test
 
-Not playable yet. Once it is, QC adds `node tools/deflect-duel-smoke.js` here. Until then,
-check that Turbo Party still passes after any change to `../shared/`:
-`node tools/turbo-party-smoke.js 2 8 200`.
+From the `games` folder:
 
-## Current state (as of 2026-11-27)
+- `node tools/deflect-duel-smoke.js 4 8 180`: all-bot match (players, speed, timeout s,
+  optional lives). Checks the rules on every frame; prints PASS/FAIL. Fails cleanly with
+  "isn't playable yet" until `duel.js` and `main.js` exist.
+- `node tools/turbo-party-smoke.js 2 8 200`: must still pass after any shared change.
 
-- **Done:** `index.html` (layout, styles, script tags) and `js/hud.js` (player chips with
-  hearts, ball speed, centre text, toasts, cards). In the shared engine: the Hit button,
-  hit/swing/KO sounds, and the `pivot` car setting (turning while nearly stopped, so you can
-  aim; Deflect Duel should use about 0.8).
-- **To build:** `js/duel.js` and `js/main.js`. See `README.md` for the checklist.
+## Current state (as of 2026-11-28)
+
+**`team/deflect-duel` now holds v2** (see `DESIGN.md`). The hub's Play card still points at v1
+on the base branch until the Director verifies v2 and swaps it in.
+
+**Team:** efficiency mode. The boss builds alone; Gameplay, Art and UI, and QC are stopped.
+
+**v2 has:**
+- A 3D ball in a closed box with a ceiling. A neutral ball has gravity; an owned ball flies in
+  straight lines, then cools back to neutral.
+- Aimed strikes (up, straight or down, plus a sideways bend), clash, the wheels-touch bunt
+  (flip reset), and 3D KOs.
+- Speed escalation: ×1.22 + 2.5 per strike, up to 210. The hit-freeze grows up to 1.2 s, and a
+  Hit pressed during a freeze is remembered.
+- The rocket moveset: double jump, flips, air control and flying. Flip strikes; aerial strikes
+  aim with the car's nose.
+- Bots that fly to high balls, return high shots in the air, flip-strike, flip-dodge, Smash, and
+  react according to speed.
+- Art's broadcast camera and effects.
+
+**Tests (from `games/`):**
+- `node tools/deflect-duel-smoke.js 4 8 240`: a whole all-bot match.
+- `node tools/deflect-duel-rules.js`: 11 pass. The skipped tests are v2 plans not built yet.
+- `node tools/deflect-duel-fun.js 50 4 3`: the fun table. Last run:
+  - rallies: median 5–6 strikes
+  - median KO speed: about 29
+  - rallies reaching top speed: about 6%
+  - aerial strikes: about 31% (7–9% of all strikes are real flying aerials)
+  - per match: about 3 flip strikes, 1.6 clashes and 1 flip reset
+  - no stalemates, seats fair, nothing stuck
+
+**Still open:**
+- Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
+- The tunables in `TP.DUEL_CFG`.
+
+## Round 3 roadmap: genre gap check (Reece, 2026-11-28)
+
+Reece asked for the same gap check that Turbo Party got. References are the ball-deflection
+and arena-fighter genres (Lethal League-style duelling, platform fighters, car-ball games).
+**Use genre conventions only. Never copy any game's names, characters, stages, moves, art or
+music.** v2's core (speed escalation, aimed and flip strikes, bunts, flying bots) is solid. The
+gaps are mostly content, depth and presentation.
+
+### Gaps compared with the genre
+
+| Area | Deflect Duel now | Genre standard | Gap |
+|---|---|---|---|
+| Arenas | 1 box with pillars | 4–8 stages, each with its own shape, hazards and look | **Big** |
+| Character variety | Every car is identical | Several characters with different stats, hit angles and a unique special | **Big** |
+| Meter and specials | None | A meter built by hits and bunts, spent on a special shot or a defensive burst | **Big** (depth) |
+| Modes | Free-for-all lives (3 or 5) | Teams (2 vs 2), a time or points mode, one-life sudden death, handicaps, a short tournament | Big |
+| Bots | One level | Easy, Normal and Hard (and Expert) | Medium |
+| Onboarding | Controls table only | A practice room (ball launcher, speed dial) and a short interactive tutorial for strikes, flips and bunts | **Big**: the moveset is deep and nothing teaches it |
+| Presentation | Hit-freeze, broadcast camera, speed readout | KO slow-motion and replay, announcer callouts ("200!", "PERFECT"), crowd that reacts, music per stage that swells with ball speed, victory poses | Big |
+| End of match | Results card | Podium with victory poses, match stats (top speed, best rally, flips, bunts), MVP tags | Medium |
+| Feel | No human playtest yet; keyboard W both drives and aims | Separate aim input or a hold-to-aim option; tunables checked by hand | Medium: **do this first** |
+| Cosmetics | Player colours | Paints, ball skins, trails, KO effects, unlocked by play | Later |
+
+### Plan (one builder, in this order; each phase ends merged and verified)
+
+- **Phase 0: feel.** Add an optional keyboard aim (a separate aim-up and aim-down pair, or
+  hold-Hit-to-aim) so W can just drive. The bindings live in shared `input.js`, so request any
+  change from the Director: an optional "aim" action that falls back to up/down when it's
+  unbound. Sanity-check `TP.DUEL_CFG` with scripted human input.
+- **Phase 1: learn and choose.** A practice room (ball launcher, speed dial, infinite lives),
+  a 60–90 s tutorial (strike, aim, flip strike, bunt, clash), Easy/Normal/Hard bots, and modes:
+  Teams 2 vs 2, Time (most KOs), and Sudden Death.
+- **Phase 2: presentation.** KO slow-motion and an instant replay of the last 2 s, announcer
+  callouts as text plus sfx, a crowd that reacts to speed tiers, music that builds with ball
+  speed, a victory podium and match stats with MVP tags.
+- **Phase 3: arenas 1 → 4.** Each arena has a shape twist and one hazard, for example:
+  - moving pillars;
+  - a split-level floor;
+  - a low ceiling with bounce pads;
+  - a rotating centre wall.
+
+  Every arena needs bot support and gets tunnelling tests.
+- **Phase 4: car styles and the meter.** 3–4 car archetypes (for example heavy: a slower
+  swing that adds more speed; light: a quick flip and a wide bunt; trickster: curve shots),
+  each with one special paid for with a meter built by strikes and bunts. Bots use them, and
+  balance is checked with the fun table and seat or style win rates.
+- **Phase 5: cosmetics.** Paints, ball skins, trails and KO effects unlocked by play, saved
+  locally.
+
+Each phase: smoke, rules and fun table pass, `credits-check` passes, screenshots, then message
+the Director "Deflect Duel phase N: ready to merge". Shared changes still go through the Director.
 
 ## Decisions (from Reece)
 
@@ -85,3 +170,48 @@ check that Turbo Party still passes after any change to `../shared/`:
   feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
   and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
   The Director owns `shared/` and the hub.
+- 2026-11-27 (via the Director): **Free assets and tools only** (see `../TEAMS.md`). Every
+  third-party asset needs a line in `../CREDITS.md` before the boss merges it; assets made in
+  code are exempt.
+- 2026-11-27: **Reece approved the build plan** and said "Director can approve for me": from
+  now on the Director's approvals count as Reece's for this team. Answers (logged by the Director):
+  the ball never KOs its owner; double KO → last hitter wins; stalemate = 12 s reset only (no
+  speed decay); neutral serve anyone can take; aim bend about 25° (tune after first playtest);
+  two round pillars, on by default behind one config flag; `js/arena.js` belongs to Art and UI;
+  car tuning via `TP.modeTuning({ pivot: 0.8 })`; one bot difficulty for v1 (random skill per bot);
+  ball stays flat at bumper height.
+- **First playable** = launch from the hub, pick 2–4 seats and 3/5 lives, play to a winner,
+  results + rematch, an all-bot match finishes with no errors, QC's smoke test passes.
+- 2026-11-28 (Reece's direction, via the Director): **Design v2.** The game should feel and play
+  like car-soccer mechanics crossed with an arena ball-striking fighter. That means a truly 3D
+  ball (a neutral ball has gravity, an owned ball flies in straight lines), a ceiling, aimed
+  strikes (up, straight or down), bunts, clashes, flip strikes, the shared engine's new "rocket
+  moveset" (from the Core session), and a side-angle broadcast camera. See `DESIGN.md`. v1 stays
+  on the hub as Play while v2 is built. Genre conventions only, with no other game's names or
+  look.
+- 2026-11-28 (Reece, via the Director): "Bunting should be a flip reset (touching with 4 wheels)."
+  A bunt is no longer a button. When the car touches the ball with its underside (all four
+  wheels), the ball pops up gently and slows, the toucher keeps or takes ownership, there's no
+  hit-freeze, and the car gets its jump and flip back. Hit in the air with no direction is a
+  normal straight strike. `DESIGN.md` is updated.
+- 2026-11-28 (Reece, via the Director):
+  - **Keep the neutral-bump rule:** bumping a neutral ball makes you its owner at base speed.
+  - **Speeds should escalate the way the genre does.** Each strike multiplies the speed (about
+    ×1.12) plus a small step, up to a top speed around 200+. Hit-freeze grows up to about 1–1.5 s,
+    with a camera punch-in and a speed readout that climbs. Freeze time doesn't count toward the
+    stalemate timer. The ball's collision is swept, so it can't tunnel. Bots get speed-aware
+    reactions.
+  - **The bar is "just get them to a good playable level".** v2 replaces v1 on the hub only once
+    it's genuinely good to play (moveset, aerials, flip-strikes, bots using them, escalation, no
+    stalls). The Director verifies, then swaps it in.
+- 2026-11-28 (Director, Reece's call): **Efficiency mode.** The boss builds the rest of v2 alone,
+  keeps testing lean, and messages the new Director (`session_01GHNBrpeLU9EhxDWu9Qk78E`) only at
+  milestones or when blocked.
+- 2026-11-28 (boss, accepting Gameplay's Stage A calls):
+  - The ball radius is 0.75, so a timed jump clears a floor ball.
+  - A clash puts the ball back as it was before the first strike, with zero velocity.
+  - A hard bump on a neutral ball makes you its owner as a gravity ball, with a 0.3 s no-KO
+    grace.
+  - A cooling ball still KOs until it turns neutral.
+  - No Smash off a neutral ball.
+  - Strike aim uses the pitch axis (stick up/down or W/S), not the gas trigger.
