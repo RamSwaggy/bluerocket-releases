@@ -9,9 +9,13 @@
      node tools/car-fighter-human.js            # moves + results card
      node tools/car-fighter-human.js moves      # only the controls part
      node tools/car-fighter-human.js results    # only the results card part
+   Options: --p1=rivet|haulback|skitter (P1's car, default rivet)
+            --p2=...  (the bot's car, default rivet)  --diff=easy (the bot)
 
-   Part 1, "moves": open car-fighter/index.html with no query string, pick
-   an Easy bot for P2 in the menu, click Fight!, wait for phase "fight",
+   Part 1, "moves": open car-fighter/index.html with no query string, set
+   P1 to keyboard 1 and P2 to an Easy bot, click "Choose cars →", pick each
+   seat's car on the select screen, click Fight!, check the fight really
+   uses those cars, wait for phase "fight",
    then check, one at a time (each gets a few tries, because the bot
    moves and attacks on its own):
      walk      A / D moves P1 along the line
@@ -21,12 +25,14 @@
      heavy     R gives Ram
      launcher  toward + R gives Corkscrew
      throw     E + R up close gives Tow Hook
+     throw30   E, then R about 30 ms later (real key presses), gives Tow Hook
      sidestep  tapping W puts P1 in the "sidestep" state
      flipkick  Space, then E in the air, gives Flip Kick
    A move "works" when the move starts from the key presses; whether it
    also connected (hit / block / throw) is printed alongside.
 
-   Part 2, "results": opens index.html?roundTime=20, clicks Fight!, lets
+   Part 2, "results": opens index.html?roundTime=20, goes through the menu
+   and car select the same way, lets
    the bot win, then checks the results card: Rematch starts a fresh
    match, and Menu goes back to the menu.
 
@@ -39,7 +45,15 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 const { chromium } = require("playwright");
 
-const which = process.argv[2] || "all";
+const flags = {};
+const pos = [];
+for (const a of process.argv.slice(2)) {
+  const m = a.match(/^--([^=]+)=(.*)$/);
+  if (m) flags[m[1]] = m[2];
+  else pos.push(a);
+}
+const which = pos[0] || "all";
+const P1CAR = flags.p1 || "rivet", P2CAR = flags.p2 || "rivet", DIFF = flags.diff || "easy";
 const PAGE = pathToFileURL(path.resolve(__dirname, "../car-fighter/index.html")).href;
 
 const results = [];
@@ -54,8 +68,24 @@ async function openPage(browser, query, errors) {
   page.on("pageerror", (e) => errors.push("PAGE ERROR: " + e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push("CONSOLE ERROR: " + m.text()); });
   await page.goto(PAGE + (query || ""));
-  await page.waitForSelector("#start", { timeout: 30000 });
+  await page.waitForSelector("#next", { timeout: 30000 });
   return page;
+}
+
+/* The real M2 menu flow: seats → "Choose cars →" (#next) → car select →
+   Fight! (#fight). Checks the fight that starts uses the cars picked. */
+async function startFromMenu(page, p1car, p2car, diff) {
+  await page.selectOption("#ctrl0", "kb1");
+  await page.selectOption("#ctrl1", "bot");
+  await page.selectOption("#diff1", diff).catch(() => {});
+  await page.click("#next");
+  await page.waitForSelector("#fight", { timeout: 10000 });
+  await page.click(`.tile[data-seat="0"][data-car="${p1car}"]`);
+  await page.click(`.tile[data-seat="1"][data-car="${p2car}"]`);
+  await page.click("#fight");
+  await waitForFight(page);
+  const got = await page.evaluate(() => TP.fight.state.cars.map((c) => c.fighter));
+  record("carselect", got[0] === p1car && got[1] === p2car, `picked ${p1car} vs ${p2car} (bot ${diff}); the fight has ${got.join(" vs ")}`);
 }
 
 /* A recorder inside the page: after every fight step it logs P1's and
@@ -146,7 +176,8 @@ const p1Hits = (evs) => evs.filter((e) => e.attacker === 0 && ["hit", "block", "
 async function attempt(page, name, tries, act) {
   let last = { ok: false, detail: "never got into position" };
   for (let i = 0; i < tries; i++) {
-    const s = await getReady(page, name === "throw" ? 2.8 : 3.0);
+    // Push-apart keeps touching cars about 3.0 apart; throw range is 3.6.
+    const s = await getReady(page, name.startsWith("throw") ? 3.4 : 3.0);
     if (!s) continue;
     last = await act(s);
     if (last.ok) break;
@@ -160,15 +191,9 @@ async function attempt(page, name, tries, act) {
    ===================================================================== */
 async function partMoves(browser, errors) {
   const page = await openPage(browser, "", errors);
-  // P1 on keyboard 1, P2 an Easy bot (fewer blocks, slower reactions).
-  await page.selectOption("#ctrl0", "kb1").catch(() => {});
-  await page.selectOption("#ctrl1", "bot").catch(() => {});
-  await page.selectOption("#diff1", "easy").catch(() => {});
-  await page.click("#start");
+  // P1 on keyboard 1, P2 a bot (Easy by default: fewer blocks, slower reactions).
   await installRecorder(page);
-  await waitForFight(page);
-  const ctrls = await page.evaluate(() => TP.Match.options && TP.fight && [TP.fight.state.cars.length, JSON.stringify(TP.Match.options.bot2 || "")]);
-  console.log(`Menu → Fight! started a fight (phase "fight"); options ${JSON.stringify(ctrls)}`);
+  await startFromMenu(page, P1CAR, P2CAR, DIFF);
   await page.mouse.click(5, 5); // keep keyboard focus on the page, away from the menu buttons
 
   // ---- walk: hold toward for half a second ----
@@ -256,6 +281,23 @@ async function partMoves(browser, errors) {
     };
   });
 
+  // ---- throw30: E, then R about 30 ms later, as real key presses ----
+  await attempt(page, "throw30", 6, async (s) => {
+    await page.keyboard.down("KeyE");
+    await page.waitForTimeout(30);
+    await page.keyboard.down("KeyR");
+    await page.waitForTimeout(60);
+    await page.keyboard.up("KeyE");
+    await page.keyboard.up("KeyR");
+    await page.waitForTimeout(1300);
+    const moves = movesStarted(await logSince(page, s.logLen));
+    const evs = p1Hits(await eventsSince(page, s.nEv));
+    return {
+      ok: moves.includes("tow_hook") && evs.includes("throw:tow_hook"),
+      detail: `distance ${Math.abs(s.cars[1].x - s.cars[0].x).toFixed(2)}, P2 was "${s.cars[1].state}"; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(evs)}`,
+    };
+  });
+
   // ---- sidestep: tap W ----
   await attempt(page, "sidestep", 3, async (s) => {
     await page.keyboard.press("KeyW");
@@ -284,11 +326,7 @@ async function partMoves(browser, errors) {
    ===================================================================== */
 async function partResults(browser, errors) {
   const page = await openPage(browser, "?roundTime=20", errors);
-  await page.selectOption("#ctrl0", "kb1").catch(() => {});
-  await page.selectOption("#ctrl1", "bot").catch(() => {});
-  await page.selectOption("#diff1", "hard").catch(() => {});
-  await page.click("#start");
-  await waitForFight(page);
+  await startFromMenu(page, P1CAR, P2CAR, "hard");
   // P1 does nothing; the bot wins (by KO or on time) within about a minute.
   await page.waitForSelector("#rematch", { timeout: 150000 });
   const card = await page.evaluate(() => document.getElementById("card").innerText.split("\n").filter(Boolean).slice(0, 3).join(" | "));
@@ -306,12 +344,12 @@ async function partResults(browser, errors) {
   record("rematch", re.fresh && re.round === 1 && re.wins[0] === 0 && re.wins[1] === 0 && !re.overlay,
     `new fight ${re.fresh}, round ${re.round}, wins ${JSON.stringify(re.wins)}, HP ${re.hp.join(" ")}, card hidden ${!re.overlay}`);
 
-  // Menu: play that one out too, then press Menu; the menu card (Fight!) should come back.
+  // Menu: play that one out too, then press Menu; the seats menu ("Choose cars →") should come back.
   await page.waitForSelector("#menu", { timeout: 150000 });
   await page.click("#menu");
-  await page.waitForSelector("#start", { timeout: 15000 }).catch(() => {});
-  const menu = await page.evaluate(() => ({ url: location.search, hasStart: !!document.getElementById("start"), fight: window.TP && TP.fight ? TP.fight.state.phase : null }));
-  record("menu", menu.hasStart, `after Menu: query "${menu.url}", Fight! button ${menu.hasStart ? "shown" : "missing"}, fight phase ${menu.fight}`);
+  await page.waitForSelector("#next", { timeout: 15000 }).catch(() => {});
+  const menu = await page.evaluate(() => ({ url: location.search, hasNext: !!document.getElementById("next"), fight: window.TP && TP.fight ? TP.fight.state.phase : null }));
+  record("menu", menu.hasNext, `after Menu: query "${menu.url}", "Choose cars" button ${menu.hasNext ? "shown" : "missing"}, fight phase ${menu.fight}`);
   await page.close();
 }
 
@@ -326,7 +364,8 @@ let TP_MOVE_DAMAGE = {};
   try {
     // Read the move table once (for chip damage).
     const p = await openPage(browser, "", errors);
-    TP_MOVE_DAMAGE = await p.evaluate(() => Object.fromEntries(Object.entries(TP.MOVES).map(([k, m]) => [k, m.damage])));
+    // The bot (P2) is the attacker in the block check, so use its car's own table.
+    TP_MOVE_DAMAGE = await p.evaluate((car) => Object.fromEntries(Object.entries(TP.fighterMoves ? TP.fighterMoves(car) : TP.MOVES).map(([k, m]) => [k, m.damage])), P2CAR);
     await p.close();
     if (which === "all" || which === "moves") await partMoves(browser, errors);
     if (which === "all" || which === "results") await partResults(browser, errors);
