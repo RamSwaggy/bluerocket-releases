@@ -79,7 +79,7 @@
     // Start with two flat chunks so the grid has room, then random chunks.
     const order = ["flat", "flat"];
     const pool = ["gap", "ramp", "step", "drop", "oneway", "boost", "gap", "ramp"];
-    for (let i = 0; i < 40; i++) order.push(pool[Math.floor(r() * pool.length)]);
+    for (let i = 0; i < 90; i++) order.push(pool[Math.floor(r() * pool.length)]);
     for (const id of order) {
       // Keep heights in a band so the course doesn't wander off forever.
       let name = id;
