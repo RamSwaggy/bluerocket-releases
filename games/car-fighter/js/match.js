@@ -247,7 +247,10 @@ window.TP = window.TP || {};
     paused = on;
     if (!on && current && TP.Input) {
       // Whatever is held right now pressed "Resume" (or is left over from
-      // the menu): ignore it until it's released.
+      // the menu): ignore it until it's released. Poll first: Resume is
+      // usually pressed inside a keydown handler, before the game loop has
+      // polled that same key, so the last poll wouldn't show it held yet.
+      TP.Input.poll();
       ignoreHeld = current.controllers.map((id) => {
         const ign = {};
         if (id === "bot" || id === "dummy") return ign;

@@ -83,6 +83,24 @@ async function closeIn(page, d = 3.1) {
   }
   return false;
 }
+
+/* Headless Chromium draws WebGL in software at ~15 frames a second, so
+   each rendered frame runs ~4 fight steps and two keys pressed 30 ms
+   apart reach the fight 4 steps apart (a real browser at 60 fps: 2).
+   For timing-exact checks (throws), slow the fight down to the measured
+   frame rate so it's back to one fight step per rendered frame, exactly
+   like a real 60 fps browser. Returns a restore function. */
+async function matchFrameRate(page) {
+  const fps = await page.evaluate(() => new Promise((ok) => {
+    let n = 0; const t0 = performance.now();
+    const f = () => { n++; if (performance.now() - t0 < 600) requestAnimationFrame(f); else ok(n / ((performance.now() - t0) / 1000)); };
+    requestAnimationFrame(f);
+  }));
+  const speed = Math.min(1, Math.max(0.1, fps / 60));
+  await page.evaluate((s) => { TP.Match.options.speed = s; }, speed);
+  return { fps, speed, slow: 1 / speed, restore: () => page.evaluate(() => { TP.Match.options.speed = 1; }) };
+}
+
 const towardKey = async (page) => ((await st(page)).cars[1].x > (await st(page)).cars[0].x ? "KeyD" : "KeyA");
 const awayKey = async (page) => ((await towardKey(page)) === "KeyD" ? "KeyA" : "KeyD");
 
@@ -173,10 +191,11 @@ async function partTraining(browser, errors) {
   const backOnPause = await page.evaluate(() => !!document.querySelector("#presume"));
   record("movelist", ml.missing.length === 0 && backOnPause, `${ml.names.length} rows${ml.missing.length ? ", missing " + ml.missing.join(", ") : ""}; Esc back to pause: ${backOnPause}`);
 
-  // resume while holding Space: no jump until it's let go
+  // resume with a held button: on the pause card Space presses the
+  // highlighted button (Resume). Keep holding it: P1 must NOT jump until
+  // Space is let go (it's keyboard 1's jump in the fight).
+  await page.evaluate(() => { const b = document.querySelector("#presume"); b.focus(); });
   await page.keyboard.down("Space");
-  await page.waitForTimeout(80);
-  await tap(page, "Escape");
   await page.waitForTimeout(500);
   const r1 = await st(page);
   const paused = await page.evaluate(() => TP.Match.isPaused());
@@ -238,12 +257,14 @@ async function partTutorial(browser, errors) {
       for (let i = 0; i < 3; i++) { await tap(page, "KeyE"); await page.waitForTimeout(140); }
       await page.waitForTimeout(600);
     },
-    async () => { // Throw
+    async () => { // Throw (frame-exact: see matchFrameRate)
       await closeIn(page, 3.2);
+      const rate = await matchFrameRate(page);
       await page.keyboard.down("KeyE"); await page.keyboard.down("KeyR");
-      await page.waitForTimeout(70);
+      await page.waitForTimeout(70 * rate.slow);
       await page.keyboard.up("KeyE"); await page.keyboard.up("KeyR");
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(1200 * rate.slow);
+      await rate.restore();
     },
     async () => { // Signature: hold Boost, tap Heavy
       await closeIn(page);
@@ -263,7 +284,7 @@ async function partTutorial(browser, errors) {
       await page.waitForTimeout(1500);   // the lesson moves on ~1.2 s after it's done
       ok = (await lesson()) > i || (i === plays.length - 1 && await done());
     }
-    record("t:" + names[i], ok, ok ? `done after ${n + (ok ? 1 : 0)} go(es)` : `stuck on lesson ${(await lesson()) + 1}: "${await page.$eval("#coach", (e) => e.innerText.replace(/\n/g, " ").slice(0, 100))}"`);
+    record("t:" + names[i], ok, ok ? `done after ${n} go(es)` : `stuck on lesson ${(await lesson()) + 1}: "${await page.$eval("#coach", (e) => e.innerText.replace(/\n/g, " ").slice(0, 100))}"`);
     if (!ok) break;
   }
   if (results.find((r) => r.name === "t:signature" && r.ok)) {

@@ -379,8 +379,11 @@
     .card.pause { width: min(560px, 100%); text-align: center; }
     .card.pause .title { margin-bottom: 12px; }
     .pausebtns { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin: 6px auto 10px; max-width: 320px; }
+    /* One column, like the buttons under it, so a D-pad's up / down
+       reaches every setting (side by side, "Reset positions" was a trap). */
     .trainset {
-      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; gap: 8px; align-items: center; max-width: 320px;
+      margin-left: auto !important; margin-right: auto !important;
       padding: 10px; margin: 0 0 12px; border-radius: 12px; background: var(--panel-2); font-size: 14px;
     }
     .trainset select {

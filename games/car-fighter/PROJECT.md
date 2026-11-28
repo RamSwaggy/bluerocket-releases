@@ -59,6 +59,7 @@ node tools/car-fighter-sim.js 50 1000         # [matches] [seed]: headless bot-v
                                               #   options: --p1= --p2= --bot= --bot2=
 node tools/car-fighter-sim.js frames 7        # frame-data check of every TP.MOVES row
 node tools/car-fighter-human.js               # real menu + kb1 key presses for every move type (~3 min, background)
+node tools/car-fighter-training.js            # training, pause menu, move list, tutorial (~3 min, background)
 ```
 
 All three also take `--page=<path>` and `--extra="&opt=.."`.
@@ -163,6 +164,51 @@ time of the pause.
   The throw bug it found is now fixed (see above).
 - (old) Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
+
+## Round 2 progress (one builder: "Car Fighter · Builder (round 2)")
+
+Branch `team/car-fighter`, with the release branch (rebindable controls, MenuNav, Controls
+button) merged in. Team sessions above are no longer active; the builder does all roles.
+
+**Phase 0 (bugs and loose ends): fixed**
+- Merge bug: every card had **two** MenuNavs (the release's `UI.card` attached one, and so did
+  `main.js`), so arrows moved twice. Now `UI.card(html, { onBack })` is the only one.
+- `match.js`: on a slow or 30 Hz screen one rendered frame runs several fight steps, and the
+  same "just pressed" flag went to **every** step (one tap could count twice and chain on its
+  own). Presses now reach only the first step of each frame.
+- QC's `car-fighter-human.js` (d9e8ecd) merged and fixed. Playwright's `keyboard.press()` is
+  down+up in one frame, which no input poll sees, so it now uses real 50 ms taps and a
+  640×360 window. The throw checks run against the training dummy (the Easy bot kept hitting
+  P1 first), at a fight speed matched to headless Chromium's frame rate (~15 fps), so one
+  rendered frame is one fight step, as in a real 60 fps browser.
+
+**Phase 1 (M2 roster, select, bot levels):** already merged before the pause (see below).
+The builder re-checks it with the sim matrix.
+
+**Phase 2 (learn and pause): built**
+- `js/pause.js`: Esc / P / pad Start pauses any match. The card has Resume, Move list,
+  🎮 Controls, Restart and Quit to menu, plus the training settings in training. While paused,
+  no fight step runs. On resume, a button still held from the menu is ignored until it's
+  released (`TP.Match.setPaused`).
+- Move list: built from `TP.fighterMoves`, so it can't drift. It shows the input with the
+  player's own bound keys, startup frames, total damage and notes (armour, launches,
+  cross-up...).
+- Training (`fight.js` `opts.training`, `js/training.js`): no clock (∞), no KO, health
+  refills when a combo ends, and an optional super-meter refill. The dummy can stand, block,
+  jump, attack or fight back as a Normal bot (`fight.setTraining`, `fight.resetPositions`).
+  The readout shows last hit, current combo and best combo. Hit and throw events now also
+  carry `combo` and `comboDamage` (additive to the §9 contract).
+- Tutorial (menu → Tutorial): 6 lessons (move, dodge, guard, combo, throw, signature). Each
+  uses the player's own key names and moves on by itself. At the end: keep practising, or
+  go back to the menu.
+- New test: `node tools/car-fighter-training.js` (training rules, pause, pad navigation of the
+  pause card, move list, resume-while-held, restart, quit, and the whole tutorial with real
+  keys).
+
+**Resume note:** if this stops mid-phase, re-run (from `games/`) `car-fighter-training.js`,
+`car-fighter-human.js --p1=X --p2=X` for each car, smoke, sim frames, the sim matrix,
+`menunav-qc.js`, `controls-test.js` and `credits-check.js car-fighter`, then message the
+Director.
 
 ## Round 2 roadmap: genre gap check (Reece, 2026-11-28)
 

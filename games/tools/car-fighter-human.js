@@ -9,6 +9,7 @@
      node tools/car-fighter-human.js            # moves + results card
      node tools/car-fighter-human.js moves      # only the controls part
      node tools/car-fighter-human.js results    # only the results card part
+     node tools/car-fighter-human.js throws     # only the throws (training dummy)
    Options: --p1=rivet|haulback|skitter (P1's car, default rivet)
             --p2=...  (the bot's car, default rivet)  --diff=easy (the bot)
 
@@ -24,8 +25,7 @@
      chain     E E E gives Jab > Swipe > Spinout
      heavy     R gives Ram
      launcher  toward + R gives Corkscrew
-     throw     E + R up close gives Tow Hook
-     throw30   E, then R about 30 ms later (real key presses), gives Tow Hook
+     (throw and throw30 run against the training dummy: see Part 1b)
      sidestep  tapping W puts P1 in the "sidestep" state
      flipkick  Space, then E in the air, gives Flip Kick
    A move "works" when the move starts from the key presses; whether it
@@ -137,14 +137,34 @@ async function waitForFight(page, ms = 20000) {
   await page.waitForFunction(() => window.TP && TP.fight && TP.fight.state.phase === "fight", null, { timeout: ms });
 }
 
-/* A real key tap: down, held ~50 ms (3 fight frames), up. Playwright's
+/* A real key tap: down, held a moment, up. Playwright's
    keyboard.press() sends down and up back to back, inside one rendered
    frame, and the shared input only sees keys that are down when it
    polls, so a press() is invisible. No person taps that fast. */
-async function tap(page, key, holdMs = 50) {
+// 90 ms: headless Chromium polls input only ~17 times a second, so a
+// shorter tap can start and end between two polls and never be seen.
+async function tap(page, key, holdMs = 90) {
   await page.keyboard.down(key);
   await page.waitForTimeout(holdMs);
   await page.keyboard.up(key);
+}
+
+
+/* Headless Chromium draws WebGL in software at ~15 frames a second, so
+   each rendered frame runs ~4 fight steps and two keys pressed 30 ms
+   apart reach the fight 4 steps apart (a real browser at 60 fps: 2).
+   For timing-exact checks (throws), slow the fight down to the measured
+   frame rate so it's back to one fight step per rendered frame, exactly
+   like a real 60 fps browser. Returns a restore function. */
+async function matchFrameRate(page) {
+  const fps = await page.evaluate(() => new Promise((ok) => {
+    let n = 0; const t0 = performance.now();
+    const f = () => { n++; if (performance.now() - t0 < 600) requestAnimationFrame(f); else ok(n / ((performance.now() - t0) / 1000)); };
+    requestAnimationFrame(f);
+  }));
+  const speed = Math.min(1, Math.max(0.1, fps / 60));
+  await page.evaluate((s) => { TP.Match.options.speed = s; }, speed);
+  return { fps, speed, slow: 1 / speed, restore: () => page.evaluate(() => { TP.Match.options.speed = 1; }) };
 }
 
 /* Make sure we're mid-round and close to the bot, with both cars free to
@@ -250,7 +270,8 @@ async function partMoves(browser, errors) {
 
   // ---- light chain E E E ----
   await attempt(page, "chain", 5, async (s) => {
-    for (let i = 0; i < 3; i++) { await tap(page, "KeyE"); await page.waitForTimeout(120); }
+    // ~130 ms per press (90 ms tap + 40 ms): inside even Skitter's 12-frame Jab.
+    for (let i = 0; i < 3; i++) { await tap(page, "KeyE"); await page.waitForTimeout(40); }
     await page.waitForTimeout(700);
     const moves = movesStarted(await logSince(page, s.logLen));
     const ok = moves.slice(0, 3).join(">") === "jab>swipe>spinout";
@@ -280,39 +301,6 @@ async function partMoves(browser, errors) {
     return { ok: moves[0] === "corkscrew", detail: `moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(p1Hits(await eventsSince(page, s.nEv)))}; P2 states ${p2.join(",")}` };
   });
 
-  // ---- throw: E + R together, up close ----
-  await attempt(page, "throw", 6, async (s) => {
-    await page.keyboard.down("KeyE");
-    await page.keyboard.down("KeyR");
-    await page.waitForTimeout(60);
-    await page.keyboard.up("KeyE");
-    await page.keyboard.up("KeyR");
-    await page.waitForTimeout(1300);
-    const moves = movesStarted(await logSince(page, s.logLen));
-    const evs = p1Hits(await eventsSince(page, s.nEv));
-    return {
-      ok: moves[0] === "tow_hook",
-      detail: `distance ${Math.abs(s.cars[1].x - s.cars[0].x).toFixed(2)}, P2 was "${s.cars[1].state}"; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(evs)}`,
-    };
-  });
-
-  // ---- throw30: E, then R about 30 ms later, as real key presses ----
-  await attempt(page, "throw30", 6, async (s) => {
-    await page.keyboard.down("KeyE");
-    await page.waitForTimeout(30);
-    await page.keyboard.down("KeyR");
-    await page.waitForTimeout(60);
-    await page.keyboard.up("KeyE");
-    await page.keyboard.up("KeyR");
-    await page.waitForTimeout(1300);
-    const moves = movesStarted(await logSince(page, s.logLen));
-    const evs = p1Hits(await eventsSince(page, s.nEv));
-    return {
-      ok: moves.includes("tow_hook") && evs.includes("throw:tow_hook"),
-      detail: `distance ${Math.abs(s.cars[1].x - s.cars[0].x).toFixed(2)}, P2 was "${s.cars[1].state}"; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(evs)}`,
-    };
-  });
-
   // ---- sidestep: tap W ----
   await attempt(page, "sidestep", 3, async (s) => {
     await tap(page, "KeyW");
@@ -331,6 +319,65 @@ async function partMoves(browser, errors) {
     const log = await logSince(page, s.logLen);
     const moves = movesStarted(log);
     return { ok: moves.includes("flip_kick"), detail: `P1 states ${p1States(log).join(",")}; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(p1Hits(await eventsSince(page, s.nEv)))}` };
+  });
+
+  await page.close();
+}
+
+
+/* =====================================================================
+   Part 1b: throws, against the TRAINING dummy (it stands still).
+   Against the Easy bot these two were flaky: at 3 units apart the bot
+   swings first and P1 is in hit-stun when the keys arrive. The dummy
+   never attacks, so this checks only what it should: that real E + R
+   presses (together, and 30 ms apart) make a Tow Hook.
+   ===================================================================== */
+async function partThrows(browser, errors) {
+  const page = await openPage(browser, "", errors);
+  await installRecorder(page);
+  await page.selectOption("#ctrl0", "kb1");
+  await page.click("#training");
+  await page.waitForSelector("#fight", { timeout: 10000 });
+  await page.click(`.tile[data-seat="0"][data-car="${P1CAR}"]`);
+  await page.click(`.tile[data-seat="1"][data-car="${P2CAR}"]`);
+  await page.click("#fight");
+  await waitForFight(page);
+  await page.mouse.click(5, 5);
+  const rate = await matchFrameRate(page);
+  console.log(`      (throws: page draws ${rate.fps.toFixed(0)} fps, fight speed ${rate.speed.toFixed(2)} so 1 step = 1 frame)`);
+  // ---- throw: E + R together, up close ----
+  await attempt(page, "throw", 4, async (s) => {
+    await page.keyboard.down("KeyE");
+    await page.keyboard.down("KeyR");
+    await page.waitForTimeout(60 * rate.slow);
+    await page.keyboard.up("KeyE");
+    await page.keyboard.up("KeyR");
+    await page.waitForTimeout(1300 * rate.slow);
+    const moves = movesStarted(await logSince(page, s.logLen));
+    const evs = p1Hits(await eventsSince(page, s.nEv));
+    return {
+      // "jab > tow_hook" is the designed kara-throw (the 2nd key landed a
+      // frame later and turned the Jab into the throw): also a pass.
+      ok: moves.includes("tow_hook") && evs.includes("throw:tow_hook"),
+      detail: `distance ${Math.abs(s.cars[1].x - s.cars[0].x).toFixed(2)}, P2 was "${s.cars[1].state}"; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(evs)}`,
+    };
+  });
+
+  // ---- throw30: E, then R about 30 ms later, as real key presses ----
+  await attempt(page, "throw30", 4, async (s) => {
+    await page.keyboard.down("KeyE");
+    await page.waitForTimeout(30 * rate.slow);   // 30 ms of fight time = 2 frames
+    await page.keyboard.down("KeyR");
+    await page.waitForTimeout(60 * rate.slow);
+    await page.keyboard.up("KeyE");
+    await page.keyboard.up("KeyR");
+    await page.waitForTimeout(1300 * rate.slow);
+    const moves = movesStarted(await logSince(page, s.logLen));
+    const evs = p1Hits(await eventsSince(page, s.nEv));
+    return {
+      ok: moves.includes("tow_hook") && evs.includes("throw:tow_hook"),
+      detail: `distance ${Math.abs(s.cars[1].x - s.cars[0].x).toFixed(2)}, P2 was "${s.cars[1].state}"; moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(evs)}`,
+    };
   });
 
   await page.close();
@@ -383,6 +430,7 @@ let TP_MOVE_DAMAGE = {};
     TP_MOVE_DAMAGE = await p.evaluate((car) => Object.fromEntries(Object.entries(TP.fighterMoves ? TP.fighterMoves(car) : TP.MOVES).map(([k, m]) => [k, m.damage])), P2CAR);
     await p.close();
     if (which === "all" || which === "moves") await partMoves(browser, errors);
+    if (which === "all" || which === "moves" || which === "throws") await partThrows(browser, errors);
     if (which === "all" || which === "results") await partResults(browser, errors);
   } catch (err) {
     record("tool", false, "tool error: " + err.message.split("\n")[0]);
