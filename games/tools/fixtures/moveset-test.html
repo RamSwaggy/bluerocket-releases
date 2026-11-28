@@ -1,0 +1,309 @@
+<!doctype html>
+<!-- =====================================================================
+     moveset-test.html — a little test arena for the shared car's ROCKET
+     MOVESET (shared/js/car.js). Every move can be tried by hand with
+     keyboard 1, and a bot car shows them off using the TP.ai helpers.
+
+     Open it straight from the file (double-click works; it only uses
+     code-made visuals).
+
+     Keyboard 1:
+       W / S        drive / reverse on the ground; pitch nose up / down in the air
+       A / D        steer; yaw in the air
+       Space        jump. Press again in the air (within 1.25 s):
+                      nothing held      → double jump
+                      W / S / A / D held → dodge flip that way
+       Shift or F   boost (in the air it pushes along the nose: pitch up + boost = fly)
+       1            reset your car to the start
+       2            bot demo on / off (a second car flips at and flies to the ball)
+       3            move the ball to a new spot
+
+     URL options: ?bot  starts with the bot demo on.
+
+     The arena has a ceiling (height 16, the faint grid overhead) and four
+     wall planes the car bounces off, so you can test both. The panel at
+     the top left shows the car's state live.
+
+     For headless checks the page exposes window.MOVESET_FIXTURE with the
+     cars, the ball and a step(dt) function.
+     ===================================================================== -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rocket Moveset Test</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1220; overflow: hidden; font-family: system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #panel {
+    position: fixed; top: 12px; left: 12px; padding: 10px 14px; min-width: 230px;
+    background: rgba(10, 14, 28, 0.82); color: #e6ecff; border-radius: 10px;
+    font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre;
+  }
+  #panel b { color: #ffd166; }
+  #help {
+    position: fixed; bottom: 12px; left: 12px; right: 12px; padding: 8px 12px;
+    background: rgba(10, 14, 28, 0.72); color: #b8c4e8; border-radius: 10px; font-size: 13px;
+  }
+  #help kbd { background: #26304d; color: #fff; border-radius: 4px; padding: 0 5px; font-family: inherit; }
+  #toast {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 16px;
+    background: #ffd166; color: #1b1f2e; border-radius: 999px; font-weight: 700; opacity: 0; transition: opacity 0.2s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel"></div>
+<div id="toast"></div>
+<div id="help">
+  <kbd>W</kbd><kbd>S</kbd> drive / air pitch &nbsp; <kbd>A</kbd><kbd>D</kbd> steer / air yaw &nbsp;
+  <kbd>Space</kbd> jump, again for double jump, again + direction for a flip &nbsp;
+  <kbd>Shift</kbd> boost (along the nose in the air) &nbsp;
+  <kbd>1</kbd> reset &nbsp; <kbd>2</kbd> bot demo &nbsp; <kbd>3</kbd> move ball
+</div>
+
+<script src="../../shared/vendor/three.min.js"></script>
+<script src="../../shared/js/util.js"></script>
+<script src="../../shared/js/input.js"></script>
+<script src="../../shared/js/car.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- Arena size, ceiling and walls ---------- */
+  const HALF_W = 30, HALF_D = 22, CEILING = 16;
+  // The world object the car reads. groundHeightAt is the only required
+  // part; ceilingHeight and wallPlanes are the moveset's optional extras.
+  const world = {
+    groundHeightAt: () => 0,
+    ceilingHeight: CEILING,
+    // Each wall: unit normal (nx, nz) pointing INTO the arena; inside is nx*x + nz*z >= d.
+    wallPlanes: [
+      { nx: 1, nz: 0, d: -HALF_W }, { nx: -1, nz: 0, d: -HALF_W },
+      { nx: 0, nz: 1, d: -HALF_D }, { nx: 0, nz: -1, d: -HALF_D },
+    ],
+  };
+  // Every car in this arena uses the rocket moveset.
+  const tuning = TP.modeTuning({}, { moveset: "rocket" });
+
+  /* ---------- Renderer, scene, camera ---------- */
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.shadowMap.enabled = true;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0d1220);
+  scene.fog = new THREE.Fog(0x0d1220, 60, 140);
+  const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 300);
+  TP.addStadiumLights(scene, 40);
+
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // Floor with a grid so speed and height are easy to judge.
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(HALF_W * 2, HALF_D * 2),
+    new THREE.MeshStandardMaterial({ color: 0x1f6f4a, roughness: 0.9 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+  const grid = new THREE.GridHelper(HALF_W * 2, 30, 0x9be7c4, 0x2f8a60);
+  grid.scale.z = HALF_D / HALF_W;
+  grid.position.y = 0.01;
+  scene.add(grid);
+
+  // Ceiling: a faint grid overhead.
+  const ceil = new THREE.GridHelper(HALF_W * 2, 15, 0x6b7cff, 0x3b4699);
+  ceil.scale.z = HALF_D / HALF_W;
+  ceil.position.y = CEILING;
+  scene.add(ceil);
+
+  // Walls: translucent panels matching the wall planes.
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x7aa2ff, transparent: true, opacity: 0.16, side: THREE.DoubleSide });
+  for (const [w, x, z, ry] of [[HALF_D * 2, HALF_W, 0, Math.PI / 2], [HALF_D * 2, -HALF_W, 0, Math.PI / 2],
+                               [HALF_W * 2, 0, HALF_D, 0], [HALF_W * 2, 0, -HALF_D, 0]]) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, CEILING), wallMat);
+    m.position.set(x, CEILING / 2, z);
+    m.rotation.y = ry;
+    scene.add(m);
+  }
+
+  // Height marker poles in the corners every 2 units (single jump ≈ 2, double jump ≈ 4–6.5).
+  for (const [x, z] of [[-HALF_W + 1, -HALF_D + 1], [HALF_W - 1, -HALF_D + 1], [-HALF_W + 1, HALF_D - 1], [HALF_W - 1, HALF_D - 1]]) {
+    for (let y = 2; y < CEILING; y += 2) {
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.08, 0.8), new THREE.MeshBasicMaterial({ color: y % 4 ? 0x8899bb : 0xffd166 }));
+      tick.position.set(x, y, z);
+      scene.add(tick);
+    }
+  }
+
+  /* ---------- The ball (a target to hit or fly to) ---------- */
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(1.2, 24, 16),
+    new THREE.MeshStandardMaterial({ color: 0xffd166, emissive: 0x553300, roughness: 0.4 })
+  );
+  ball.castShadow = true;
+  scene.add(ball);
+  // Ball spots: alternate low (flip at it) and high (aerial to it). A fixed
+  // list instead of random, so the bot demo always plays out the same.
+  const SPOTS = [
+    [0, 1.2, 12], [-12, 9, -6], [14, 1.2, -10], [10, 11, 10], [-18, 1.2, 12], [-4, 6, -14], [20, 13, 0],
+  ];
+  let spot = 0;
+  function moveBall() {
+    spot = (spot + 1) % SPOTS.length;
+    ball.position.set(...SPOTS[spot]);
+  }
+  ball.position.set(...SPOTS[0]);
+
+  /* ---------- Cars ---------- */
+  const you = new TP.Car(scene, { index: 0, color: TP.PLAYER_COLORS[0] });
+  you.moveset = "rocket";
+  const bot = new TP.Car(scene, { index: 1, color: TP.PLAYER_COLORS[1] });
+  bot.moveset = "rocket";
+  function resetYou() { you.placeAt(0, -12, 0); you.boost = 100; }
+  function resetBot() { bot.placeAt(-8, -14, 0.4); bot.boost = 100; }
+  resetYou();
+  resetBot();
+  let botOn = /[?&]bot\b/.test(location.search);
+  bot.mesh.visible = botOn;
+
+  /* Bot demo brain: a low ball gets a jump + dodge flip into it, a high
+     ball gets an aerial. Uses only the shared TP.ai helpers, so this is
+     also a working example of them. */
+  function botControls(car) {
+    const b = ball.position;
+    const flat = TP.util.dist2D(car.pos.x, car.pos.z, b.x, b.z);
+    if (b.y < 3) {
+      if (car.onGround && flat > 7) return TP.ai.driveTo(car, b.x, b.z, { boostDist: 10 });
+      return TP.ai.flipAt(car, b.x, b.z);
+    }
+    // High ball: start the aerial from close enough that boost lasts.
+    return TP.ai.aerialTo(car, b.x, b.y, b.z, { takeoffDist: b.y * 1.6 + 4, boostDist: 12 });
+  }
+
+  /* ---------- Toast for move names ---------- */
+  const toastEl = document.getElementById("toast");
+  let toastT = 0;
+  function toast(text) { toastEl.textContent = text; toastEl.style.opacity = 1; toastT = 1.1; }
+
+  // Watch a car's state between steps to name the move it just did.
+  function watch(car, who) {
+    const was = car._fixtureWas || {};
+    if (!was.flipping && car.flipping) {
+      // How much of the flip's push is along the nose: mostly forward or
+      // back = front/back flip, otherwise a side (or diagonal) flip.
+      const along = car.flipDir.dot(car.forward());
+      const name = along > 0.7 ? "Front flip" : along < -0.7 ? "Back flip" : "Side flip";
+      toast(`${who}: ${name}`);
+    }
+    if (!was.doubleJumped && car.doubleJumped) toast(`${who}: Double jump`);
+    if (was.onGround === false && car.onGround && car.lastLanding) {
+      if (!car.lastLanding.clean) toast(`${who}: Tumble!`);
+    }
+    car._fixtureWas = { flipping: car.flipping, doubleJumped: car.doubleJumped, onGround: car.onGround };
+  }
+
+  /* ---------- Fixed-step simulation ---------- */
+  const STEP = 1 / 120; // smaller than the arenas' 1/60, to show sub-steps are fine
+  let acc = 0;
+  let lastKeys = {};
+  function step(dt) {
+    const ctrl = TP.Input.get("kb1");
+    you.update(dt, ctrl, world, tuning);
+    watch(you, "You");
+    if (botOn) {
+      bot.update(dt, botControls(bot), world, tuning);
+      watch(bot, "Bot");
+      // Touched the ball? Next spot. Fell into a long tumble far away? Fine, it recovers on its own.
+      if (bot.pos.distanceTo(ball.position) < 2.8) moveBall();
+    }
+    if (you.pos.clone().setY(you.pos.y + 0.65).distanceTo(ball.position) < 2.4) { toast("You: hit the ball!"); moveBall(); }
+    TP.Car.collideAll(botOn ? [you, bot] : [you], tuning);
+  }
+
+  // Number keys for the fixture's own actions (edge-triggered).
+  const keyDown = new Set();
+  window.addEventListener("keydown", (e) => {
+    if (keyDown.has(e.code)) return;
+    keyDown.add(e.code);
+    if (e.code === "Digit1") resetYou();
+    if (e.code === "Digit2") { botOn = !botOn; bot.mesh.visible = botOn; resetBot(); toast(botOn ? "Bot demo on" : "Bot demo off"); }
+    if (e.code === "Digit3") moveBall();
+  });
+  window.addEventListener("keyup", (e) => keyDown.delete(e.code));
+
+  /* ---------- Live state panel ---------- */
+  const panel = document.getElementById("panel");
+  function stateName(c) {
+    if (c.tumbling) return "TUMBLING";
+    if (c.flipping) return `FLIPPING ${(c.flipProgress * 100).toFixed(0)}%`;
+    if (c.onGround) return "DRIVING";
+    return "AIRBORNE";
+  }
+  function updatePanel() {
+    const c = you;
+    const nose = c.nose(), roof = c.roof();
+    const noseDeg = Math.asin(TP.util.clamp(nose.y, -1, 1)) * 180 / Math.PI;
+    const second = c.onGround ? "after a jump"
+      : c.airJumpUsed ? "used"
+      : c.airTime <= TP.ROCKET_MOVES.airJumpWindow ? `ready (${(TP.ROCKET_MOVES.airJumpWindow - c.airTime).toFixed(2)} s)` : "expired";
+    panel.innerHTML =
+      `<b>Rocket moveset</b>\n` +
+      `state      ${stateName(c)}\n` +
+      `speed      ${c.vel.length().toFixed(1)} u/s (flat ${c.speed2D().toFixed(1)})\n` +
+      `height     ${c.pos.y.toFixed(2)}\n` +
+      `nose pitch ${noseDeg.toFixed(0)}°   roof.y ${roof.y.toFixed(2)}\n` +
+      `2nd jump   ${second}\n` +
+      `boost      ${c.boost.toFixed(0)}${c.boosting ? "  BOOSTING" : ""}\n` +
+      `landing    ${c.lastLanding ? (c.lastLanding.clean ? "clean" : "tumble") : "-"}` +
+      `${c.hitCeiling ? "\nCEILING" : ""}` +
+      `${botOn ? "\n\nbot        " + stateName(bot) : ""}`;
+  }
+
+  /* ---------- Chase camera ---------- */
+  const camPos = new THREE.Vector3(0, 6, -24);
+  const camLook = new THREE.Vector3();
+  function updateCamera(dt) {
+    const f = you.forward();
+    const want = new THREE.Vector3(you.pos.x - f.x * 11, Math.max(4, you.pos.y + 4.5), you.pos.z - f.z * 11);
+    camPos.lerp(want, 1 - Math.exp(-5 * dt));
+    camLook.lerp(new THREE.Vector3(you.pos.x + f.x * 4, you.pos.y + 1.2, you.pos.z + f.z * 4), 1 - Math.exp(-8 * dt));
+    camera.position.copy(camPos);
+    camera.lookAt(camLook);
+  }
+
+  /* ---------- Main loop ---------- */
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    TP.Input.poll();
+    acc += dt;
+    while (acc >= STEP) { step(STEP); acc -= STEP; }
+    if (toastT > 0) { toastT -= dt; if (toastT <= 0) toastEl.style.opacity = 0; }
+    ball.rotation.y += dt;
+    updateCamera(dt);
+    updatePanel();
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // For headless checks.
+  window.MOVESET_FIXTURE = {
+    you, bot, ball, world, tuning, step,
+    setBot(on) { botOn = on; bot.mesh.visible = on; resetBot(); },
+    spotIndex: () => spot,
+  };
+})();
+</script>
+</body>
+</html>

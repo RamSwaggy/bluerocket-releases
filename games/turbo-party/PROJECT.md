@@ -19,12 +19,14 @@ characters, art, music or levels.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Turbo Party (boss) | `team/turbo-party` |
-| Turbo Party · Gameplay (systems and feel) | `team/turbo-party-gameplay` |
-| Turbo Party · Art and UI (look and screens) | `team/turbo-party-art` |
-| Turbo Party · QC (playtest and checks) | `team/turbo-party-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Turbo Party (boss) | `session_01GHNBrt23mSuiGTyLcdpmqK` | `team/turbo-party` |
+| Turbo Party · Gameplay (systems and feel) | `session_01GHNBrrE9ipBPBwoUZ5Axrt` | `team/turbo-party-gameplay` |
+| Turbo Party · Art and UI (look and screens) | `session_01GHNBrrfMnRLjVS95iDUFgw` | `team/turbo-party-art` |
+| Turbo Party · QC (playtest and checks) | `session_01GHNBrqhaxQit2X1D5DYyad` | `team/turbo-party-qc` |
+
+Message a session with `send_message` and its session ID. Roles reply to the boss.
 
 ## Who owns what
 
@@ -37,8 +39,7 @@ Several files mix rules and visuals. Split them by **function**, not by file.
 | `js/game.js` | match flow, payouts, bonus trophies | card layouts and wording |
 | `js/arena.js` | physics loop, countdown/timer logic | camera, HUD hookup, hints |
 | `js/ui.js`, `js/main.js`, `index.html` | — | owns all of these (menu, HUD, cards, CSS) |
-| `../shared/js/car.js`, `input.js`, `util.js` | owns (car handling, controls) | car **model** (`buildCarMesh`) |
-| `../shared/js/fx.js`, `sfx.js` | — | owns (particles, sounds, music) |
+| `../shared/*` (car, input, util, fx, sfx, rumble) | **Director owns.** Ask the boss, who asks the Director. Mode tuning only through `TP.modeTuning` | same: request through the boss |
 | `../tools/*` and any tests | — (QC owns) | — (QC owns) |
 
 **Adding a minigame:** Gameplay writes the rules and bots, Art and UI does its arena look,
@@ -52,6 +53,9 @@ From the `games` folder (run these in the background, since they take over 30 s)
 ```
 node tools/turbo-party-smoke.js 3 8 240      # full 4-bot match → PASS/FAIL
 node tools/turbo-party-minigame.js all 5     # each minigame ×5, winners/lengths/errors
+node tools/turbo-party-balance.js 20 6       # 20 six-turn bot matches → trophy balance report (~18 min)
+node tools/turbo-party-human.js              # scripted Keyboard-1 player: hub, shop, items, fork, trophy + 14 rule checks (~4 min)
+node tools/turbo-party-minigame.js all 10 [seed]  # seeded, replayable; flags ties, cap hits, console errors
 ```
 
 In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&speed=N`,
@@ -75,7 +79,7 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
    distance was reduced from 30 to 20 as a guess. Bonus trophies can end up deciding the game.
 2. **Untested:** real gamepads, and how the audio actually sounds (no speakers in cloud
    sessions). Only Reece can check these.
-3. **Human-path coverage is thin:** QC tests have used a keyboard player for the die and the
+3. ~~**Human-path coverage is thin:**~~ Fixed by job 3 (`turbo-party-human.js`). QC tests have used a keyboard player for the die and the
    fork. The shop and item menus with a human player haven't been tested.
 4. **King of the Hill:** scores are low because bots crowd the zone. That may be fine, but
    it's worth a look.
@@ -88,3 +92,70 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-27: Set up this team, using RocketBonk's structure.
 - 2026-11-27: Turbo Party is now a mode of **Rocket Rumble** (one umbrella game, one car feel;
   minigame tuning limited to `TP.MODE_TUNABLE`). The Director owns `shared/` and the hub.
+- 2026-11-27: **The Director can approve for Reece** (Reece, directly to the boss: "Director can
+  approve for me"). Plans and decisions approved by the Director count as Reece's approval.
+- 2026-11-27: **Free assets and tools only** (Reece's standing rule, see `../TEAMS.md`). Every
+  third-party file gets a line in `../CREDITS.md`, or it isn't merged. Assets made in code are exempt.
+- 2026-11-27: Reece approved the boss's first plan ("approved"). Rulings the Director made under
+  that approval:
+  - **Ties:** if every player ties, each gets 3 coins and nobody gets a minigame win. In a
+    partial tie, each tied player gets that place's payout, and a tie for 1st counts as a win
+    for each of them.
+  - **Trophy relocation:** counted in spaces along the track, at least 10 spaces from the buyer,
+    never on the shortcut directly ahead of the buyer. Checked with QC's 20-match before/after.
+  - **Head-on knockback** (`shared/car.js`) is approved in principle. It ships together with a
+    Sumo retune that keeps rounds at 20–35 s. Gameplay sends the exact change to the Director.
+  - The bigger art ideas (arena backdrops, board clutter, car models) wait until jobs 1–5 are
+    merged.
+
+- 2026-11-28 (Director, for Reece): **Speed-cap fix in shared car.js.** Holding the gas now tops out at
+  maxSpeed (17), boost reaches 27, and head-on rams carry extra knockback that bleeds off. The car is
+  a bit slower and boost matters. Turbo Party minigames need re-checking at the new speeds.
+- 2026-11-28 (Director): **Bonus-trophy ties** are broken on coins; if still tied, nobody gets it.
+- 2026-11-28 (Director): use the shared `TP.MenuNav.attach(card)` for gamepad/arrow menus.
+
+## Current jobs (round 1)
+
+| # | Job | Who | Status |
+|---|---|---|---|
+| 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | **merged** (ba264be) |
+| A | 20-match 6-turn balance baseline + reusable balance tool | QC | **merged** (2f9e168); "after" run in progress |
+| 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | **merged** (a8a4caa) |
+| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | **merged** (79d536d) |
+| 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
+| 4b | Greyed-out menu options (unaffordable shop items, unusable items) | Art and UI | **merged** (e7502c0) |
+| 4c | Bugs found by job 3 | Gameplay / Art and UI | after job 3 |
+| 5a | Head-on knockback + Sumo retune (rounds 20–35 s; fix early pile-ups and frequent 45 s shared-win rounds) | Gameplay → Director | Sumo retune **merged** (13702b1); car.js change sent to the Director |
+| 5b | King of the Hill crowding, Goal Frenzy posts | Gameplay | **merged** (1342ade) |
+| 7 | Re-measure Sumo + KotH at the new car speeds, retune if needed; bonus-tie tiebreak; KotH seat-0 bias fix | Gameplay | **merged** (38b4faf) |
+| 8 | Controller/arrow navigation on the menu and cards with TP.MenuNav | Art and UI | **merged** (963d366, 82c90aa: shared MenuNav fixes, workaround removed) |
+| 6 | Gamepad and sound check (checklist below) | Reece | end of round |
+
+## Art backlog (after jobs 1–5; the Director sets the order)
+
+Art and UI's list, most value first (S ≈ 1 h, M ≈ a few hours, L ≈ half a day or more):
+
+1. Minigame arena backdrops: stadium ring, stands, sky, a theme per game (M)
+2. Board scene clean-up: floodlights, lamps, ground, trophy beam (S–M)
+3. Bigger, clearer tokens on the board, with a coloured ring and a taller marker (S; coordinate with Gameplay)
+4. Card and menu polish: title, minigame intro cards, podium results (M)
+5. Car model refresh (M–L): **shared/, so the Director decides**
+6. Particles and sound pass (M): **shared/, so the Director decides; needs Reece's ears**
+
+## Reece's checklist: gamepad and sound (job 6)
+
+Only you can check these: the cloud sessions have no speakers or gamepads. Open
+`games/index.html` in Chrome, pick Turbo Party, and note anything odd:
+
+1. **Gamepad:** plug one in, set a seat to it in the hub, and start a match.
+   - Do the triggers drive forward and back? Does the stick steer *without* moving the car?
+   - Do Jump, Boost and Hit work in a minigame (try Sumo Ring and Goal Frenzy)?
+   - On the board, can you roll the die, pick the fork direction, and use the shop and item
+     menus with the gamepad alone?
+2. **Two gamepads, or a gamepad and a keyboard:** does each control only its own car?
+3. **Sound:** is the music pleasant or grating? Are any sounds too loud (bumps, explosions,
+   coins)? Does `M` mute and unmute?
+4. **Feel:** anything that feels slow, confusing or unfair. Rough notes are fine.
+
+Tell the boss what you found, and it becomes the next jobs.
+

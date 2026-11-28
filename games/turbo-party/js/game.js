@@ -16,6 +16,8 @@
 
   // Coins paid for 1st, 2nd, 3rd, 4th in a minigame.
   const PAYOUT = [10, 6, 3, 0];
+  // Coins each player gets when the WHOLE field ties (see Game.payouts).
+  const ALL_TIE_PAYOUT = 3;
   const PLACE_NAMES = ["1st", "2nd", "3rd", "4th"];
 
   // Music speed per phase (beats per minute).
@@ -23,7 +25,8 @@
   const MINIGAME_BPM = 138;
 
   /* End-of-game bonus trophies. Each goes to whoever has the highest
-     stat (ties all get one). Skipped if nobody scored anything. */
+     stat; ties are broken on coins, and a tie on coins too means no
+     award (see Game.bonusWinner). Skipped if nobody scored anything. */
   const BONUSES = [
     { stat: "minigameWins", title: "Minigame Ace", desc: "Most minigame wins" },
     { stat: "coinsEarned", title: "Coin Collector", desc: "Most coins earned" },
@@ -31,6 +34,54 @@
   ];
 
   class Game {
+    /* Turn a minigame ranking (groups of tied player indices, best first,
+       e.g. [[2], [0, 1], [3]]) into who gets what. Director's ruling:
+         • EVERYONE tied (e.g. 0-0-0-0, nobody did anything): each player
+           gets ALL_TIE_PAYOUT coins and nobody is credited with a win —
+           otherwise a dead round would hand all four a "Minigame Ace" win.
+         • Partial tie: tied players all get the higher place's payout
+           (two players tied for 2nd both get 2nd-place coins, and the next
+           player is 4th). A tie for 1st counts as a win for each of them.
+       Returns [{ index, place, gain, win }] in ranking order. Kept as a
+       pure function (no side effects) so it's easy to test on its own. */
+    static payouts(ranking) {
+      const out = [];
+      if (ranking.length === 1 && ranking[0].length > 1) {
+        for (const i of ranking[0]) out.push({ index: i, place: 0, gain: ALL_TIE_PAYOUT, win: false });
+        return out;
+      }
+      let place = 0; // 0-based place of the current group
+      for (const group of ranking) {
+        for (const i of group) out.push({ index: i, place, gain: PAYOUT[place], win: place === 0 });
+        place += group.length; // ties use up the places they share
+      }
+      return out;
+    }
+
+    /* Who gets one end-of-game bonus trophy. Director's ruling:
+         • the player with the highest `stat` wins it;
+         • if several share the highest stat, the one with the most coins
+           (right now, at the end of the match) wins it;
+         • if they're STILL tied on coins, nobody gets this bonus;
+         • if the best stat is 0 (nobody did the thing), nobody gets it.
+       `players` is the usual player list (only .index, .coins and
+       .stats are read). Returns { winner, best, tied }:
+         winner — the winning player's index, or null for no award
+         best   — the highest stat value
+         tied   — indices of everyone who shared that highest stat
+       Pure function (no side effects), so it can be tested on its own. */
+    static bonusWinner(players, stat) {
+      const best = Math.max(...players.map((p) => p.stats[stat]));
+      const tied = players.filter((p) => p.stats[stat] === best).map((p) => p.index);
+      if (best <= 0) return { winner: null, best, tied };
+      if (tied.length === 1) return { winner: tied[0], best, tied };
+      // Tie-break on coins.
+      const coinsOf = (i) => players.find((p) => p.index === i).coins;
+      const most = Math.max(...tied.map(coinsOf));
+      const rich = tied.filter((i) => coinsOf(i) === most);
+      return { winner: rich.length === 1 ? rich[0] : null, best, tied };
+    }
+
     /* config = { turns, bonuses, slots: [{ name, controller }, ×4] } */
     constructor(config) {
       this.turns = config.turns;
@@ -147,19 +198,14 @@
       arena.dispose();
       TP.sfx.setTempo(BOARD_BPM);
 
-      // Pay out by place. Tied players all get the higher place's reward.
+      // Pay out by place (rules in Game.payouts below).
       const rows = [];
-      let place = 0;
-      for (const group of ranking) {
-        for (const i of group) {
-          const p = this.players[i];
-          const gain = PAYOUT[place];
-          p.coins += gain;
-          p.stats.coinsEarned += gain;
-          if (place === 0) p.stats.minigameWins++;
-          rows.push({ p, place, gain });
-        }
-        place += group.length;
+      for (const r of Game.payouts(ranking)) {
+        const p = this.players[r.index];
+        p.coins += r.gain;
+        p.stats.coinsEarned += r.gain;
+        if (r.win) p.stats.minigameWins++;
+        rows.push({ p, place: r.place, gain: r.gain });
       }
 
       ui.setPlayers(this.players);
@@ -200,15 +246,22 @@
         ui.center("BONUS TROPHIES", "", "#ffcc33");
         await TP.sched.wait(1.8);
         for (const b of BONUSES) {
-          const best = Math.max(...this.players.map((p) => p.stats[b.stat]));
-          if (best <= 0) continue;
-          const winners = this.players.filter((p) => p.stats[b.stat] === best);
-          winners.forEach((p) => {
-            p.trophies++;
-            this.board.fx.confetti(this.board.tokens[p.index].pos, { count: 30 });
-          });
+          const r = Game.bonusWinner(this.players, b.stat);
+          if (r.best <= 0) continue; // nobody did the thing: skip silently
+          if (r.winner === null) {
+            // Tied on the stat AND on coins: nobody gets it, but say so,
+            // so players aren't left wondering where the trophy went.
+            const names = r.tied.map((i) => this.players[i].name).join(" & ");
+            ui.center(`🏆 ${b.title}`, `${names} tied (${r.best}) with equal coins: no award`, "#9aa3b8");
+            await TP.sched.wait(2.6);
+            continue;
+          }
+          const p = this.players[r.winner];
+          p.trophies++;
+          this.board.fx.confetti(this.board.tokens[p.index].pos, { count: 30 });
           TP.sfx.play("trophy");
-          ui.center(`🏆 ${b.title}`, `${winners.map((p) => p.name).join(" & ")} — ${b.desc} (${best})`, winners[0].css);
+          const how = r.tied.length > 1 ? `, won on coins` : "";
+          ui.center(`🏆 ${b.title}`, `${p.name} — ${b.desc} (${r.best}${how})`, p.css);
           ui.setPlayers(this.players);
           await TP.sched.wait(2.6);
         }
@@ -240,8 +293,8 @@
             ${p.stats.minigameWins} minigame wins · ${p.stats.coinsEarned} coins earned · ${p.stats.spacesMoved} spaces driven
           </div>`).join("")}
         <div class="row" style="margin-top:18px">
-          <button class="btn" id="again">Play again</button>
-          <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}">← All modes</a>
+          <button class="btn" id="again" data-nav-primary>Play again</button>
+          <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
         </div>`);
       card.querySelector("#again").addEventListener("click", () => location.reload());
     }

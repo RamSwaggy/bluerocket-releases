@@ -135,8 +135,8 @@
       </table>
 
       <div class="row" style="margin-top:18px">
-        <button class="btn" id="start">Start party</button>
-        <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}">← All modes</a>
+        <button class="btn" id="start" data-nav-primary>Start party</button>
+        <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
       </div>`);
 
     // Show how many gamepads the browser can see (press a button to wake them).

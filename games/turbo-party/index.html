@@ -37,29 +37,69 @@
       display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
     }
     .pcard {
+      position: relative;
       min-width: 150px; padding: 8px 12px; border-radius: 12px;
       background: var(--panel); border: 2px solid var(--line);
-      display: flex; flex-direction: column; gap: 2px;
-      transition: transform .2s, border-color .2s;
+      display: flex; flex-direction: column; gap: 4px;
+      transition: transform .2s, border-color .2s, opacity .2s, box-shadow .2s;
     }
-    .pcard.active { transform: translateY(4px) scale(1.05); }
+    .pcard .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .pcard .name { font-weight: 700; font-size: 15px; }
-    .pcard .ctrl { font-size: 11px; color: var(--muted); }
+    /* Small controller pill (CPU / KEYS 1 / PAD 2) instead of a whole line. */
+    .pcard .tag {
+      font-size: 10px; font-weight: 800; letter-spacing: .06em; color: var(--muted);
+      padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line);
+    }
     .pcard .stats { font-size: 15px; display: flex; gap: 12px; }
 
-    /* ---------- Turn counter, top-left ---------- */
-    #turn-label {
-      top: 96px; left: 50%; transform: translateX(-50%);
-      font-size: 14px; color: var(--muted); letter-spacing: .08em;
+    /* Whose turn: the card lifts, glows in the player's colour (--pc), gets a
+       tinted background and a "TURN" tab underneath. Everyone else dims. */
+    .pcard.active {
+      transform: translateY(4px) scale(1.07);
+      border-color: var(--pc);
+      background: linear-gradient(color-mix(in srgb, var(--pc) 28%, transparent), transparent), var(--panel-solid);
+      box-shadow: 0 0 0 2px var(--pc), 0 0 22px var(--pc);
     }
+    /* Dim the idle cards' contents, but not the leader's crown badge. */
+    .pcard.idle > :not(.crown) { opacity: .6; }
+    .pcard.idle { border-color: rgba(255,255,255,.08); }
+    .pcard .turn-tab {
+      position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%);
+      padding: 1px 10px; border-radius: 999px; background: var(--pc); color: #0b1020;
+      font-size: 11px; font-weight: 900; letter-spacing: .1em; white-space: nowrap;
+    }
+    /* Leader badge, pinned to the card's top-left corner. */
+    .pcard .crown {
+      position: absolute; top: -11px; left: -8px;
+      padding: 1px 8px; border-radius: 999px; background: var(--accent); color: #1a1300;
+      font-size: 12px; font-weight: 900; box-shadow: 0 2px 6px rgba(0,0,0,.4);
+    }
+
+    /* ---------- Turn counter, under the player cards ---------- */
+    #turn-label {
+      top: 104px; left: 50%; transform: translateX(-50%);
+      padding: 3px 12px; border-radius: 999px; background: var(--panel);
+      font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: .08em;
+    }
+    #turn-label:empty { display: none; }
 
     /* ---------- Big centre message (countdowns, "GO!", etc.) ---------- */
     #center-msg {
       top: 38%; left: 0; right: 0; text-align: center;
-      font-size: 64px; font-weight: 900; letter-spacing: .02em;
-      text-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 30px rgba(0,0,0,.6);
     }
-    #center-msg .sub { display: block; font-size: 22px; font-weight: 600; margin-top: 6px; }
+    /* The dark panel behind big messages, so they read over any scene.
+       --cc is the message colour, used for the panel's top edge. */
+    #center-msg .box {
+      display: inline-block; max-width: calc(100vw - 32px);
+      padding: 12px 34px 16px; border-radius: 20px;
+      background: rgba(8, 12, 30, 0.82); border: 2px solid var(--line); border-top: 4px solid var(--cc);
+      box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    }
+    #center-msg .main {
+      display: block; font-size: 64px; font-weight: 900; letter-spacing: .02em; line-height: 1.1;
+      text-shadow: 0 4px 0 rgba(0,0,0,.45);
+    }
+    #center-msg .sub { display: block; font-size: 22px; font-weight: 600; margin-top: 6px; color: var(--text); }
 
     /* ---------- Toast: short pop-up notes ("+3 coins") ---------- */
     #toast {
@@ -99,6 +139,9 @@
       font-size: 18px; font-weight: 700; border: 2px solid transparent;
     }
     #choice .opt.sel { border-color: var(--accent); background: #3a4580; }
+    /* Options you can't pick right now: greyed out, with the reason under the label. */
+    #choice .opt.off { background: #1a2140; color: #5d6789; border: 2px dashed #2c3560; }
+    #choice .opt .why { display: block; font-size: 12px; font-weight: 700; color: var(--bad); margin-top: 2px; }
 
     /* ---------- Minigame HUD: timer + live scores ---------- */
     #mg-hud {
@@ -163,7 +206,7 @@
 
     @media (max-width: 640px) {
       .slots { grid-template-columns: 1fr; }
-      #center-msg { font-size: 44px; }
+      #center-msg .main { font-size: 44px; }
       .pcard { min-width: 120px; }
     }
   </style>
@@ -191,6 +234,7 @@
   <script src="../shared/js/sfx.js"></script>
   <script src="../shared/js/input.js"></script>
   <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/menunav.js"></script>
   <script src="js/ui.js"></script>
   <script src="../shared/js/car.js"></script>
   <script src="../shared/js/fx.js"></script>
