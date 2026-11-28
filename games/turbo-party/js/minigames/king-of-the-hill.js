@@ -44,6 +44,11 @@
       m.timer = rand(3, 6);
       m.chargeDist = rand(5, 8);
       m.lurkAngle = rand(0, Math.PI * 2);
+      // Small random handicap (units) when deciding who's "closest" to an
+      // empty zone. Without it, cars at exactly equal distances (as at the
+      // start, all four corners vs. a centre zone) always resolved to the
+      // lowest seat, so Blue got the first zone unopposed every round.
+      m.reach = rand(0, 2);
     }
 
     build() {
@@ -70,7 +75,12 @@
     }
 
     spawn(i) {
-      const c = [[-1, -1], [1, -1], [-1, 1], [1, 1]][i];
+      // One car per corner, facing the middle. Which corner each player
+      // gets is shuffled every round so no seat is always in the same
+      // spot. (spawn() runs inside the base constructor, before ours, so
+      // the shuffle is set up lazily.)
+      if (!this.corners) this.corners = TP.util.shuffle([[-1, -1], [1, -1], [-1, 1], [1, 1]]);
+      const c = this.corners[i];
       const x = c[0] * 13, z = c[1] * 13;
       return { x, z, heading: Math.atan2(-x, -z) };
     }
@@ -199,12 +209,14 @@
       if (this.inZone.length === 0) {
         let closestCar = null, cd = Infinity;
         for (const c of this.cars) {
-          const d = dist2D(c.pos.x, c.pos.z, this.zx, this.zz);
+          // Distance plus that bot's random handicap (see rollRole), so
+          // exact ties don't always go to the same seat.
+          const d = dist2D(c.pos.x, c.pos.z, this.zx, this.zz) + this.minds[c.index].reach;
           if (d < cd) { cd = d; closestCar = c; }
         }
         if (closestCar === car || m.role === "ram") {
           // Boost while far away, then brake into the middle.
-          if (cd > 12 && closestCar === car) return TP.ai.driveTo(car, this.zx, this.zz, { boostDist: 8 });
+          if (me > 12 && closestCar === car) return TP.ai.driveTo(car, this.zx, this.zz, { boostDist: 8 });
           return this.arriveAt(car, this.zx, this.zz);
         }
       } else if (this.inZone.length === 1 && m.role === "ram") {

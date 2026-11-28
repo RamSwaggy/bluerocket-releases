@@ -25,7 +25,8 @@
   const MINIGAME_BPM = 138;
 
   /* End-of-game bonus trophies. Each goes to whoever has the highest
-     stat (ties all get one). Skipped if nobody scored anything. */
+     stat; ties are broken on coins, and a tie on coins too means no
+     award (see Game.bonusWinner). Skipped if nobody scored anything. */
   const BONUSES = [
     { stat: "minigameWins", title: "Minigame Ace", desc: "Most minigame wins" },
     { stat: "coinsEarned", title: "Coin Collector", desc: "Most coins earned" },
@@ -55,6 +56,30 @@
         place += group.length; // ties use up the places they share
       }
       return out;
+    }
+
+    /* Who gets one end-of-game bonus trophy. Director's ruling:
+         • the player with the highest `stat` wins it;
+         • if several share the highest stat, the one with the most coins
+           (right now, at the end of the match) wins it;
+         • if they're STILL tied on coins, nobody gets this bonus;
+         • if the best stat is 0 (nobody did the thing), nobody gets it.
+       `players` is the usual player list (only .index, .coins and
+       .stats are read). Returns { winner, best, tied }:
+         winner — the winning player's index, or null for no award
+         best   — the highest stat value
+         tied   — indices of everyone who shared that highest stat
+       Pure function (no side effects), so it can be tested on its own. */
+    static bonusWinner(players, stat) {
+      const best = Math.max(...players.map((p) => p.stats[stat]));
+      const tied = players.filter((p) => p.stats[stat] === best).map((p) => p.index);
+      if (best <= 0) return { winner: null, best, tied };
+      if (tied.length === 1) return { winner: tied[0], best, tied };
+      // Tie-break on coins.
+      const coinsOf = (i) => players.find((p) => p.index === i).coins;
+      const most = Math.max(...tied.map(coinsOf));
+      const rich = tied.filter((i) => coinsOf(i) === most);
+      return { winner: rich.length === 1 ? rich[0] : null, best, tied };
     }
 
     /* config = { turns, bonuses, slots: [{ name, controller }, ×4] } */
@@ -221,15 +246,22 @@
         ui.center("BONUS TROPHIES", "", "#ffcc33");
         await TP.sched.wait(1.8);
         for (const b of BONUSES) {
-          const best = Math.max(...this.players.map((p) => p.stats[b.stat]));
-          if (best <= 0) continue;
-          const winners = this.players.filter((p) => p.stats[b.stat] === best);
-          winners.forEach((p) => {
-            p.trophies++;
-            this.board.fx.confetti(this.board.tokens[p.index].pos, { count: 30 });
-          });
+          const r = Game.bonusWinner(this.players, b.stat);
+          if (r.best <= 0) continue; // nobody did the thing: skip silently
+          if (r.winner === null) {
+            // Tied on the stat AND on coins: nobody gets it, but say so,
+            // so players aren't left wondering where the trophy went.
+            const names = r.tied.map((i) => this.players[i].name).join(" & ");
+            ui.center(`🏆 ${b.title}`, `${names} tied (${r.best}) with equal coins: no award`, "#9aa3b8");
+            await TP.sched.wait(2.6);
+            continue;
+          }
+          const p = this.players[r.winner];
+          p.trophies++;
+          this.board.fx.confetti(this.board.tokens[p.index].pos, { count: 30 });
           TP.sfx.play("trophy");
-          ui.center(`🏆 ${b.title}`, `${winners.map((p) => p.name).join(" & ")} — ${b.desc} (${best})`, winners[0].css);
+          const how = r.tied.length > 1 ? `, won on coins` : "";
+          ui.center(`🏆 ${b.title}`, `${p.name} — ${b.desc} (${r.best}${how})`, p.css);
           ui.setPlayers(this.players);
           await TP.sched.wait(2.6);
         }
