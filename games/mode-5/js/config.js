@@ -55,7 +55,7 @@ TP.M5 = TP.M5 || {};
     roundTime: 120,         // seconds per round
     rounds: 3,              // best of 3 by default (1, 3 or 5)
     countdown: 3.5,         // 3-2-1-GO (the last half second shows GO)
-    roundEndTime: 4.5,      // pause on the final floor before the next round
+    roundEndTime: 7,        // pause on the final floor before the next round (Art's reveal + card)
 
     /* ---------- Overdrive (the last stretch of every round) ---------- */
     overdriveTime: 20,      // seconds left when it starts
