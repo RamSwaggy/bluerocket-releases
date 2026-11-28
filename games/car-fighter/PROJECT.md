@@ -58,6 +58,7 @@ node tools/car-fighter-smoke.js 8 180 12345   # [speed] [maxSeconds] [seed]: bot
 node tools/car-fighter-sim.js 50 1000         # [matches] [seed]: headless bot-vs-bot stats
                                               #   options: --p1= --p2= --bot= --bot2=
 node tools/car-fighter-sim.js frames 7        # frame-data check of every TP.MOVES row
+node tools/car-fighter-human.js               # real menu + kb1 key presses for every move type (~3 min, background)
 ```
 
 All three also take `--page=<path>` and `--extra="&opt=.."`.
@@ -98,7 +99,10 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - display info for character select
   Smoke test with Haulback vs Skitter: PASS. All pairings are within 40–60%.
 - QC's frames tool needs updates for per-car tables, multi-hit moves and cross-ups (QC JOB 3).
-- Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
+- QC JOB 2 is merged (`a2b5ecf`): `tools/car-fighter-human.js`. 10 of 11 PASS.
+  **Open bug (Gameplay):** the Tow Hook throw never comes out when E and R are pressed on
+  different frames, which is how a real person presses them. Instead you get Jab > Ram.
+- (old) Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
 ## Decisions (from Reece)
