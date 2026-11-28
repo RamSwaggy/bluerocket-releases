@@ -239,6 +239,7 @@ TP.M5 = TP.M5 || {};
        home from every one of them means never finishing a loop.
        Easy bots don't always notice. */
     _trailInDanger() {
+      if (this.car.mega > 0.8) return false;   // un-poppable for now: keep going
       if (Math.random() > this.L.defend) return false;
       const g = this.match.grid, car = this.car;
       const home = this._homePoint();
@@ -368,8 +369,11 @@ TP.M5 = TP.M5 || {};
     _plan() {
       const m = this.match, g = m.grid, A = m.arena, car = this.car, p = car.index, L = this.L;
       const x0 = car.pos.x, z0 = car.pos.z;
-      const greed = L.greed + (m.overdrive ? 0.45 : 0);
-      const sizeMul = m.overdrive ? 1.25 : 1;
+      // Go big when it's safe to: in Overdrive (last push for the lead) and
+      // while a Mega Roller makes our trail un-poppable.
+      const mega = car.mega > 0;
+      const greed = L.greed + (m.overdrive ? 0.45 : 0) + (mega ? 0.5 : 0);
+      const sizeMul = (m.overdrive ? 1.25 : 1) * (mega ? 1.3 : 1);
       const rivals = this._rivals();
 
       /* Pass 1: list loop shapes that fit, with a cheap first guess of

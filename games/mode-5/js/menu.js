@@ -157,7 +157,11 @@
   /* ----- Footer: back link + big Start ----- */
   .m5m-foot { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
     padding: 12px 16px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(0deg, rgba(4,5,13,.96), rgba(4,5,13,.7));
-    border-top: 1px solid var(--line); }
+    border-top: 1px solid var(--line); position: relative; }
+  /* A soft fade above the footer, so options scrolling under it read as
+     "there's more below" instead of being silently cut off. */
+  .m5m-foot::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px;
+    background: linear-gradient(0deg, rgba(4,5,13,.85), rgba(4,5,13,0)); pointer-events: none; }
   .m5m-btn { font: inherit; font-weight: 900; font-style: italic; cursor: pointer; border: none; border-radius: 14px;
     text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
   .m5m-start { font-size: clamp(20px, 2.6vw, 28px); padding: 12px 46px; min-height: 52px; color: #1a0610; letter-spacing: .06em;
@@ -440,7 +444,11 @@
         const choice = def.choices[Number(b.dataset.c)];
         this.options[def.key] = choice[0];
         saveOptions(this.options);
-        this.renderOptions();
+        // Update the pressed state in place (not a re-render), so keyboard
+        // and gamepad focus stays on the button that was just pressed.
+        for (const o of root.querySelectorAll(`#m5m-opts button[data-k="${def.key}"]`)) {
+          o.setAttribute("aria-pressed", String(def.choices[Number(o.dataset.c)][0] === choice[0]));
+        }
         click();
       });
       root.querySelector("#m5m-start").addEventListener("click", () => this.start());
@@ -571,6 +579,7 @@
       if (!this.root) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      Pause.closedAt = performance.now(); // a Start press that started the match mustn't also pause it
       this.helpOpen = false;
       this.root.querySelector("#m5m-how").classList.remove("show");
       this.navOff();
@@ -641,6 +650,7 @@
       if (!this.isOpen) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      this.closedAt = performance.now();
       this.navOff();
       if (!quiet) emit("resume");
     },
@@ -650,6 +660,7 @@
       if (!this.isOpen) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      this.closedAt = performance.now();
       this.navOff();
       if (id === "resume") emit("resume");
       else if (id === "restart") { emit("restart"); if (TP.M5.restart) TP.M5.restart(); }
@@ -708,16 +719,20 @@
       return now && !was;
     },
     pads() { return navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : []; },
-    gameTick() {
+    // Read Start's edge EVERY frame (menu open or not), so the Start press
+    // that starts a match from the menu, or resumes from the pause card
+    // via MenuNav, is already "seen" and can't count as a fresh press that
+    // pauses the game again a frame later.
+    tick() {
       for (const p of this.pads()) {
-        // Keep reading so the edge is fresh, but only act while not paused
-        // (when paused, MenuNav's Start presses Resume).
-        if (this.pressed(p, 9) && !Pause.isOpen) Pause.open();
+        const edge = this.pressed(p, 9);
+        const inPlay = !Menu.isOpen && Pause.enabled && !Pause.isOpen;
+        if (edge && inPlay && performance.now() - (Pause.closedAt || 0) > 300) Pause.open();
       }
     },
   };
   (function padLoop() {
-    if (!Menu.isOpen && Pause.enabled) Pad.gameTick();
+    Pad.tick();
     requestAnimationFrame(padLoop);
   })();
 
