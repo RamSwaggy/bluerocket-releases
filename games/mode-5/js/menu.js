@@ -55,6 +55,11 @@
     def.choices = [["random", "Random"]].concat((TP.M5.ARENAS || []).map((a) => [a.id, a.name]));
   }
 
+  const SHORT_LABELS = { off: "Empty", bot: "Bot", kb1: "Keys WASD", kb2: "Keys ↑↓",
+    pad0: "Pad 1", pad1: "Pad 2", pad2: "Pad 3", pad3: "Pad 4" };
+  const narrow = () => innerWidth < 600;
+  const HELP_KEY = "rocketRumble.mode5.seenHelp";
+
   function loadOptions() {
     arenaChoices();
     const o = {};
@@ -104,7 +109,18 @@
   .m5m-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px;
     backdrop-filter: blur(6px); }
   .m5m-panel h2 { margin: 0 0 10px; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
-  .m5m-how { grid-column: 1 / -1; }
+  /* How to play: a panel over the menu (first visit, or the "?" button). */
+  .m5m-howwrap { position: absolute; inset: 0; z-index: 2; display: none; align-items: center; justify-content: center;
+    padding: 16px; background: rgba(4, 5, 13, .78); backdrop-filter: blur(4px); overflow-y: auto; }
+  .m5m-howwrap.show { display: flex; }
+  .m5m-how { width: min(1040px, 100%); max-height: 100%; overflow-y: auto; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+  .m5m-how h2 { color: #fff !important; font-size: 18px !important; }
+  .m5m-howfoot { display: flex; justify-content: center; margin-top: 14px; }
+  .m5m-gotit { padding: 10px 40px !important; min-height: 48px !important; }
+  .m5m-help { font-size: 16px; font-style: normal; font-weight: 800; padding: 12px 18px; min-height: 48px; color: #1a1300;
+    background: #ffd23f; box-shadow: 0 0 16px rgba(255,210,63,.35); gap: 8px; }
+  .m5m-help .q { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center;
+    background: #1a1300; color: #ffd23f; font-size: 14px; }
 
   /* ----- Seats ----- */
   .m5m-seat { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; align-items: center; margin-bottom: 8px;
@@ -165,6 +181,11 @@
   .m5p-card .tip { margin-top: 10px; font-size: 13px; color: #9aa6c8; }
 
   /* ----- Smaller screens ----- */
+  @media (max-width: 520px) {
+    .m5m-foot { gap: 8px; }
+    .m5m-back, .m5m-help { font-size: 14px; padding: 10px 12px; }
+    .m5m-start { padding: 12px 28px; }
+  }
   @media (max-width: 860px) {
     .m5m-grid { grid-template-columns: 1fr; }
     .m5m-steps { grid-template-columns: 1fr; }
@@ -180,7 +201,10 @@
     .m5m-step { display: block; }
     .m5m-foot { padding-top: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
     .m5m-start { min-height: 46px; padding: 8px 40px; }
-    .m5m-back { min-height: 44px; padding: 8px 14px; }
+    .m5m-back, .m5m-help { min-height: 44px; padding: 8px 14px; }
+    .m5m-how { padding: 12px; }
+    .m5m-step p { font-size: 12px; padding: 6px 8px 8px; }
+    .m5m-extra { display: none; }
   }
   /* Landscape phones are wide enough for two columns. */
   @media (max-height: 500px) and (min-width: 700px) {
@@ -370,7 +394,16 @@
               <h2 id="m5m-oh">Match</h2>
               <div id="m5m-opts"></div>
             </section>
-            <section class="m5m-panel m5m-how" aria-labelledby="m5m-hh">
+          </div>
+        </div></div>
+        <footer class="m5m-foot">
+          <a class="m5m-btn m5m-back" href="${esc(TP.Rumble ? TP.Rumble.HUB_URL : "../index.html")}">← All modes</a>
+          <button class="m5m-btn m5m-help" id="m5m-help" type="button"><span class="q">?</span> How to play</button>
+          <button class="m5m-btn m5m-start" id="m5m-start" type="button" data-nav-primary>START</button>
+          <span class="m5m-press">or press <kbd class="m5k">Enter</kbd> / <kbd class="m5k">A</kbd></span>
+        </footer>
+        <div class="m5m-howwrap" id="m5m-how" role="dialog" aria-labelledby="m5m-hh">
+          <section class="m5m-panel m5m-how">
               <h2 id="m5m-hh">How to play</h2>
               <div class="m5m-steps">
                 <div class="m5m-step"><canvas aria-hidden="true"></canvas>
@@ -382,14 +415,9 @@
               </div>
               <p class="m5m-extra">Most floor when the clock hits zero wins the round. Last 20 seconds: <b>OVERDRIVE</b>, wider paint and more pickups.
                 Pickups: <b>Paint Bomb</b> (big splat) · <b>Mega Roller</b> (huge brush, trail can't pop) · <b>Boost Can</b>.</p>
-            </section>
-          </div>
-        </div></div>
-        <footer class="m5m-foot">
-          <a class="m5m-btn m5m-back" href="${esc(TP.Rumble ? TP.Rumble.HUB_URL : "../index.html")}">← All modes</a>
-          <button class="m5m-btn m5m-start" id="m5m-start" type="button">START</button>
-          <span class="m5m-press">or press <kbd class="m5k">Enter</kbd> / <kbd class="m5k">Space</kbd> / <kbd class="m5k">A</kbd></span>
-        </footer>`;
+              <div class="m5m-howfoot"><button class="m5m-btn m5m-start m5m-gotit" id="m5m-gotit" type="button" data-nav-primary>GOT IT</button></div>
+          </section>
+        </div>`;
       document.body.appendChild(root);
       this.root = root;
 
@@ -416,6 +444,11 @@
         click();
       });
       root.querySelector("#m5m-start").addEventListener("click", () => this.start());
+      root.querySelector("#m5m-help").addEventListener("click", () => { click(); this.showHelp(); });
+      root.querySelector("#m5m-gotit").addEventListener("click", () => { click(); this.hideHelp(); });
+      root.querySelector("#m5m-how").addEventListener("click", (e) => { if (e.target.id === "m5m-how") this.hideHelp(); });
+      // Narrow ↔ wide changes the controller label length.
+      addEventListener("resize", () => { if (this.isOpen && narrow() !== this.wasNarrow) this.renderSeats(); });
 
       // How-to-play canvases: size to their box (crisp on hi-dpi), animate while open.
       this.canvases = [...root.querySelectorAll(".m5m-step canvas")];
@@ -425,7 +458,10 @@
     renderSeats(only) {
       const seats = this.root.querySelector("#m5m-seats");
       const ids = ["off", ...TP.CONTROLLER_IDS];
-      const lab = (id) => (id === "off" ? "Empty (bot plays)" : TP.CONTROLLER_LABELS[id]);
+      // Narrow screens get short labels so the dropdowns don't truncate.
+      this.wasNarrow = narrow();
+      const lab = (id) => (this.wasNarrow ? SHORT_LABELS[id] || TP.CONTROLLER_LABELS[id]
+        : id === "off" ? "Empty (bot plays)" : TP.CONTROLLER_LABELS[id]);
       const html = (s, i) => `
         <div class="m5m-seat ${s.controller === "bot" || s.controller === "off" ? "bot" : ""}" style="border-color:${NEON_CSS()[i]}">
           <input data-i="${i}" maxlength="12" value="${esc(s.name)}" aria-label="Player ${i + 1} name" />
@@ -473,7 +509,6 @@
             if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
             HOW[k](c.getContext("2d"), w, h, t + k * 0.7);
           });
-          Pad.menuTick();
         }
         requestAnimationFrame(frame);
       };
@@ -490,8 +525,35 @@
       this.isOpen = true;
       Pause.enabled = false;
       Pause.close(true);
+      this.navOn(this.root);
       emit("menuOpen");
       this.attract();
+      // First visit: show How to play straight away.
+      let seen = false;
+      try { seen = localStorage.getItem(HELP_KEY) === "1"; } catch (e) { /* blocked: show it */ }
+      if (!seen) this.showHelp();
+    },
+
+    /* Gamepad / arrow-key navigation (shared TP.MenuNav): one container at
+       a time, either the whole menu or the How-to-play panel on top of it. */
+    navOn(el) {
+      this.navOff();
+      if (TP.MenuNav) this.nav = TP.MenuNav.attach(el, el === this.root ? {} : { onBack: () => this.hideHelp() });
+    },
+    navOff() { if (this.nav) { this.nav.detach(); this.nav = null; } },
+
+    showHelp() {
+      const how = this.root.querySelector("#m5m-how");
+      how.classList.add("show");
+      this.helpOpen = true;
+      this.navOn(how);
+    },
+    hideHelp() {
+      if (!this.helpOpen) return;
+      this.root.querySelector("#m5m-how").classList.remove("show");
+      this.helpOpen = false;
+      try { localStorage.setItem(HELP_KEY, "1"); } catch (e) { /* fine */ }
+      if (this.isOpen) this.navOn(this.root);
     },
 
     // Backdrop: four bots painting a long round behind the menu. The HUD
@@ -509,10 +571,13 @@
       if (!this.root) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      this.helpOpen = false;
+      this.root.querySelector("#m5m-how").classList.remove("show");
+      this.navOff();
     },
 
     start() {
-      if (!this.isOpen) return;
+      if (!this.isOpen || this.helpOpen) return;
       if (TP.sfx) TP.sfx.unlock();
       // Save the seats exactly as chosen (so "off" stays "off" in the hub)...
       TP.Rumble.saveSetup(this.slots);
@@ -542,7 +607,6 @@
   const Pause = {
     enabled: false,
     isOpen: false,
-    sel: 0,
     ACTIONS: [["resume", "Resume"], ["restart", "Restart round"], ["quit", "Menu"]],
 
     build() {
@@ -553,7 +617,7 @@
       root.setAttribute("role", "dialog");
       root.setAttribute("aria-label", "Paused");
       root.innerHTML = `<div class="m5p-card"><h2>PAUSED</h2>
-        ${this.ACTIONS.map(([id, txt], i) => `<button type="button" data-a="${id}" class="${i === 0 ? "sel" : ""}">${txt}</button>`).join("")}
+        ${this.ACTIONS.map(([id, txt], i) => `<button type="button" data-a="${id}" ${i === 0 ? "data-nav-primary" : ""}>${txt}</button>`).join("")}
         <div class="tip">Esc / Start to resume</div></div>`;
       root.addEventListener("click", (e) => {
         const b = e.target.closest("button[data-a]");
@@ -566,10 +630,10 @@
     open() {
       if (!this.enabled || this.isOpen || Menu.isOpen) return;
       this.build();
-      this.sel = 0;
-      this.mark();
       this.root.classList.add("show");
       this.isOpen = true;
+      // Pads / arrows move between the buttons; B or Escape resumes.
+      if (TP.MenuNav) this.nav = TP.MenuNav.attach(this.root, { onBack: () => this.act("resume") });
       emit("pause");
     },
     // quiet = close without emitting (used when the menu takes over).
@@ -577,17 +641,16 @@
       if (!this.isOpen) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      this.navOff();
       if (!quiet) emit("resume");
     },
+    navOff() { if (this.nav) { this.nav.detach(); this.nav = null; } },
     toggle() { if (this.isOpen) this.act("resume"); else this.open(); },
-    move(d) { this.sel = (this.sel + d + this.ACTIONS.length) % this.ACTIONS.length; this.mark(); click(); },
-    mark() {
-      [...this.root.querySelectorAll("button")].forEach((b, i) => b.classList.toggle("sel", i === this.sel));
-    },
     act(id) {
       if (!this.isOpen) return;
       this.root.classList.remove("show");
       this.isOpen = false;
+      this.navOff();
       if (id === "resume") emit("resume");
       else if (id === "restart") { emit("restart"); if (TP.M5.restart) TP.M5.restart(); }
       else if (id === "quit") { emit("quit"); Menu.open(); }
@@ -601,23 +664,28 @@
   addEventListener("keydown", (e) => {
     const tag = (e.target && e.target.tagName) || "";
     if (Menu.isOpen) {
-      if (tag === "SELECT") return;                          // let selects use arrows/Enter
-      if (e.code === "Enter" || (e.code === "Space" && tag !== "INPUT" && tag !== "BUTTON" && tag !== "A")) {
+      // A focused button, link or dropdown handles Enter/Space itself (and
+      // the shared MenuNav handles arrows). Enter while typing a name, or
+      // Enter/Space with nothing focused, starts the match.
+      if (Menu.helpOpen) return;
+      const onControl = ["BUTTON", "A", "SELECT"].includes(tag);
+      if (!onControl && (e.code === "Enter" || (e.code === "Space" && tag !== "INPUT"))) {
         e.preventDefault();
         Menu.start();
       }
       return;
     }
-    if (e.code === "Escape" || e.code === "KeyP") { e.preventDefault(); Pause.toggle(); return; }
-    if (Pause.isOpen) {
-      if (["ArrowUp", "KeyW"].includes(e.code)) { e.preventDefault(); Pause.move(-1); }
-      if (["ArrowDown", "KeyS"].includes(e.code)) { e.preventDefault(); Pause.move(1); }
-      if (["Enter", "Space"].includes(e.code)) { e.preventDefault(); Pause.act(Pause.ACTIONS[Pause.sel][0]); }
+    if (e.code === "Escape" || (e.code === "KeyP" && tag !== "INPUT")) {
+      e.preventDefault();
+      if (Pause.isOpen) Pause.act("resume");
+      // Open AFTER this keypress is done: otherwise the overlay's own
+      // navigation would see the same Escape and close it straight away.
+      else setTimeout(() => Pause.open(), 0);
     }
   }, true);
 
-  // Gamepads: A (0) starts from the menu; Start (9) pauses; in the pause
-  // overlay the d-pad (12/13) or stick moves and A picks.
+  // Gamepad Start (9) pauses during play. Inside the pause overlay (and
+  // the menu) the shared TP.MenuNav does the rest: d-pad/stick, A, B, Start.
   const Pad = {
     prev: {},
     pressed(pad, b) {
@@ -628,28 +696,11 @@
       return now && !was;
     },
     pads() { return navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : []; },
-    menuTick() {
-      for (const p of this.pads()) {
-        // Don't start while a seat's controller select has focus.
-        if (this.pressed(p, 0) && document.activeElement?.tagName !== "SELECT") Menu.start();
-        this.pressed(p, 9);
-      }
-    },
     gameTick() {
       for (const p of this.pads()) {
-        const start = this.pressed(p, 9);
-        const a = this.pressed(p, 0);
-        const up = this.pressed(p, 12), down = this.pressed(p, 13);
-        const y = p.axes[1] || 0, stickKey = p.index + ":stick";
-        const stick = y < -0.6 ? -1 : y > 0.6 ? 1 : 0;
-        const stickEdge = stick !== 0 && stick !== this.prev[stickKey];
-        this.prev[stickKey] = stick;
-        if (start) Pause.toggle();
-        else if (Pause.isOpen) {
-          if (up || (stickEdge && stick < 0)) Pause.move(-1);
-          if (down || (stickEdge && stick > 0)) Pause.move(1);
-          if (a) Pause.act(Pause.ACTIONS[Pause.sel][0]);
-        }
+        // Keep reading so the edge is fresh, but only act while not paused
+        // (when paused, MenuNav's Start presses Resume).
+        if (this.pressed(p, 9) && !Pause.isOpen) Pause.open();
       }
     },
   };
