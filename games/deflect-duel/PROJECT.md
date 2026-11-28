@@ -66,9 +66,12 @@ match to the end) as soon as a match can finish.
 
 ## How to test
 
-Not playable yet. Once it is, QC adds `node tools/deflect-duel-smoke.js` here. Until then,
-check that Turbo Party still passes after any change to `../shared/`:
-`node tools/turbo-party-smoke.js 2 8 200`.
+From the `games` folder:
+
+- `node tools/deflect-duel-smoke.js 4 8 180`: all-bot match (players, speed, timeout s,
+  optional lives). Checks the rules on every frame; prints PASS/FAIL. Fails cleanly with
+  "isn't playable yet" until `duel.js` and `main.js` exist.
+- `node tools/turbo-party-smoke.js 2 8 200`: must still pass after any shared change.
 
 ## Current state (as of 2026-11-27)
 
