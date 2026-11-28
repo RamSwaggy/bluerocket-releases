@@ -35,6 +35,11 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 - Efficiency mode (Director, 2026-11-28): roles stood down; the boss builds and tests alone.
 - Status: feature-complete. Final test pass on team/mode-5, then "ready for reveal" to the Director.
 
+## READY FOR REVEAL (boss sign-off, 2026-11-28) — hand-off for the Director
+- Launch: `games/mode-5/index.html` (file:// OK). Menu from `TP.Rumble.loadSetup()`, saves on Start, "← All modes"; results screen has Rematch / Menu / ← All modes.
+- Hub card: `{ id: "neon-turf", name: "Neon Turf", tag: "Paint-the-floor arena", status: "play", players: [1, 4], color: "#22d3ee", blurb: "Your car is a paint roller. Loop back to your colour to flood-fill everything inside, pop rivals' wet trails, and own the most floor when the clock runs out.", path: "mode-5/index.html" }` (folder may be renamed to `neon-turf/`; all paths inside are relative).
+- Sign-off tests on the final commit, all PASS: smoke 3 rounds (8/8, incl. sudden death), batch on all 3 arenas (0 stuck, 0 errors), ui all (42 checks, 0 FAIL). No `shared/` changes; all assets code-made.
+
 ## How to test (final sign-off set, from `games/`)
 - `node tools/mode-5-smoke.js 3 16 600` — full best-of-3 bot match, 8 checks.
 - `node tools/mode-5-ui.js all` — menu (keyboard + gamepad), pause, start/quit sweep.
