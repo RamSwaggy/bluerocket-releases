@@ -491,41 +491,123 @@ const TESTS = {
     return r.done();
   },
 
-  /* ---------- Stalemate reset ---------- */
+  /* ---------- Stalemate reset (v2) ----------
+     In v2 an owned ball flies straight for ownedHold seconds, then cools
+     back to a NEUTRAL ball (that's not a reset). The stalemate reset is a
+     re-serve stalemateTime after the last strike, counted in d.stats. */
   stalemate: function () {
     const Q = window.QC, r = Q.result();
     const T = Q.cfg("stalemateTime");
-    // A's ball bounces end to end along z = 10, away from both cars, so
-    // nobody touches it. Nothing should change until the 12 s reset.
+    const hold = (TP.DUEL_CFG && TP.DUEL_CFG.ownedHold) || 3;
+    // A's ball flies end to end along z = 10, away from both cars, so
+    // nobody touches it.
     const setup = () => {
       const d = Q.fresh({ players: 2, lives: 3, pillars: false });
       Q.place(0, -15, -10, Math.PI / 2); Q.place(1, 15, -10, -Math.PI / 2);
-      Q.ballInFront(0, 2.0); Q.hit(0);
-      Q.place(0, -15, -10, Math.PI / 2);
-      d.setBall({ pos: { x: -10, y: 0, z: 10 }, vel: { x: 15, z: 0 }, owner: 0 });
+      d.setBall({ pos: { x: -10, y: 3, z: 10 }, vel: { x: 15, z: 0 }, owner: 0 });
       return d;
     };
     let d = setup();
     let minSp = Infinity;
-    const tReset = Q.stepUntil(() => d.ball.neutral, T + 3, () => { if (!d.ball.neutral) minSp = Math.min(minSp, d.ball.speed); });
-    r.ok(tReset !== null, `with no hits, the ball resets to a neutral serve (after ${tReset === null ? "never (waited " + (T + 3) + " s)" : tReset.toFixed(2) + " s"})`);
-    if (tReset !== null) r.ok(Math.abs(tReset - T) <= 0.25, `the reset comes at ${T} s (got ${tReset.toFixed(2)} s)`);
-    r.ok(minSp >= 15 * 0.99, `the ball doesn't slow down before the reset (slowest ${minSp.toFixed(2)}, started 15)`);
+    const resets = () => (d.stats ? d.stats.stalemates : 0);
+    // While the ball is still "owned" (flying straight), it must hold its speed.
+    const tReset = Q.stepUntil(() => resets() > 0, T + 3, () => { if (d.ball.mode === "owned") minSp = Math.min(minSp, d.ball.speed); });
+    r.ok(tReset !== null, `with no strikes, the ball is re-served (after ${tReset === null ? "never (waited " + (T + 3) + " s)" : tReset.toFixed(2) + " s"})`);
+    if (tReset !== null) r.ok(Math.abs(tReset - T) <= 0.25, `the re-serve comes at ${T} s (got ${tReset.toFixed(2)} s)`);
+    r.ok(minSp >= 15 * 0.99, `an owned ball holds its speed for ownedHold (${hold} s) (slowest ${minSp.toFixed(2)}, started 15)`);
     r.ok(d.koLog.length === 0, "nobody was KO'd during the stalemate run (the test set-up held)");
 
-    // A hit at 11 s restarts the count.
+    // A strike at 11 s restarts the count.
     d = setup();
     Q.step(T - 1);
-    const b = Q.xz(d.ball.pos), v = Q.xz(d.ball.vel), sp = Q.vlen(v), u = { x: v.x / sp, z: v.z / sp };
-    // Put A in the ball's path, facing the same way, and swing.
-    Q.place(0, b.x + u.x * 1.5, b.z + u.z * 1.5, Math.atan2(u.x, u.z));
-    // (No setBall here: moving the ball by hand restarts the clock too.)
+    const b = Q.xz(d.ball.pos);
+    // Put A right behind the ball and swipe.
+    Q.place(0, b.x - 1.5, b.z, Math.PI / 2);
+    const before = d.stats.strikes;
     Q.press(0);
-    const hitAt = Q.stepUntil(() => d.freezeLeft > 0 || d.ball.speed > sp + 0.01, 0.4);
-    r.ok(hitAt !== null, "set-up: A hits the ball at 11 s");
+    const hitAt = Q.stepUntil(() => d.stats.strikes > before, 0.5);
+    r.ok(hitAt !== null, "set-up: A strikes the ball at 11 s");
     Q.park(0);
-    const t2 = Q.stepUntil(() => d.ball.neutral, T + 3);
-    r.ok(t2 !== null && Math.abs(t2 - T) <= 0.4, `after a hit at 11 s, the reset waits a fresh ${T} s (came ${t2 === null ? "never" : t2.toFixed(2) + " s"} after the hit)`);
+    const r0 = resets();
+    const t2 = Q.stepUntil(() => resets() > r0, T + 3);
+    r.ok(t2 !== null && Math.abs(t2 - T) <= 0.5, `after a strike at 11 s, the re-serve waits a fresh ${T} s (came ${t2 === null ? "never" : t2.toFixed(2) + " s"} after the strike)`);
+    return r.done();
+  },
+
+  /* ---------- v2: hit-freeze doesn't count toward the stalemate clock ---------- */
+  "v2-freeze-vs-stalemate": function () {
+    const Q = window.QC, r = Q.result();
+    const T = Q.cfg("stalemateTime");
+    const d = Q.fresh({ players: 2, lives: 3, pillars: false });
+    Q.place(0, -15, -10, Math.PI / 2); Q.place(1, 15, -10, -Math.PI / 2);
+    d.setBall({ pos: { x: -10, y: 3, z: 10 }, vel: { x: 15, z: 0 }, owner: 0 });
+    // Add a long freeze three times during the count (as if three max-speed strikes froze the game).
+    let wall = 0, frozen = 0, k = 0;
+    const r0 = d.stats.stalemates;
+    while (d.stats.stalemates === r0 && wall < T + 8) {
+      if (k === 240 || k === 600 || k === 960) d.freezeLeft = 1.2;
+      if (d.freezeLeft > 0) frozen += 1 / 120;
+      d.update(1 / 120); wall += 1 / 120; k++;
+    }
+    const unfrozen = wall - frozen;
+    r.ok(d.stats.stalemates > r0, `the re-serve still happens (after ${wall.toFixed(2)} s, ${frozen.toFixed(2)} s of it frozen)`);
+    r.ok(Math.abs(unfrozen - T) <= 0.15, `it comes after ${T} s of UNFROZEN time (got ${unfrozen.toFixed(2)} s)`);
+    r.ok(wall > T + 3, `so the total is about ${T} s + the freezes (got ${wall.toFixed(2)} s)`);
+    return r.done();
+  },
+
+  /* ---------- v2: no tunnelling at max speed ----------
+     Fire an owned ball at maxSpeed at every wall, the ceiling, the floor
+     (head-on, 45° and nearly grazing) and each pillar, and at a parked
+     car from 8 directions. It must never end up outside the box or
+     inside a pillar, and it must KO the car, never pass through it. */
+  "v2-tunnelling": function () {
+    const Q = window.QC, r = Q.result();
+    const C = TP.DUEL_CFG, V = C.maxSpeed, R = C.ballR;
+    const W = C.arenaW / 2, D = C.arenaD / 2, H = C.arenaH;
+    const inside = (b) => b.x >= -W + R - 1e-3 && b.x <= W - R + 1e-3 && b.z >= -D + R - 1e-3 && b.z <= D - R + 1e-3 && b.y >= R - 1e-3 && b.y <= H - R + 1e-3;
+    const inPillar = (b, pls) => pls.some((pl) => Math.hypot(b.x - pl.x, b.z - pl.z) < pl.r + R - 1e-3);
+    const shoot = (dir, start, pillars, label) => {
+      const d = Q.fresh({ players: 2, lives: 3, pillars });
+      d.players.forEach((_, i) => Q.place(i, -W + 3 + i * 2, D - 2.5, 0)); // out of the way, in a corner
+      const l = Math.hypot(dir.x, dir.y, dir.z);
+      d.setBall({ pos: start, vel: { x: dir.x / l * V, y: dir.y / l * V, z: dir.z / l * V }, owner: 0 });
+      let bad = null, bounced = false;
+      const pls = pillars ? C.pillarList : [];
+      for (let k = 0; k < 60 && !bad; k++) {
+        d.update(1 / 120);
+        const b = d.ball.pos;
+        if (!inside(b)) bad = `left the box at (${b.x.toFixed(2)}, ${b.y.toFixed(2)}, ${b.z.toFixed(2)})`;
+        else if (inPillar(b, pls)) bad = `ended up inside a pillar at (${b.x.toFixed(2)}, ${b.z.toFixed(2)})`;
+        if (d.ball.vel.x * dir.x + d.ball.vel.y * dir.y + d.ball.vel.z * dir.z < 0) bounced = true;
+      }
+      r.ok(!bad && bounced, `${label}: ${bad || (bounced ? "bounced, stayed inside" : "never bounced back")}`);
+    };
+    const mid = { x: 0, y: 6, z: 0 };
+    for (const a of [0, 45, 80]) {
+      const s = Math.sin(a * Math.PI / 180), c = Math.cos(a * Math.PI / 180);
+      shoot({ x: c, y: 0, z: s * 0.3 }, { x: 0, y: 6, z: -3 }, false, `+X wall at ${a}°`);
+      shoot({ x: -c, y: 0, z: s * 0.3 }, { x: 0, y: 6, z: -3 }, false, `-X wall at ${a}°`);
+      shoot({ x: s, y: 0, z: c }, mid, false, `+Z wall at ${a}°`);
+      shoot({ x: s, y: 0, z: -c }, mid, false, `-Z wall at ${a}°`);
+      shoot({ x: s, y: c, z: 0 }, mid, false, `ceiling at ${a}°`);
+      shoot({ x: s, y: -c, z: 0 }, mid, false, `floor at ${a}°`);
+    }
+    for (const pl of C.pillarList) {
+      shoot({ x: pl.x - 12, y: 0, z: pl.z - pl.z }, { x: 12, y: 3, z: pl.z }, true, `pillar (${pl.x}, ${pl.z}) head-on`);
+      shoot({ x: pl.x - 12, y: 0, z: 0 }, { x: 12, y: 3, z: pl.z + pl.r * 0.7 }, true, `pillar (${pl.x}, ${pl.z}) off-centre`);
+    }
+    // A parked car, grounded, from 8 directions: the ball must KO it.
+    for (let k = 0; k < 8; k++) {
+      const d = Q.fresh({ players: 2, lives: 3, pillars: false });
+      Q.place(0, -W + 3, D - 2.5, 0);
+      Q.place(1, 0, 0, 0);
+      const a = k * Math.PI / 4, sx = Math.sin(a) * 10, sz = Math.cos(a) * 10;
+      d.setBall({ pos: { x: sx, y: 0.9, z: sz }, vel: { x: -Math.sin(a) * V, y: 0, z: -Math.cos(a) * V }, owner: 0 });
+      const n0 = d.koLog.length;
+      Q.stepUntil(() => d.koLog.length > n0, 0.3);
+      r.ok(d.koLog.length > n0, `a ${V} ball from ${k * 45}° KOs a parked car (it didn't pass through)`);
+    }
     return r.done();
   },
 
@@ -602,10 +684,9 @@ const V2_PLANNED = {
   "v2-flip-reset": "underside contact pops the ball up at ≈ buntKeep×v, keeps/takes ownership, no hit-freeze, resets air moves; nose/side = plain bump; airborne Hit with no direction = normal straight strike",
   "v2-clash": "two strikes inside clashWindow: ball stays put, owner unchanged, nobody's tier rises, both cars pushed apart; just outside the window = normal tier-up",
   "v2-dodge-3d": "jumping over a ground ball and a high ball over a grounded car are both no-KO; meeting the ball at its height in the air IS a KO",
-  "v2-tunnelling": "(FAIL-level) at maxSpeed (~210) fire at every wall, ceiling, floor (90°/45°/10°), each pillar (head-on/off-centre) and a parked car (grounded/mid-jump, 8 directions): never ends up past or inside anything; the car is KO'd or strikes",
-  "v2-freeze-vs-stalemate": "hit-freeze time (up to ~1.2 s) doesn't count toward stalemateTime: reset after stalemateTime ± 0.1 s of unfrozen time, also with several freezes",
 };
 for (const [name, plan] of Object.entries(V2_PLANNED)) {
+  if (TESTS[name]) continue;
   TESTS[name] = new Function(`return { checks: [], skipped: ${JSON.stringify("v2 test not built yet (waiting for Stage A field names). Plan: " + plan)}, notes: [] };`);
 }
 

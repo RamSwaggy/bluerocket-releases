@@ -89,7 +89,12 @@
       updateHud();
       duel.camera.aspect = aspect;
       duel.camera.updateProjectionMatrix();
-      renderer.render(duel.scene, duel.camera); // 4) draw
+      // 4) The broadcast camera (Art's js/camera.js): a side-on view that
+      //    eases to fit every car and the ball's height, with shake,
+      //    punch-ins and the standoff push-in during long hit-freezes.
+      //    The real (unscaled) frame time keeps it smooth in ?demo speed-ups.
+      if (TP.DuelCamera) TP.DuelCamera.update(duel.camera, duel, dt / SPEED);
+      renderer.render(duel.scene, duel.camera); // 5) draw
     } else {
       renderer.clear();
     }

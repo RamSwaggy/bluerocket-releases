@@ -98,10 +98,16 @@
     restSpeed: 1.5,      // a floor bounce slower than this just stops bouncing (rolls)
 
     /* ---------- Ball: owned (straight lines) and cool-down ---------- */
+    /* Speed ESCALATION (Reece, 2026-11-28: "late rallies get absurd but
+       stay readable"). Each strike multiplies the speed AND adds a small
+       step, so early rallies stay chaseable and late ones explode:
+       16 → 20.7 → 26.2 → 32.7 → 40.3 → 49 → … → 210 after about 14 strikes. */
     baseSpeed: 16,       // first strike on a neutral ball (under the car's 17, so you can chase it)
-    speedStep: 2.5,      // added by every later strike
-    maxSpeed: 56,        // top speed, whatever happens
-    smashBonus: 8,       // extra speed for a Smash (strike while boosting)
+    speedMult: 1.17,     // every later strike multiplies the speed by this...
+    speedStep: 2,        // ...and then adds this
+    maxSpeed: 210,       // top speed, whatever happens (about 4× a car: crosses the arena in ~0.2 s)
+    smashBonus: 6,       // a Smash (strike while boosting) adds this flat amount...
+    smashMult: 0.15,     // ...plus this share of the new speed, so Smashes scale with the rally
     smashBoostCost: 30,  // boost a Smash costs (out of 100). Not enough boost = normal strike.
     ownedHold: 3,        // seconds an owned ball flies straight with no strike...
     ownedFade: 1.5,      // ...then over this long gravity eases back in and it slows, then it's neutral
@@ -117,7 +123,9 @@
     angleDownDeg: 35,    // strike angle with Down held
     aimBendDeg: 25,      // full steering bends the shot this many degrees sideways
     aimDeadzone: 0.5,    // stick/keys past this count as "held" for up/down aim
-    flipBonus: 4,        // extra speed for a flip strike (Stage B, when the shared car can flip)
+    flipBonus: 4,        // extra speed for a flip strike (a dodge-flip that slams into the ball)
+    flipReach: 0.5,      // a flipping car "touches" the ball this much before real contact
+    flipLiftDeg: 12,     // a flip strike goes along the flip, angled up this much
 
     /* ---------- Bunt (wheels touch the ball: a flip reset) ---------- */
     buntKeep: 0.6,       // share of the speed tier the ball remembers
@@ -147,7 +155,8 @@
 
     /* ---------- Timers (seconds) ---------- */
     freezeMin: 0.04,     // hit-freeze at base speed
-    freezeMax: 0.3,      // hit-freeze at max speed
+    freezeMax: 1.2,      // hit-freeze at max speed (the standoff: makes extreme speeds readable)
+    freezeCurve: 1.6,    // >1 = the freeze stays short early and grows steeply near the top
     koFreeze: 0.35,      // pause when someone is KO'd
     stalemateTime: 12,   // no strikes for this long → re-serve
     respawnDelay: 1.0,   // a KO'd car is gone this long before it respawns
@@ -168,15 +177,20 @@
   function makeBotSkill() {
     return {
       reaction: rand(0.08, 0.2),   // seconds before reacting to a new strike
-      maxReturn: rand(28, 42),     // fastest ball it will try to strike back
+      maxReturn: rand(110, 190),   // fastest ball it will even try to strike back (faster = dodge)
       leadErr: 0.2,                // how far off its swing timing can be, per shot (seconds)
       lead: 0.08,                  // this shot's swing timing (re-rolled per shot)
       aimNoise: rand(4, 14),       // degrees of sloppiness in its aim
       swingLead: rand(0.04, 0.12), // how early it swings
       jumpLead: rand(0.3, 0.42),   // jump this long before impact (peak height ≈ 0.37 s)
-      fumble: 0.12,                // chance it misreads a slow shot...
-      fumbleFast: 0.4,             // ...plus this much more at max speed
-      fumbleRally: 0.03,           // ...plus this much per strike in the current rally
+      fumble: 0.06,                // chance it misreads a slow shot...
+      fumbleFast: rand(0.35, 0.55),// ...plus up to this much more as the ball nears max speed
+      needWindow: rand(0.3, 0.45), // seconds of warning it wants (freeze + travel); less = shakier
+      fumbleRally: 0.012,          // ...plus this much per strike in the current rally
+      aerial: rand(0.45, 0.9),     // how keen it is to fly up to a high ball (rocket moveset)
+      flipper: rand(0.2, 0.5),     // chance it flips into a low ball instead of swiping
+      flipDodge: rand(0.3, 0.7),   // chance it dodges by flipping sideways instead of jumping
+      move: null,                  // a committed move: { kind: "flip"|"aerial", until, x, y, z }
       planFor: -1, plan: "",       // decision for the current shot
     };
   }
@@ -284,7 +298,16 @@
 
       // Same car as every Rocket Rumble mode; Deflect Duel only lets you
       // turn more while nearly stopped, so you can aim.
-      this.tuning = TP.modeTuning({ pivot: 0.8 });
+      this.tuning = TP.modeTuning({ pivot: 0.8 }, { moveset: "rocket" });
+      // The shared car reads these off its "world" (this duel): with the
+      // rocket moveset it can fly, so it needs to know where the box is.
+      // Ceiling: the roof can't go above it. Wall planes: { nx, nz, d },
+      // the normal points INTO the arena, inside where nx*x + nz*z >= d.
+      this.ceilingHeight = C.arenaH;
+      this.wallPlanes = [
+        { nx: 1, nz: 0, d: -C.arenaW / 2 }, { nx: -1, nz: 0, d: -C.arenaW / 2 },
+        { nx: 0, nz: 1, d: -C.arenaD / 2 }, { nx: 0, nz: -1, d: -C.arenaD / 2 },
+      ];
 
       /* ---------- Hooks for Art and UI (and anyone else) ----------
          Each one is called at the moment named; by default they do nothing. */
@@ -423,7 +446,7 @@
       this.winner = null;          // index (into players[]) of the winner once "over"
       this.koLog = [];             // { t, victim, owner, speed } per KO (player indexes)
       this.outOrder = [];          // player indexes in the order they were eliminated
-      this.stats = { strikes: 0, aerialStrikes: 0, bunts: 0, clashes: 0, bumps: 0, stalemates: 0, swings: 0 };
+      this.stats = { strikes: 0, aerialStrikes: 0, flipStrikes: 0, bunts: 0, clashes: 0, bumps: 0, stalemates: 0, swings: 0 };
       // Every counted event, in order: { t, type, player, ...details }.
       // Types: swing, strike, clash, bunt, bump, ko, stalemate.
       this.events = [];
@@ -465,9 +488,14 @@
         return;
       }
 
-      // Hit-freeze: the whole game holds still for a moment.
+      // Hit-freeze: the whole game holds still for a moment. Freeze time
+      // isn't match time, so it never counts toward the stalemate clock.
+      // A human who presses Hit during the freeze (reacting to the
+      // standoff) gets that press remembered: it swings the moment play
+      // resumes, even if they've already let go.
       if (this.freezeLeft > 0) {
         this.freezeLeft = Math.max(0, this.freezeLeft - dt);
+        this._bufferHitsDuringFreeze();
         return;
       }
 
@@ -510,11 +538,14 @@
         const ctrl = this.inputOverride[i] || (this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller));
         car.update(dt, ctrl, this, this.tuning);
         this._keepCarInArena(car);
+        // A new dodge-flip has started: it can strike the ball once.
+        if (car.flipStarted) p.flipUsed = false;
 
         // Start a swipe on the moment Hit goes down. We detect the press
         // ourselves (not with hitPressed) because several fixed steps can
         // run inside one frame and a press must only count once.
-        const pressed = !!ctrl.hit && !p.prevHit;
+        const pressed = (!!ctrl.hit && !p.prevHit) || p.hitBuffered;
+        p.hitBuffered = false;
         p.prevHit = !!ctrl.hit;
         p.lastSteer = ctrl.steer || 0;
         p.lastThrottle = ctrl.throttle || 0;
@@ -523,7 +554,8 @@
           p.swingHit = false;
           this.stats.swings++;
           p.stats.swings++;
-          this._log("swing", i, { airborne: !car.onGround });
+          // (the ball's speed right now lets QC measure connect rate by speed)
+          this._log("swing", i, { airborne: !car.onGround, ballSpeed: +this.ball.speed.toFixed(1), threat: this.ball.owner !== null && this.ball.owner !== i && this.ball.mode !== "neutral" });
           this.hooks.onSwing(car);
           this.onEvent("swing", { player: p });
         }
@@ -534,6 +566,17 @@
       // pushed someone into one.
       TP.Car.collideAll(this.cars, this.tuning);
       this.cars.forEach((car) => { if (!car.out) this._keepCarInArena(car); });
+    }
+
+    // During a hit-freeze nothing moves, but humans can still press Hit.
+    // Remember a fresh press so it swings as soon as the freeze ends.
+    _bufferHitsDuringFreeze() {
+      this.players.forEach((p, i) => {
+        if (p.out || p.dead > 0 || this.bots[i] || this.inputOverride[i]) return;
+        const ctrl = TP.Input.get(p.controller);
+        if (ctrl.hit && !p.prevHit) p.hitBuffered = true;
+        p.prevHit = !!ctrl.hit;
+      });
     }
 
     // The car physics asks for the floor height: it's flat everywhere.
@@ -657,6 +700,9 @@
       const sp = b.vel.length();
       if (sp > C.maxSpeed) b.vel.multiplyScalar(C.maxSpeed / sp);
       b.speed = Math.min(sp, C.maxSpeed);
+      // heat: 1 while owned and flying straight, falling to 0 as it cools,
+      // 0 when neutral. Art uses it to soften the glow as a ball cools.
+      b.heat = b.mode === "owned" ? 1 : b.mode === "cooling" ? 1 - gravityShare(b) : 0;
     }
 
     // A bounce happened: tell the hooks, and flash the wall in the arena
@@ -698,16 +744,23 @@
     _tryHits() {
       const C = this.cfg, b = this.ball;
       if (this.time < b.lockUntil) return false;
-      let best = -1, bestD = Infinity;
+      let best = -1, bestD = Infinity, bestKind = "strike";
       this.players.forEach((p, i) => {
-        if (p.out || p.dead > 0 || p.swingT <= 0 || p.swingHit) return;
-        const d = this._reach(this.cars[i]);
-        if (d <= C.hitRange && d < bestD) { best = i; bestD = d; }
+        if (p.out || p.dead > 0) return;
+        const car = this.cars[i];
+        // A dodge-flip that slams into the ball is a strike too (once per flip).
+        if (car.flipping && !p.flipUsed && this._contact(car, C.flipReach)) {
+          if (-1 < bestD) { best = i; bestD = -1; bestKind = "flip"; } // contact beats a swipe at range
+          return;
+        }
+        if (p.swingT <= 0 || p.swingHit) return;
+        const d = this._reach(car);
+        if (d <= C.hitRange && d < bestD) { best = i; bestD = d; bestKind = "strike"; }
       });
       if (best < 0) return false;
       const ls = this.lastStrike;
       if (ls && ls.i !== best && this.time - ls.t <= C.clashWindow) this._clash(ls, best);
-      else this._strike(best);
+      else this._strike(best, bestKind);
       return true;
     }
 
@@ -717,10 +770,12 @@
       return { owner: b.owner, mode: b.mode, tier: b.tier, ownT: b.ownT, coolT: b.coolT, coolLen: b.coolLen, coolK0: b.coolK0, hits: b.hits };
     }
 
-    _strike(i) {
+    _strike(i, kind = "strike") {
       const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i];
       const before = this._ballBefore();
       const aerial = !car.onGround;
+      const flip = kind === "flip";
+      if (flip) p.flipUsed = true;
 
       p.swingHit = true;
       p.swingT = 0;
@@ -736,15 +791,17 @@
 
       /* ---------- Next speed tier, straight-line flight ---------- */
       const fromNeutral = b.mode === "neutral" || b.tier <= 0;
-      let speed = fromNeutral ? C.baseSpeed : Math.min(C.maxSpeed, b.tier + C.speedStep);
+      let speed = fromNeutral ? C.baseSpeed : Math.min(C.maxSpeed, b.tier * C.speedMult + C.speedStep);
       // Smash: striking while boosting, with enough boost to pay for it.
       // Not on the first touch of a neutral ball: off a serve it would
       // leave faster than a car can chase.
       const smash = !fromNeutral && car.boosting && car.boost >= C.smashBoostCost;
       if (smash) {
-        speed = Math.min(C.maxSpeed, speed + C.smashBonus);
+        speed = Math.min(C.maxSpeed, speed * (1 + C.smashMult) + C.smashBonus);
         car.boost -= C.smashBoostCost;
       }
+      // A flip strike hits harder.
+      if (flip) speed = Math.min(C.maxSpeed, speed + C.flipBonus);
 
       // Aim: up / straight / down from the throttle axis, bent sideways
       // by steering. Steering right (+1) lowers the heading (see car.js),
@@ -752,8 +809,25 @@
       let angle = "straight", elev = 0;
       if (p.lastThrottle > C.aimDeadzone) { angle = "up"; elev = C.angleUpDeg * DEG; }
       else if (p.lastThrottle < -C.aimDeadzone) { angle = "down"; elev = -C.angleDownDeg * DEG; }
-      const bend = clamp(p.lastSteer, -1, 1) * C.aimBendDeg;
-      const h = car.heading - bend * DEG;
+      let bend = clamp(p.lastSteer, -1, 1) * C.aimBendDeg;
+      // The base direction is the way the car faces. In the air (rocket
+      // moveset) that includes the nose's pitch: point the nose down at
+      // the floor and a "straight" strike goes down too.
+      let baseH = car.heading;
+      if (aerial && typeof car.nose === "function") {
+        const n = car.nose();
+        if (Math.hypot(n.x, n.z) > 0.05) baseH = Math.atan2(n.x, n.z);
+        elev += Math.asin(clamp(n.y, -1, 1));
+      }
+      // A flip strike goes the way the flip throws the car, angled up a little.
+      if (flip && car.flipDir) {
+        baseH = Math.atan2(car.flipDir.x, car.flipDir.z);
+        elev = C.flipLiftDeg * DEG;
+        angle = "flip";
+        bend = 0;
+      }
+      elev = clamp(elev, -80 * DEG, 80 * DEG);
+      const h = baseH - bend * DEG;
       const ch = Math.cos(elev);
       b.vel.set(Math.sin(h) * ch * speed, Math.sin(elev) * speed, Math.cos(h) * ch * speed);
       b.speed = speed;
@@ -764,19 +838,30 @@
       b.ownT = 0;
       b.safeUntil = 0;
 
-      // The hit-freeze: faster ball → longer pause.
+      // The hit-freeze: faster ball → longer pause (steeply, near the top).
       const frac = clamp((speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
-      this.freezeLeft = lerp(C.freezeMin, C.freezeMax, frac);
+      this.freezeLeft = this._freezeFor(speed);
+      b.lastFreeze = this.freezeLeft;
 
-      const info = { kind: "strike", angle, bend: +bend.toFixed(1), aerial };
+      const info = { kind, angle, bend: +bend.toFixed(1), aerial, flip, freeze: this.freezeLeft };
       p.stats.strikes++;
       if (aerial) p.stats.strikesAir++;
       if (angle === "up") p.stats.strikesUp++;
       if (angle === "down") p.stats.strikesDown++;
+      if (flip) { p.stats.strikesFlip++; this.stats.flipStrikes = (this.stats.flipStrikes || 0) + 1; }
       if (smash) p.stats.smashes++;
-      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip: false, smash });
+      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash });
       this.hooks.onHit(car, b, frac, smash, info);
       this.onEvent("hit", { player: p, speed, frac, smash, info });
+    }
+
+    // How long the hit-freeze lasts for a ball leaving at `speed`. Short
+    // and snappy early in a rally; grows steeply toward freezeMax at the
+    // top, so a 200+ ball gets a long, readable standoff first.
+    _freezeFor(speed) {
+      const C = this.cfg;
+      const frac = clamp((speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
+      return C.freezeMin + (C.freezeMax - C.freezeMin) * Math.pow(frac, C.freezeCurve);
     }
 
     // Two cars struck within clashWindow: both bounce away, the ball stops
@@ -834,7 +919,31 @@
        shared car has full 3D orientation, otherwise straight down. The
        touch counts when the ball sphere meets the car's body box on that
        underside, inside the wheelbase. */
+    /* ---------- Car vs ball contact ----------
+       With the rocket moveset the car can be at any angle (mid-flip,
+       upside down in the air), so we use the shared engine's tilted-box
+       test when it's there: TP.Car.sphereContact(car, ballPos, radius).
+       Otherwise fall back to our heading-only box. Returns null (no touch)
+       or { nx, ny, nz (car → ball), cx, cy, cz (contact point), wheels }. */
+    _contact(car, extra = 0) {
+      const C = this.cfg, b = this.ball, R = C.ballR + extra;
+      if (TP.Car.sphereContact && car.quat) {
+        const hit = TP.Car.sphereContact(car, b.pos, R);
+        if (!hit) return null;
+        return { nx: hit.normal.x, ny: hit.normal.y, nz: hit.normal.z, cx: hit.point.x, cy: hit.point.y, cz: hit.point.z, wheels: hit.wheels };
+      }
+      const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
+      if (box.d >= R) return null;
+      return { nx: box.nx, ny: box.ny, nz: box.nz, cx: box.cx, cy: box.cy, cz: box.cz, wheels: null };
+    }
+
     _wheelsTouch(car) {
+      // The shared engine's answer when it has one: underside facing the
+      // ball (within 30°) and the contact inside the wheelbase.
+      if (TP.Car.sphereContact && car.quat) {
+        const hit = this._contact(car);
+        return !!(hit && hit.wheels);
+      }
       const C = this.cfg, b = this.ball;
       const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
       if (box.d >= C.ballR) return false;
@@ -911,8 +1020,7 @@
         if (p.out || p.dead > 0 || i === b.owner || p.invuln > 0) return;
         // True 3D: the ball sphere against the car's body box. Jumping
         // over the ball works only if you really are above it.
-        const box = this._carBox(this.cars[i], b.pos.x, b.pos.y, b.pos.z);
-        if (box.d < C.ballR) victims.push(i);
+        if (this._contact(this.cars[i])) victims.push(i);
       });
       if (!victims.length) return false;
 
@@ -941,8 +1049,8 @@
       this.players.forEach((p, i) => {
         if (p.out || p.dead > 0 || b.mode !== "neutral") return;
         const car = this.cars[i];
-        const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
-        if (box.d >= C.ballR) return;
+        const box = this._contact(car);
+        if (!box) return;
         const { nx, ny, nz } = box;
         // Push the ball out of the car.
         b.pos.set(box.cx + nx * C.ballR, Math.max(C.ballR, box.cy + ny * C.ballR), box.cz + nz * C.ballR);
@@ -1089,6 +1197,26 @@
       const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i], S = this.bots[i];
       const canSwing = p.swingT <= 0 && p.cooldown <= 0 && this.state === "play";
       const reach = this._reach(car);
+
+      // 0) Rocket moves take several steps (jump, release, flip / aim and
+      //    boost). Once a bot commits to one it sees it through, swiping
+      //    if the ball comes into reach on the way.
+      if (S.move) {
+        const m = S.move;
+        if (this.time > m.until || car.tumbling || (m.kind === "aerial" && car.onGround && this.time > m.start + 0.4)) S.move = null;
+        else {
+          let ctrl;
+          if (m.kind === "flip") {
+            ctrl = TP.ai.flipAt(car, m.x, m.z, { boost: m.boost });
+          } else {
+            // Re-aim at where the ball is now (it may have moved).
+            ctrl = TP.ai.aerialTo(car, b.pos.x, b.pos.y, b.pos.z, { lift: 0.4 });
+          }
+          ctrl.hit = canSwing && m.swing && reach < C.hitRange * 0.85 && this.time >= b.lockUntil;
+          if (ctrl.hit) { const aim = this._botAim(i); ctrl.steer = aim.steer; ctrl.throttle = aim.throttle; }
+          return ctrl;
+        }
+      }
       const mine = b.owner === i;
       const dangerous = b.mode !== "neutral" && !mine && b.owner !== null;
       // Boldness: after each stalemate since the last KO, bots return
@@ -1105,6 +1233,17 @@
       //    timing can be off. If another car is nearer the ball, usually
       //    let it have it (sometimes go for it anyway: a clash).
       const contested = this.players.some((q, j) => j !== i && !q.out && q.dead <= 0 && this._reach(this.cars[j]) < reach);
+      // Sometimes, instead of a swipe, slam a low ball with a dodge-flip
+      // (a flip strike hits harder). Decided once per approach.
+      if (!dangerous && car.onGround && b.pos.y < 2.2 && this.state === "play" && !contested &&
+          dist2D(car.pos.x, car.pos.z, b.pos.x, b.pos.z) < 6 && dist2D(car.pos.x, car.pos.z, b.pos.x, b.pos.z) > 3 &&
+          Math.abs(TP.ai.angleTo(car, b.pos.x, b.pos.z)) < 0.5 && S.flipFor !== b.hitId) {
+        S.flipFor = b.hitId;
+        if (Math.random() < S.flipper) {
+          S.move = { kind: "flip", x: b.pos.x, z: b.pos.z, until: this.time + 1.0, start: this.time, swing: false, boost: false };
+          return this._botControls(i);
+        }
+      }
       if (canSwing && !dangerous && reach < C.hitRange * 0.85 && this.time >= b.lockUntil && (!contested || Math.random() < 0.06)) {
         const ctrl = TP.ai.driveTo(car, b.pos.x, b.pos.z, { boostDist: 99 });
         const aim = this._botAim(i);
@@ -1156,13 +1295,21 @@
         S.planFor = b.hitId;
         const frac = clamp((b.speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
         S.lead = S.swingLead + rand(-S.leadErr, S.leadErr * 2); // early or late this time
+        // The reaction window: the hit-freeze the bot just watched, plus how
+        // long the ball takes to reach it. A long freeze gives time to read
+        // even a very fast ball; a short window makes a misread likelier.
+        const window = (b.lastFreeze || 0) + Math.hypot(rx, ry, rz) / Math.max(1, b.speed);
+        const rushed = 0.5 * clamp((S.needWindow - window) / S.needWindow, 0, 1);
         // Long rallies tire bots out: each strike since the serve adds a
         // little to the misread chance, so rallies end (median aim 4–12).
         const rally = S.fumbleRally * b.hits;
         // And the longer nobody has been KO'd (after 20 s), the more
         // likely a misread, so a match always ends.
         const drought = 0.015 * Math.max(0, this.time - this.lastKOt - 20);
-        if (Math.random() < (S.fumble + S.fumbleFast * frac + rally) * Math.pow(0.6, bold) + drought) S.plan = "fumble";
+        // Misread chance: a base, more for fast balls (curving up near the
+        // top), more for long rallies and for a rushed window. Beatable at
+        // high speed, but not hopeless.
+        if (Math.random() < (S.fumble + S.fumbleFast * Math.pow(frac, 1.2) + rally + rushed) * Math.pow(0.6, bold) + drought) S.plan = "fumble";
         else if (b.speed <= maxReturn) S.plan = "return";
         else S.plan = "dodge";
       }
@@ -1183,6 +1330,8 @@
           ctrl.hit = true;
           ctrl.steer = aim.steer;
           ctrl.throttle = aim.throttle;
+          // Sometimes return it as a Smash (boost held as it swipes).
+          ctrl.boost = car.boost > C.smashBoostCost + 5 && Math.random() < 0.25;
         }
         return ctrl;
       }
@@ -1192,6 +1341,18 @@
         // drive out from under.
         const yAt = b.pos.y + b.vel.y * tClose;
         if (yAt < C.ballR + 0.6) {
+          // A low ball: jump it... or, with time to spare, dodge-flip
+          // sideways out of its line (decided once per shot).
+          if (car.onGround && tImpact <= S.jumpLead + 0.25 && tImpact > S.jumpLead * 0.5 && S.flipDodgeFor !== b.hitId) {
+            S.flipDodgeFor = b.hitId;
+            if (Math.random() < S.flipDodge) {
+              const len = Math.hypot(b.vel.x, b.vel.z) || 1;
+              const side = mx * b.vel.z - mz * b.vel.x >= 0 ? 1 : -1;
+              const [fx, fz] = this._inside(car.pos.x + (-b.vel.z / len) * side * 6, car.pos.z + (b.vel.x / len) * side * 6);
+              S.move = { kind: "flip", x: fx, z: fz, until: this.time + 0.9, start: this.time, swing: false, boost: false };
+              return this._botControls(i);
+            }
+          }
           ctrl.jump = car.onGround && tImpact <= S.jumpLead;
           return ctrl;
         }
@@ -1213,9 +1374,24 @@
        find the first moment it's low enough to strike and I can get
        there in time, and drive to that spot. Jump if it'll be high. */
     _botMeet(i) {
-      const C = this.cfg, car = this.cars[i], b = this.ball;
+      const C = this.cfg, car = this.cars[i], b = this.ball, S = this.bots[i];
       const path = this._predictBall();
       const reachTop = C.strikeY + C.hitRange * 0.8;   // highest strike from the ground
+
+      // A high ball I can get under in time: fly up to it (an aerial),
+      // if this bot is the flying sort. Decided once per ball state so it
+      // doesn't dither between driving and flying.
+      if (car.onGround && S && this.state === "play" && b.pos.y > reachTop + 1.5 && S.aerialFor !== b.hitId) {
+        const g = C.gravity * gravityShare(b);
+        const ip = TP.ai.interceptPoint(car, b.pos, b.vel, { gravity: g, floorY: C.ballR, maxT: 1.6 });
+        if (ip && ip.y > reachTop + 0.5 && ip.y < C.arenaH - 1.5 && car.boost > 25) {
+          S.aerialFor = b.hitId;
+          if (Math.random() < S.aerial) {
+            S.move = { kind: "aerial", until: this.time + Math.min(2.2, ip.t + 0.9), start: this.time, swing: true };
+            return this._botControls(i);
+          }
+        }
+      }
       let target = path[path.length - 1];
       for (const q of path) {
         const tCar = dist2D(car.pos.x, car.pos.z, q.x, q.z) / 14 + 0.15;
