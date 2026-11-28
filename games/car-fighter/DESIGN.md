@@ -143,8 +143,11 @@ and spark colour. Handling differs only through `TP.modeTuning({...})`: `maxSpee
 
 **M2 starting numbers** (Gameplay's plan, accepted 2026-11-28, to be tuned with QC's sims).
 **Tuned since** (Gameplay `383d4e8`):
-- Haulback: 1150 HP, damage ×1.0.
-- Skitter: 950 HP, knockback ×1.05.
+- Haulback: damage ×1.0.
+- Health after the 2026-11-28 balance pass (Gameplay `014d7f1`): **Rivet 1050, Haulback 1120,
+  Skitter 975.** Every pairing lands at 47–54% across both seats; mirror rounds are 25–32 s.
+- Hard beats Normal 79%. Normal beats Easy 85%.
+- Skitter: knockback ×1.05.
 - Health in the table above is superseded by these values.
 
 Measured by the boss at Normal, both seat orders:
@@ -274,6 +277,12 @@ TP.Fight.ARENA        // { halfX, halfZ, minY, maxY }: the playable bounds, for 
 3. `TP.Fight.create` takes an optional `super` per player (e.g. `p1: { ..., super: 100 }`),
    so tests can start with meter. It's also useful for training mode later.
 4. `onEvent(fn)` takes **any number of listeners**. Tests should still read `fight.events`.
+6. **Throws** (Hit + Heavy): the two presses may be up to 3 frames apart, in either order. It
+   only throws in grab range (3.6). Out of range, the first button's move comes out.
+7. Extra events for the view: `wall_bounce` {frame, victim, attacker, x, y, z} and
+   `knockdown` {frame, victim, attacker, x, y, z, stun}.
+8. `TP.Match.setTimeScale(s)` / `getTimeScale()`: a visual-only real-time scale (KO slow-mo),
+   clamped to 0–4, reset to 1 on start, ignored by headless runs.
 5. `round_end` events carry `winner` (0, 1, or `null` for a draw) and
    `reason: "KO" | "time-out" | "draw" | "double-KO"`. `combo_end` carries `hits` and
    `damage`.

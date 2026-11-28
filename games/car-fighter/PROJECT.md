@@ -106,9 +106,15 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   Boss check: smoke PASS (haulback vs skitter, and skitter vs rivet on Hard), screenshots of
   select and fight look right, no errors.
 - QC's frames tool needs updates for per-car tables, multi-hit moves and cross-ups (QC JOB 3).
+- Gameplay JOB 4 is merged (`125c279`, `014d7f1`). Boss check: frames PASS 15/15 on all three
+  cars. Gameplay's sim gave Normal pairings 47–54%.
+  - The throw works with staggered presses.
+  - Health is now Rivet 1050, Haulback 1120, Skitter 975.
+  - New `wall_bounce` and `knockdown` events, and `TP.Match.setTimeScale`.
+- QC JOB 4: update `car-fighter-human.js` for the M2 menu (character select), then do a full
+  re-run. Art JOB 4: the polish pass.
 - QC JOB 2 is merged (`a2b5ecf`): `tools/car-fighter-human.js`. 10 of 11 PASS.
-  **Open bug (Gameplay):** the Tow Hook throw never comes out when E and R are pressed on
-  different frames, which is how a real person presses them. Instead you get Jab > Ram.
+  The throw bug it found is now fixed (see above).
 - (old) Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
