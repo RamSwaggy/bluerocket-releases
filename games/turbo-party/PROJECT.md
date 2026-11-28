@@ -54,6 +54,8 @@ From the `games` folder (run these in the background, since they take over 30 s)
 node tools/turbo-party-smoke.js 3 8 240      # full 4-bot match → PASS/FAIL
 node tools/turbo-party-minigame.js all 5     # each minigame ×5, winners/lengths/errors
 node tools/turbo-party-balance.js 20 6       # 20 six-turn bot matches → trophy balance report (~18 min)
+node tools/turbo-party-human.js              # scripted Keyboard-1 player: hub, shop, items, fork, trophy + 14 rule checks (~4 min)
+node tools/turbo-party-minigame.js all 10 [seed]  # seeded, replayable; flags ties, cap hits, console errors
 ```
 
 In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&speed=N`,
@@ -77,7 +79,7 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
    distance was reduced from 30 to 20 as a guess. Bonus trophies can end up deciding the game.
 2. **Untested:** real gamepads, and how the audio actually sounds (no speakers in cloud
    sessions). Only Reece can check these.
-3. **Human-path coverage is thin:** QC tests have used a keyboard player for the die and the
+3. ~~**Human-path coverage is thin:**~~ Fixed by job 3 (`turbo-party-human.js`). QC tests have used a keyboard player for the die and the
    fork. The shop and item menus with a human player haven't been tested.
 4. **King of the Hill:** scores are low because bots crowd the zone. That may be fine, but
    it's worth a look.
@@ -119,7 +121,7 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 1 | Trophy relocation along the track, no double buy, trophy offer after a pit-lane swap | Gameplay | **merged** (ba264be) |
 | A | 20-match 6-turn balance baseline + reusable balance tool | QC | **merged** (2f9e168); "after" run in progress |
 | 2 | Tie rule, Sumo determinism (same seat always wins), Sumo edge rule | Gameplay | **merged** (a8a4caa) |
-| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | sent |
+| 3 | Scripted human test (shop + 4 items), rule checks, better minigame reporting | QC | **merged** (79d536d) |
 | 4a | Spaces easier to tell apart, readable HUD, start-space wording | Art and UI | **merged** (663bc0f) |
 | 4b | Greyed-out menu options (unaffordable shop items, unusable items) | Art and UI | **merged** (e7502c0) |
 | 4c | Bugs found by job 3 | Gameplay / Art and UI | after job 3 |
