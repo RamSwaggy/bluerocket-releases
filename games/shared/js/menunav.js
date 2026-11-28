@@ -13,7 +13,7 @@
      D-pad / left stick ... move between buttons, dropdowns and links
                             (picks the nearest one in that direction)
      ← → on a dropdown .... change its value (↑ ↓ still move away from it)
-     A (or Enter) ......... press the highlighted button
+     A (or Enter / Space) . press the highlighted button
      B (or Escape) ........ back (opts.onBack, or a [data-nav-back] element)
      Start ................ press the [data-nav-primary] element (e.g. "Play")
 
@@ -194,9 +194,10 @@ window.TP = window.TP || {};
         // dropdown, so it can't trap you), ←→ change a dropdown's value.
         e.preventDefault();
         direction(...map[e.key]);
-      } else if ((e.key === "Enter" || e.code === "NumpadEnter") && !typing) {
+      } else if ((e.key === "Enter" || e.code === "NumpadEnter" || e.code === "Space") && !typing) {
         // Press it ourselves rather than relying on the browser: shared
-        // input.js cancels Enter's default action in every game page.
+        // input.js cancels Enter's and Space's default action in every game
+        // page. Space is Keyboard 1's in-game confirm, so it confirms here too.
         e.preventDefault();
         if (!e.repeat) press();
       } else if (e.key === "Escape") {
