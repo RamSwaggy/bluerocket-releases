@@ -369,6 +369,61 @@
       .stat, .carrole, .sig { font-size: 11px; }
     }
 
+
+    /* A secondary action (Training, Tutorial, Controls, Move list). */
+    .btn.alt { background: #1e2a5c; color: var(--text); border: 1px solid var(--line); }
+
+    /* =================================================================
+       PAUSE MENU and MOVE LIST (pause.js)
+       ================================================================= */
+    .card.pause { width: min(560px, 100%); text-align: center; }
+    .card.pause .title { margin-bottom: 12px; }
+    .pausebtns { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin: 6px auto 10px; max-width: 320px; }
+    .trainset {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center;
+      padding: 10px; margin: 0 0 12px; border-radius: 12px; background: var(--panel-2); font-size: 14px;
+    }
+    .trainset select {
+      font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 8px; margin-left: 6px;
+      border: 1px solid var(--line); background: #0d1330; color: var(--text);
+    }
+    .trainset .btn { font-size: 14px; padding: 7px 14px; }
+    .toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
+    /* The move list is wide: let the card grow and the tables sit side by side. */
+    .card.pause:has(.movelists) { width: min(980px, 100%); text-align: left; }
+    .movelists { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 10px; }
+    .movelist { background: var(--panel-2); border-radius: 12px; padding: 10px 12px; border-left: 6px solid var(--seat); }
+    .movelist h3 { margin: 0 0 6px; font-style: italic; font-size: 20px; }
+    .movelist table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .movelist th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 2px 4px; }
+    .movelist td { padding: 4px; border-top: 1px solid var(--line); vertical-align: top; }
+    .movelist td.mn { font-weight: 800; white-space: nowrap; }
+    .movelist td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .movelist td.muted { font-size: 11px; }
+
+    /* =================================================================
+       TRAINING READOUT and TUTORIAL COACH (training.js)
+       Sits under P1's health bar, out of the way of the fight.
+       ================================================================= */
+    #coach { top: 96px; left: 10px; display: none; max-width: min(380px, calc(100vw - 20px)); }
+    #coach.show { display: block; }
+    /* Out of the way while a card (pause, move list) is up. */
+    body:has(#overlay.show) #coach { display: none; }
+    #coach .box {
+      background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--p1);
+      border-radius: 12px; padding: 10px 12px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    #coach .hd { font-weight: 800; letter-spacing: .04em; font-size: 12px; margin-bottom: 6px; }
+    #coach .row { display: flex; justify-content: space-between; gap: 12px; margin: 2px 0; }
+    #coach .row span:first-child { color: var(--muted); }
+    #coach .ft { margin-top: 6px; font-size: 12px; }
+    #coach p { margin: 0 0 8px; font-size: 15px; line-height: 1.4; }
+    #coach .lesson { border-left-color: var(--accent); }
+    #coach .lesson.done { border-left-color: #4ade80; }
+    #coach .bar { height: 6px; border-radius: 3px; background: var(--gauge-bg); overflow: hidden; }
+    #coach .bar i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+    #coach .lesson.done .bar i { background: #4ade80; }
+
     @media (max-width: 640px) {
       .seats { grid-template-columns: 1fr; }
       .side .who { font-size: 14px; }
@@ -426,6 +481,8 @@
   <script src="js/sfx-fight.js"></script>
   <script src="js/view.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/pause.js"></script>
+  <script src="js/training.js"></script>
   <script src="js/main.js"></script>
 
   <!-- Loop and URL options (Gameplay). Last, so everything above exists

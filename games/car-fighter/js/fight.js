@@ -68,6 +68,9 @@ window.TP = window.TP || {};
   // States in which a car can block (and must be on the ground).
   const CAN_BLOCK = new Set(["idle", "walk", "block", "blockstun"]);
 
+  // What the training dummy can do (see dummyControls in create()).
+  const TRAINING_DUMMIES = ["stand", "block", "jump", "attack", "bot"];
+
   const NEUTRAL = Object.freeze({ throttle: 0, steer: 0, pitch: 0, boost: false, jump: false, hit: false, heavy: false });
 
   // The short recovery after landing out of an air move. Not a real move
@@ -109,6 +112,19 @@ window.TP = window.TP || {};
     const roundTime = Math.max(1, opts.roundTime || 60);
     const scene = opts.scene || new THREE.Scene();
 
+    /* TRAINING (opts.training = { dummy, meter }, or nothing for a real
+       match). In training:
+         • there's no clock and nobody can be KO'd (health stops at 1),
+         • a car's health refills as soon as a combo on it ends,
+         • with `meter` on, both super meters stay full,
+         • the second car (p2) is a DUMMY: what it does is `dummy`, one of
+           TRAINING_DUMMIES below, and the pause menu can change it live
+           with fight.setTraining({ dummy, meter }).
+       fight.resetPositions() puts both cars back on their marks. */
+    const training = opts.training
+      ? { dummy: TRAINING_DUMMIES.includes(opts.training.dummy) ? opts.training.dummy : "stand", meter: opts.training.meter !== false }
+      : null;
+
     const events = [];
     const listeners = [];
 
@@ -134,6 +150,7 @@ window.TP = window.TP || {};
                                // reason: "KO" | "time-out" | "draw" | "double-KO"
       winner: null,            // at matchEnd: 0 or 1, or null for a drawn match
       seed,
+      training: training ? Object.assign({}, training) : null,   // null in a real match
       cars: [],
     };
 
@@ -142,8 +159,10 @@ window.TP = window.TP || {};
       p = p || {};
       const def = TP.fighterDef(p.fighter);
       const car = new TP.Car(scene, { index, color: TP.PLAYER_COLORS[index] });
-      // "off" (an empty hub seat) is played by a bot, like "bot".
-      const controller = !p.controller || p.controller === "off" ? "bot" : p.controller;
+      // "off" (an empty hub seat) is played by a bot, like "bot". In
+      // training the second car is always the dummy.
+      let controller = !p.controller || p.controller === "off" ? "bot" : p.controller;
+      if (training && index === 1) controller = "dummy";
       const f = {
         index,
         id: def.id,
@@ -188,14 +207,17 @@ window.TP = window.TP || {};
         ctrl: NEUTRAL,
       };
       for (const b of BUTTONS) { f.buf[b] = -9999; f.pressAt[b] = -9999; }
-      if (controller === "bot") {
-        f.bot = TP.FightBot.create({
-          level: p.bot || "normal",
-          seed: (seed ^ Math.imul(index + 1, 0x9e3779b9)) >>> 0,
-          index,
-        });
-      }
+      f.botLevel = p.bot || "normal";
+      if (controller === "bot" || (controller === "dummy" && training.dummy === "bot")) f.bot = makeBot(f);
       return f;
+    }
+
+    function makeBot(f) {
+      return TP.FightBot.create({
+        level: f.botLevel,
+        seed: (seed ^ Math.imul(f.index + 1, 0x9e3779b9)) >>> 0,
+        index: f.index,
+      });
     }
 
     const fighters = [makeFighter(opts.p1, 0), makeFighter(opts.p2, 1)];
@@ -238,6 +260,8 @@ window.TP = window.TP || {};
       state.phase = "intro";
       state.phaseFramesLeft = RULES.introFrames;
       hitstopLeft = 0;
+      // Training goes straight to fighting: no round call, no 3-2-1.
+      if (training) { state.phase = "fight"; state.phaseFramesLeft = 0; }
     }
 
     /* =================================================================
@@ -624,6 +648,8 @@ window.TP = window.TP || {};
           x: victim.car.pos.x, y: victim.car.pos.y, z: victim.car.pos.z,
         });
       }
+      // Training: the combo is over, so the victim is healed for the next go.
+      if (training) victim.health = victim.maxHealth;
       victim.comboTaken = 0;
       victim.comboDamage = 0;
       victim.airHits = 0;
@@ -816,7 +842,8 @@ window.TP = window.TP || {};
       v.move = null;
       v.thrown = { fromX: v.car.pos.x, toX, t: 0, frames: 36 };
       pendingHitstop = Math.max(pendingHitstop, m.hitstop);
-      emit("throw", { attacker: a.index, victim: v.index, move: r.moveId, damage: dmg, stun: 36, x: r.x, y: r.y, z: r.z });
+      emit("throw", { attacker: a.index, victim: v.index, move: r.moveId, damage: dmg, stun: 36, x: r.x, y: r.y, z: r.z,
+        combo: v.comboTaken, comboDamage: v.comboDamage });
     }
 
     function scaleFor(v) {
@@ -863,7 +890,7 @@ window.TP = window.TP || {};
       // Armour (Haulback's Ram/Corkscrew in M2): take the damage, keep attacking.
       if (v.state === "attack" && v.armourLeft > 0) {
         v.armourLeft--;
-        emit("hit", Object.assign(at, { damage: dmg, stun: 0, armoured: true }));
+        emit("hit", Object.assign(at, { damage: dmg, stun: 0, armoured: true, combo: v.comboTaken, comboDamage: v.comboDamage }));
         return;
       }
 
@@ -899,7 +926,9 @@ window.TP = window.TP || {};
         car.vel.x = a.facing * m.push * kb;
         stun = m.hitstun;
       }
-      emit("hit", Object.assign(at, { damage: dmg, stun }));
+      // combo / comboDamage: the victim's combo so far, this hit included
+      // (training mode's readout uses them).
+      emit("hit", Object.assign(at, { damage: dmg, stun, combo: v.comboTaken, comboDamage: v.comboDamage }));
     }
 
     /* =================================================================
@@ -992,6 +1021,16 @@ window.TP = window.TP || {};
         if (FREE.has(f.state) && f.car.onGround) updateFacing(f, fighters[1 - f.index]);
       }
 
+      if (training) {
+        // Nobody is KO'd in training and the clock never runs.
+        for (const f of fighters) {
+          if (f.health < 1) f.health = 1;
+          if (training.meter) f.super = RULES.superMax;
+        }
+        if (pendingHitstop > 0) { hitstopLeft = pendingHitstop; afterHitstop = "fight"; state.phase = "hitstop"; }
+        return;
+      }
+
       if (checkKO(lastHitBy)) return;
 
       state.timer = Math.max(0, state.timer - DT);
@@ -1031,7 +1070,9 @@ window.TP = window.TP || {};
 
       // Controls: humans from `inputs`, bots think for themselves.
       for (const f of fighters) {
-        f.ctrl = f.bot ? f.bot.think(fight, f.index) : (inputs && inputs[f.index]) || NEUTRAL;
+        f.ctrl = f.bot ? f.bot.think(fight, f.index)
+          : f.controller === "dummy" ? dummyControls(f)
+          : (inputs && inputs[f.index]) || NEUTRAL;
       }
 
       switch (state.phase) {
@@ -1099,11 +1140,62 @@ window.TP = window.TP || {};
       }
     }
 
+    /* ---------- The training dummy's "controls" ----------
+       It sends the same control shape a player does, so it obeys every
+       rule a player does (it can only block while free, and so on).
+         stand   does nothing
+         block   holds away from you all the time
+         jump    hops about once a second
+         attack  walks in and swings a Ram every ~1.3 s once close (it's
+                 what the tutorial's "Guard" lesson blocks)
+         bot     a Normal bot (handled by f.bot, not here) */
+    function dummyControls(f) {
+      const o = fighters[1 - f.index];
+      const away = -f.facing;   // steer is screen-relative: +1 = right
+      const t = state.frame;
+      switch (training && training.dummy) {
+        case "block":
+          return Object.assign({}, NEUTRAL, { steer: away });
+        case "jump":
+          return Object.assign({}, NEUTRAL, { jump: t % 60 < 3 });
+        case "attack": {
+          const dist = Math.abs(o.car.pos.x - f.car.pos.x);
+          if (dist > 3.6) return Object.assign({}, NEUTRAL, { steer: f.facing * 0.6 });
+          return Object.assign({}, NEUTRAL, { heavy: t % 80 < 3 });
+        }
+        default:
+          return NEUTRAL;
+      }
+    }
+
+    // Change the training settings live (the pause menu does this).
+    function setTraining(patch = {}) {
+      if (!training) return null;
+      if (TRAINING_DUMMIES.includes(patch.dummy)) training.dummy = patch.dummy;
+      if (typeof patch.meter === "boolean") training.meter = patch.meter;
+      const d = fighters[1];
+      d.bot = training.dummy === "bot" ? (d.bot || makeBot(d)) : null;
+      // Let go of anything the dummy was holding, so it doesn't fire on the switch.
+      d.prev = { hit: false, heavy: false, boost: false, jump: false, up: false, down: false };
+      state.training = Object.assign({}, training);
+      return state.training;
+    }
+
+    // Both cars back on their marks, full health (training only).
+    function resetPositions() {
+      if (!training) return;
+      resetRound();
+      writeState();
+    }
+
     const fight = {
       cars,
       state,
       events,
       step,
+      setTraining,
+      resetPositions,
+      get training() { return training ? Object.assign({}, training) : null; },
       onEvent(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; },
       rng,
       arena: ARENA,

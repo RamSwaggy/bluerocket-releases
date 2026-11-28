@@ -300,14 +300,14 @@
         else T.cache["cs" + i] = true;
       }
 
-      // ----- Timer: two flip digits -----
+      // ----- Timer: two flip digits (training has no clock: ∞) -----
       const secs = Math.min(99, clockSeconds(state));
-      const digits = String(secs).padStart(2, "0");
+      const digits = state.training ? "∞" : String(secs).padStart(2, "0");
       if (T.cache.timer !== digits) {
         T.cache.timer = digits;
         $("timer").innerHTML = digits.split("").map((d) => `<b>${d}</b>`).join("");
       }
-      setClass($("timer"), "hurry", "hurry", secs <= 10 && phase === "fight");
+      setClass($("timer"), "hurry", "hurry", secs <= 10 && phase === "fight" && !state.training);
 
       // ----- Round bulbs (more appear in sudden death) -----
       const wins = state.roundWins || [0, 0];
@@ -326,7 +326,7 @@
     showHint() {
       const rows = players.map((p, i) => {
         const id = p.controller;
-        if (!id || id === "bot" || id === "off") return "";
+        if (!id || id === "bot" || id === "off" || id === "dummy") return "";
         const k = TP.keyNames(id);
         const pad = id.startsWith("pad");
         const move = pad ? "Stick ←/→" : k.steer;
@@ -376,11 +376,16 @@
     // moves the highlight, A presses, B = "back" ([data-nav-back]), Start
     // presses the main action ([data-nav-primary]). The old menu had no
     // controller support at all, so pads got stuck on it.
-    card(html) {
+    // This is the ONLY place a card gets its MenuNav. (After the round-2
+    // merge, main.js attached a second one on top, so every arrow press
+    // moved the highlight twice and played two ticks.) Pass
+    // opts.onBack for what B / Escape should do; without it, MenuNav
+    // presses the card's [data-nav-back] element.
+    card(html, opts) {
       if (UI._nav) { UI._nav.detach(); UI._nav = null; }
       $("card").innerHTML = html;
       $("overlay").classList.add("show");
-      if (TP.MenuNav) UI._nav = TP.MenuNav.attach($("card"));
+      if (TP.MenuNav) UI._nav = TP.MenuNav.attach($("card"), opts && opts.onBack ? { onBack: opts.onBack } : {});
       return $("card");
     },
     hideCard() {

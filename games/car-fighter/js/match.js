@@ -11,6 +11,8 @@
          &p1= / &p2=     rivet | haulback | skitter (M1: Rivet only)
          &bot=           easy | normal | hard (&bot2= sets the second bot)
          &headless       no rendering, for fast simulations
+         &training       training mode (dummy in seat 2; see fight.js)
+                         &dummy=stand|block|jump|attack|bot
      • reads the hub's saved players (TP.Rumble.loadSetup(), seats 0–1;
        "off" means a bot takes that seat),
      • creates the fight and runs it with a FIXED 60 Hz step: real time
@@ -29,6 +31,11 @@
      TP.Match.setTimeScale(s)   visual slow-motion: 0.25 = quarter speed,
                                 1 = normal (resets on start; headless and
                                 runFrames ignore it)
+     TP.Match.setPaused(on)     pause / resume (pause.js): while paused no
+                                fight step runs, the stage keeps drawing.
+                                On resume, buttons still held from the
+                                pause menu are ignored until let go.
+     TP.Match.isPaused()
      TP.Match.options           the options in use
    A page whose menu starts the fight itself sets
    `TP.MATCH_MANUAL_START = true` before this script; otherwise the fight
@@ -64,6 +71,7 @@ window.TP = window.TP || {};
       p2: str("p2", "rivet"),
       bot,
       bot2: str("bot2", bot),
+      training: params.has("training") ? { dummy: str("dummy", "stand"), meter: true } : null,
     };
   }
 
@@ -85,12 +93,27 @@ window.TP = window.TP || {};
      frame where no fight step runs) must not be lost, so "just pressed"
      flags are OR-ed together until a step uses them. */
   const latched = [{}, {}];
+  // After a resume: per seat, the buttons that were held at that moment.
+  // Each one reads as "not held" until it's released once.
+  const HELD_KEYS = ["jump", "hit", "heavy", "boost"];
+  let ignoreHeld = [{}, {}];
   function readHumans(controllers) {
     const out = [null, null];
     for (let i = 0; i < 2; i++) {
       const id = controllers[i];
-      if (id === "bot" || !TP.Input) continue;
-      const c = TP.Input.get(id);
+      if (id === "bot" || id === "dummy" || !TP.Input) continue;
+      let c = TP.Input.get(id);
+      const ign = ignoreHeld[i];
+      if (Object.keys(ign).length) {
+        c = Object.assign({}, c);
+        for (const k of HELD_KEYS) {
+          if (!ign[k]) continue;
+          if (c[k]) c[k] = false; else delete ign[k];   // let go: back to normal
+        }
+        c.confirmPressed = c.confirmPressed && !ign.jump;
+        c.hitPressed = c.hitPressed && !ign.hit;
+        c.heavyPressed = c.heavyPressed && !ign.heavy;
+      }
       const L = latched[i];
       for (const k of ["confirmPressed", "hitPressed", "heavyPressed", "leftPressed", "rightPressed"]) L[k] = L[k] || !!c[k];
       out[i] = Object.assign({}, c, L);
@@ -99,8 +122,19 @@ window.TP = window.TP || {};
   }
   function clearLatch() { latched[0] = {}; latched[1] = {}; }
 
+  // The same controls with every one-frame "just pressed" flag switched
+  // off (null stays null: that seat is a bot).
+  const PRESS_FLAGS = ["confirmPressed", "hitPressed", "heavyPressed", "leftPressed", "rightPressed"];
+  function withoutPresses(c) {
+    if (!c) return c;
+    const out = Object.assign({}, c);
+    for (const k of PRESS_FLAGS) out[k] = false;
+    return out;
+  }
+
   let current = null; // { fight, scene, options, controllers, timer, running }
   let timeScale = 1;  // see setTimeScale
+  let paused = false; // see setPaused
 
   function start(overrides = {}) {
     stop();
@@ -113,10 +147,12 @@ window.TP = window.TP || {};
       rounds: o.rounds,
       roundTime: o.roundTime,
       seed: o.seed,
+      training: o.training || null,
       scene,
     });
     current = { fight, scene, options: o, controllers, running: true, acc: 0, last: performance.now(), handle: null };
     timeScale = 1;   // slow-motion always resets with a new fight
+    paused = false;
     TP.fight = fight;
     TP.Match.options = o;
     TP.Match.fight = fight;
@@ -148,13 +184,27 @@ window.TP = window.TP || {};
     run.acc += realDt * run.options.speed * (run.options.headless ? 1 : timeScale);
 
     if (TP.Input) TP.Input.poll();
+    if (paused) {
+      // Keep polling (so presses made in the pause menu are used up
+      // there), keep drawing, but don't move the fight on at all.
+      run.acc = 0;
+      clearLatch();
+      if (run.view && run.view.frame) run.view.frame(run.fight.state, 0, run.fight);
+      schedule(run);
+      return;
+    }
     const humans = readHumans(run.controllers);
 
     // Fixed steps. Cap the work per frame so a slow machine can't spiral.
     const maxSteps = Math.ceil(run.options.speed * 6) + 4;
     let steps = 0;
     while (run.acc >= DT && steps < maxSteps) {
-      run.fight.step(humans);
+      // On a slow or 30 Hz screen one rendered frame runs 2+ fight steps.
+      // A "just pressed" flag must reach only the FIRST of them; feeding
+      // it to every step turned one tap into several presses (a single
+      // Hit could chain Jab into Swipe on its own). Held buttons and
+      // sticks still go to every step.
+      run.fight.step(steps === 0 ? humans : humans.map(withoutPresses));
       clearLatch();
       run.acc -= DT;
       steps++;
@@ -191,7 +241,30 @@ window.TP = window.TP || {};
     return timeScale;
   }
 
-  TP.Match = { start, stop, runFrames, runToEnd, readOptions, setTimeScale, getTimeScale: () => timeScale, options: null, fight: null };
+  function setPaused(on) {
+    on = !!on;
+    if (on === paused) return paused;
+    paused = on;
+    if (!on && current && TP.Input) {
+      // Whatever is held right now pressed "Resume" (or is left over from
+      // the menu): ignore it until it's released.
+      ignoreHeld = current.controllers.map((id) => {
+        const ign = {};
+        if (id === "bot" || id === "dummy") return ign;
+        const c = TP.Input.get(id);
+        for (const k of HELD_KEYS) if (c[k]) ign[k] = true;
+        return ign;
+      });
+      current.last = performance.now();   // no time jump after the pause
+    }
+    return paused;
+  }
+
+  TP.Match = {
+    start, stop, runFrames, runToEnd, readOptions, setTimeScale, getTimeScale: () => timeScale,
+    setPaused, isPaused: () => paused,
+    options: null, fight: null,
+  };
 
   window.addEventListener("load", () => {
     if (!TP.MATCH_MANUAL_START) start();

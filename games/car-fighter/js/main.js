@@ -15,6 +15,16 @@
      4. Fight! → save the setup back to the hub → TP.Match.start(...).
      5. Match over → results card: Rematch, Menu, "← All modes".
 
+   Two more ways in from the menu (phase 2 of the round-2 roadmap):
+     TRAINING  car select (your car and the dummy's), then a fight with
+               no clock and no KO against a dummy (fight.js training).
+               training.js shows the damage / combo readout; the pause
+               menu (pause.js) sets what the dummy does.
+     TUTORIAL  straight into training with your car vs Rivet, and
+               training.js walks through 6 short lessons.
+   Esc / P / pad Start pauses any match (pause.js): Resume, Move list,
+   Controls, Restart, Quit to menu.
+
    Every screen works with mouse, keyboard arrows and gamepads through the
    shared TP.MenuNav (the main button on each is marked data-nav-primary).
 
@@ -36,7 +46,6 @@
   const STATS = [["power", "Power"], ["speed", "Speed"], ["weight", "Weight"], ["reach", "Reach"]];
 
   let lastConfig = null;   // what Rematch replays
-  let nav = null;          // the MenuNav on the current card
 
   // Headless runs (fast sims for QC) don't draw anything at all, and a
   // ?demo is started by match.js itself. Every other visit gets the menu,
@@ -64,22 +73,18 @@
   const carReady = (id) => !!(TP.FIGHTERS && TP.FIGHTERS[id]);
   const validCar = (id) => (carReady(id) ? id : TP.DEFAULT_FIGHTER || "rivet");
 
-  /* Show a card and give it gamepad / arrow-key navigation. */
+  /* Show a card. UI.card gives it gamepad / arrow-key navigation (one
+     TP.MenuNav per card); onBack is what B / Escape does on it. */
   function showCard(html, cls, onBack) {
-    if (nav) { nav.detach(); nav = null; }
-    const card = UI.card(html);
+    const card = UI.card(html, { onBack });
     card.className = "card" + (cls ? " " + cls : "");
     // The select screen keeps the middle of the stage clear for the preview;
     // the results card sits low so the winner is on show above it.
     document.getElementById("overlay").classList.toggle("select-mode", cls === "select");
     document.getElementById("overlay").classList.toggle("results-mode", cls === "results");
-    if (TP.MenuNav) nav = TP.MenuNav.attach(card, onBack ? { onBack } : {});
     return card;
   }
-  function hideCard() {
-    if (nav) { nav.detach(); nav = null; }
-    UI.hideCard();
-  }
+  function hideCard() { UI.hideCard(); }
 
   /* ---------- Starting a match ---------- */
   function startMatch(config) {
@@ -90,15 +95,35 @@
     lastConfig = config;
     hideCard();
     try {
-      TP.Match.start(config);
+      const fight = TP.Match.start(config);
+      // Training and the tutorial get their readout / lessons on top.
+      if (config.training && TP.FightTraining) {
+        TP.FightTraining.begin(fight, {
+          tutorial: !!config.tutorial,
+          controller: config.controllers[0],
+          onMenu: backToMenu,
+        });
+      } else if (TP.FightTraining) {
+        TP.FightTraining.end();
+      }
     } catch (err) {
       console.error(err);
       UI.message("Something broke", String((err && err.message) || err), "#f87171");
     }
   }
 
+  // Quit / Menu: reload without any query, so everything starts clean.
+  function backToMenu() { location.href = location.pathname; }
+
+  // The pause menu's Restart and Quit.
+  if (TP.FightPause) TP.FightPause.configure({
+    onRestart: () => { if (lastConfig) startMatch(lastConfig); },
+    onQuit: backToMenu,
+  });
+
   /* The choices being made on the menu and select screens. */
   const pick = {
+    mode: "versus",         // "versus" | "training" | "tutorial"
     setup: null,            // the hub's saved setup (all 4 seats)
     seats: null,            // [{ name, controller, bot }] for seats 1 and 2
     cars: ["rivet", "rivet"],
@@ -160,6 +185,8 @@
         <span class="muted" id="padinfo"></span>
         <span class="muted">Press <kbd>M</kbd> to mute</span>
         <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
+        <button class="btn alt" id="tutorial" title="6 short lessons: move, dodge, guard, combo, throw, signature">Tutorial</button>
+        <button class="btn alt" id="training" title="Practise against a dummy: no clock, no KO">Training</button>
         <button class="btn" id="next" data-nav-primary>Choose cars →</button>
       </div>`);
 
@@ -187,7 +214,8 @@
     window.addEventListener("gamepadconnected", refreshPads);
     window.addEventListener("gamepaddisconnected", refreshPads);
 
-    card.querySelector("#next").addEventListener("click", () => {
+    // Read the two seats off the menu (all three buttons need them).
+    const readSeats = () => {
       pick.seats = [0, 1].map((i) => ({
         name: card.querySelector("#name" + i).value.trim() || pick.setup.slots[i].name,
         controller: card.querySelector("#ctrl" + i).value,
@@ -195,8 +223,18 @@
       }));
       // Two players can't share one controller: the second one becomes a bot.
       if (!isBot(pick.seats[0].controller) && pick.seats[1].controller === pick.seats[0].controller) pick.seats[1].controller = "bot";
-      showSelect();
-    });
+    };
+    card.querySelector("#next").addEventListener("click", () => { readSeats(); pick.mode = "versus"; showSelect(); });
+    card.querySelector("#training").addEventListener("click", () => { readSeats(); pick.mode = "training"; showSelect(); });
+    card.querySelector("#tutorial").addEventListener("click", () => { readSeats(); pick.mode = "tutorial"; fightFromMenu(); });
+  }
+
+  /* Training and the tutorial are one player against the dummy. The
+     player is whoever sits in seat 1, or seat 2's controller if seat 1 is
+     a bot, or keyboard 1 if nobody is set up. */
+  function trainingController() {
+    const human = pick.seats.map((s) => s.controller).find((c) => !isBot(c));
+    return human || "kb1";
   }
 
   /* =====================================================================
@@ -239,7 +277,9 @@
     TP.FightView.preview(pick.cars, true);
     const panel = (i) => `
       <section class="pick p${i + 1}" style="--seat:${TP.PLAYER_CSS[i]}" aria-label="Player ${i + 1} car">
-        <div class="who"><b>P${i + 1}</b> ${esc(pick.seats[i].name)}${isBot(pick.seats[i].controller) ? ` <span class="muted">(Bot · ${esc(pick.seats[i].bot)})</span>` : ""}</div>
+        <div class="who"><b>P${i + 1}</b> ${pick.mode === "training"
+          ? (i ? "Training dummy" : esc(pick.seats[0].name))
+          : esc(pick.seats[i].name) + (isBot(pick.seats[i].controller) ? ` <span class="muted">(Bot · ${esc(pick.seats[i].bot)})</span>` : "")}</div>
         <div class="tiles">
           ${carIds().map((id) => `
             <button class="tile ${pick.cars[i] === id ? "on" : ""}" data-seat="${i}" data-car="${id}" ${carReady(id) ? "" : "disabled"}
@@ -252,12 +292,12 @@
       </section>`;
 
     const card = showCard(`
-      <h2 class="title">Choose your car</h2>
+      <h2 class="title">${pick.mode === "training" ? "Training: your car and the dummy's" : "Choose your car"}</h2>
       ${panel(0)}
       ${panel(1)}
       <div class="actions">
         <button class="btn ghost" id="back" data-nav-back>← Back</button>
-        <button class="btn" id="fight" data-nav-primary>Fight!</button>
+        <button class="btn" id="fight" data-nav-primary>${pick.mode === "training" ? "Start training" : "Fight!"}</button>
       </div>`, "select", () => showMenu());
 
     card.querySelectorAll(".tile").forEach((btn) => btn.addEventListener("click", () => {
@@ -285,6 +325,27 @@
     const slots = pick.setup.slots.map((s, i) => (i < 2 ? { name: seats[i].name, controller: seats[i].controller } : s));
     TP.Rumble.saveSetup(slots);
     savePrefs(Object.assign(loadPrefs(), { bot: [seats[0].bot, seats[1].bot], cars: pick.cars.slice() }));
+
+    // Training / tutorial: one player against the dummy (fight.js
+    // makes seat 2 the dummy whatever its controller says).
+    if (pick.mode === "training" || pick.mode === "tutorial") {
+      const ctrl = trainingController();
+      const tutorial = pick.mode === "tutorial";
+      const config = {
+        rounds: 1, roundTime: 99,
+        p1: pick.cars[0], p2: tutorial ? "rivet" : pick.cars[1],
+        bot: "normal", bot2: "normal",
+        controllers: [ctrl, "dummy"],
+        training: { dummy: "stand", meter: !tutorial },
+        tutorial,
+      };
+      UI.setPlayers([
+        { name: seats[0].name, fighter: carInfo(config.p1).name, controller: ctrl },
+        { name: "Dummy", fighter: carInfo(config.p2).name, controller: "dummy" },
+      ], 1);
+      startMatch(config);
+      return;
+    }
 
     const rounds = Number(params.get("rounds")) || 3;
     const roundTime = Number(params.get("roundTime")) || 60;
@@ -349,9 +410,7 @@
       startMatch(lastConfig);
     });
     // Back to the menu: reload without ?demo, so everything starts clean.
-    card.querySelector("#menu").addEventListener("click", () => {
-      location.href = location.pathname;
-    });
+    card.querySelector("#menu").addEventListener("click", backToMenu);
   };
 
   /* ---------- M = mute / unmute ---------- */

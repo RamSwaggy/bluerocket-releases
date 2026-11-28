@@ -64,7 +64,12 @@ function record(name, ok, detail) {
 
 /* ---------- Browser and page helpers ---------- */
 async function openPage(browser, query, errors) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // A small window: headless Chromium draws WebGL in software, and at
+  // 1280x720 it only manages ~10 frames a second. Each rendered frame then
+  // covers ~6 fight frames, so two keys pressed 30 ms apart land 6 fight
+  // frames apart, past the 3-frame throw window. 640x360 draws about 4x
+  // faster, which is much closer to what a person's browser does.
+  const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
   page.on("pageerror", (e) => errors.push("PAGE ERROR: " + e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push("CONSOLE ERROR: " + m.text()); });
   await page.goto(PAGE + (query || ""));
@@ -130,6 +135,16 @@ const logSince = (page, n) => page.evaluate((n) => __rec.log.slice(n), n);
 // Wait until a fight phase is running (handles round cards and countdowns).
 async function waitForFight(page, ms = 20000) {
   await page.waitForFunction(() => window.TP && TP.fight && TP.fight.state.phase === "fight", null, { timeout: ms });
+}
+
+/* A real key tap: down, held ~50 ms (3 fight frames), up. Playwright's
+   keyboard.press() sends down and up back to back, inside one rendered
+   frame, and the shared input only sees keys that are down when it
+   polls, so a press() is invisible. No person taps that fast. */
+async function tap(page, key, holdMs = 50) {
+  await page.keyboard.down(key);
+  await page.waitForTimeout(holdMs);
+  await page.keyboard.up(key);
 }
 
 /* Make sure we're mid-round and close to the bot, with both cars free to
@@ -235,7 +250,7 @@ async function partMoves(browser, errors) {
 
   // ---- light chain E E E ----
   await attempt(page, "chain", 5, async (s) => {
-    for (let i = 0; i < 3; i++) { await page.keyboard.press("KeyE"); await page.waitForTimeout(120); }
+    for (let i = 0; i < 3; i++) { await tap(page, "KeyE"); await page.waitForTimeout(120); }
     await page.waitForTimeout(700);
     const moves = movesStarted(await logSince(page, s.logLen));
     const ok = moves.slice(0, 3).join(">") === "jab>swipe>spinout";
@@ -244,7 +259,7 @@ async function partMoves(browser, errors) {
 
   // ---- heavy R ----
   await attempt(page, "heavy", 4, async (s) => {
-    await page.keyboard.press("KeyR");
+    await tap(page, "KeyR");
     await page.waitForTimeout(900);
     const moves = movesStarted(await logSince(page, s.logLen));
     return { ok: moves[0] === "ram", detail: `moves ${moves.join(" > ") || "none"}; events ${JSON.stringify(p1Hits(await eventsSince(page, s.nEv)))}` };
@@ -255,7 +270,7 @@ async function partMoves(browser, errors) {
     const d = dirs(s);
     await page.keyboard.down(d.toward);
     await page.waitForTimeout(30);
-    await page.keyboard.press("KeyR");
+    await tap(page, "KeyR");
     await page.waitForTimeout(150);
     await page.keyboard.up(d.toward);
     await page.waitForTimeout(900);
@@ -300,7 +315,7 @@ async function partMoves(browser, errors) {
 
   // ---- sidestep: tap W ----
   await attempt(page, "sidestep", 3, async (s) => {
-    await page.keyboard.press("KeyW");
+    await tap(page, "KeyW");
     await page.waitForTimeout(600);
     const log = await logSince(page, s.logLen);
     const zs = await snap(page);
@@ -309,9 +324,9 @@ async function partMoves(browser, errors) {
 
   // ---- flip kick: Space, then E once airborne ----
   await attempt(page, "flipkick", 4, async (s) => {
-    await page.keyboard.press("Space");
+    await tap(page, "Space");
     await page.waitForTimeout(120);
-    await page.keyboard.press("KeyE");
+    await tap(page, "KeyE");
     await page.waitForTimeout(1000);
     const log = await logSince(page, s.logLen);
     const moves = movesStarted(log);
