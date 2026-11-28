@@ -86,7 +86,8 @@ time of the pause.
 - Smoke PASS on all 3 pairings.
 
 **Unfinished:**
-- **QC JOB 4** (on `team/car-fighter-qc`, possibly partly pushed): update
+- **QC JOB 4** (on `team/car-fighter-qc` at **`d9e8ecd`**, pushed but **never run**, so it's
+  unverified and **not merged**): update
   `tools/car-fighter-human.js` for the M2 menu.
   - The flow is now `#next` → character select → `#fight`. The old `#start` is gone, so the
     tool currently times out.
@@ -97,7 +98,8 @@ time of the pause.
   - **This is the last gate before M2 goes to the Director.**
 
 **Next steps when resumed:**
-1. Merge whatever QC pushed, and finish QC JOB 4. Fix any bugs it finds first.
+1. Have QC run `d9e8ecd` (human.js on all 3 cars, plus the sim matrix), fix the tool if needed,
+   then merge it. Fix any bugs it finds first.
 2. Send M2 (`team/car-fighter`) to the Director to merge into the base branch.
 3. M3 (DESIGN.md §10): training mode (Art's move-list overlay, built from TP.MOVES input), a
    3-segment super, more stages (rooftop, car wash), and moving fx and sfx into `shared/`
