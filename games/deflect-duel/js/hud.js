@@ -102,7 +102,7 @@
 
       const card = TP.HUD.card(`
         <h1><span class="t1">DEFLECT</span> <span class="t2">DUEL</span></h1>
-        <p>One ball, and it speeds up with every hit. It glows in the colour of whoever
+        <p class="blurb">One ball, and it speeds up with every hit. It glows in the colour of whoever
            hit it last and knocks out anyone else it touches. Swing to send it back,
            jump to dodge it. Last car standing wins.</p>
 
@@ -132,7 +132,7 @@
         </table>
 
         <p class="error" id="menu-error"></p>
-        <div class="btn-row">
+        <div class="btn-row sticky">
           <button class="btn" id="start" data-nav-primary>Start duel</button>
           <a class="btn hub" href="${TP.Rumble.HUB_URL}">← All modes</a>
         </div>`);
