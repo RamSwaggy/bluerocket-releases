@@ -254,3 +254,11 @@ This rule applies to **every** session, the Director included:
   - A bunt is a wheels-first touch on the ball. It pops the ball up gently and gives the car its jump and flip back.
   - It's not a button action.
   - Core provides `car.resetAirMoves()` and a wheels-contact check in the shared moveset.
+- **2026-11-28, Deflect Duel speed (Reece):** keep the neutral-bump rule (a bump claims a neutral
+  ball). The speeds should escalate the way the genre does:
+  - multiplicative growth with a top speed around 200+
+  - a hit-freeze that grows to about 1–1.5 s at top speed, with a camera punch-in
+  - swept ball collision, so the ball can't pass through things
+  - bot reaction windows that work at high speed
+
+  v2 replaces v1 on the hub only at "a good playable level" (Reece).
