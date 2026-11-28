@@ -19,7 +19,7 @@ Director merges them after verifying.
 | Turbo Party | ✅ Play | **Active: one builder** (`session_01GHNBrrU9qwu2HbnfzzVvxe`) | Round 2 roadmap in its PROJECT.md: bugs, juice, board life, 14+ minigames, interaction, modes. Merge each phase when it reports. |
 | Car Fighter | ✅ Play (M1, 1 car) | **Active: one builder** (`session_01GHNBrq3cBwRUWBboR2aeNr`) | Round 2 roadmap in its PROJECT.md: QC test, M2 roster + select, pause/training/tutorial, presentation, modes (4-player bracket), stages. |
 | Deflect Duel | ✅ Play (v2) | **Active: boss only** | Round 3 roadmap in its PROJECT.md (feel, practice/tutorial/modes, presentation, arenas, car styles, cosmetics). |
-| Boost Runner | Coming soon | **Paused** | Logic done (bot rounds, fair seats). Job 3 (bot difficulty spread, softer squeeze) was in progress. Art/menus not merged yet. Put it on the hub when it's playable and verified. |
+| Boost Runner | Coming soon | **Active: one builder** (`session_01GHNBrqDAAo8qpnUjEsWJJW`) | Round 2 roadmap (in its prompt; it pastes it into PROJECT.md on team/boost-runner). Phase 0 = playable → "ready for hub": verify with the hub-listing steps above. |
 | Surprise (mode 5) | Not listed | **Active: boss only** | **No-spoilers rule** (`TEAMS.md`). Never describe, show or ask Reece about it. Reveal only when the Surprise boss says "Mode 5: ready for reveal" and the Director has verified it. |
 | Core (car physics) | — | **Idle** | The rocket moveset is merged (opt-in `{ moveset: "rocket" }`). Possible next job: ramps and wall driving (`world.surfaceAt` plan in `car.js` comments). |
 
