@@ -42,8 +42,8 @@ TP.BR = TP.BR || {};
     // Minimum speed of the trailing edge (units/s), by race time:
     minSpeedDelay: 2,       // nothing for the first 2 s after GO
     minSpeedStart: 6,
-    minSpeedEnd: 26,        // near full boost (27): nobody can hold it for long, so rounds end
-    minSpeedTime: 80,       // reaches minSpeedEnd at this race time (passes 17 at ~42 s, 22 at ~62 s)
+    minSpeedEnd: 22,        // above gas (17) and above what a pack holds without boosting
+    minSpeedTime: 90,       // reaches minSpeedEnd at this race time (passes 17 at ~62 s)
     suddenDeathAt: 120,     // the hard backstop
     suddenDeathRamp: 6,     // after it, the minimum speed climbs this much per second
     aspectMin: 4 / 3,
