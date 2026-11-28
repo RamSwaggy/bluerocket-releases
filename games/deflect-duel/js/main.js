@@ -145,12 +145,14 @@
           data.owner ? data.owner.css : "", 1.6);
         break;
       case "bunt":
-        TP.sfx.play("swing");
-        TP.HUD.toast("BUNT", data.player.css, 0.7);
+        // The thunk, ring and wheel glow come from Art's onBunt hook (arena.js).
+        // Only fall back to our own cue when that look isn't loaded.
+        if (!TP.DuelArena) { TP.sfx.play("swing"); TP.HUD.toast("BUNT", data.player.css, 0.7); }
         break;
       case "clash":
         TP.sfx.play("hit", 1);
-        TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
+        // The big flash and the "CLASH!" toast come from Art's onClash hook.
+        if (!TP.DuelArena) TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
         break;
       case "stalemate":
         TP.HUD.toast("Nobody hit it: re-serve", "", 1.2);

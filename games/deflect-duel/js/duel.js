@@ -548,7 +548,12 @@
         p.hitBuffered = false;
         p.prevHit = !!ctrl.hit;
         p.lastSteer = ctrl.steer || 0;
-        p.lastThrottle = ctrl.throttle || 0;
+        // Strike aim (up / straight / down) comes from the "pitch" axis:
+        // the stick's up/down on a gamepad, W/S (or ↑/↓) on a keyboard. On a
+        // gamepad the throttle is the triggers, so holding gas must NOT aim
+        // the strike up. Bots and test inputs that don't send pitch aim
+        // with throttle instead.
+        p.lastThrottle = (ctrl.pitch !== undefined && !this.bots[i] && !this.inputOverride[i]) ? ctrl.pitch : (ctrl.throttle || 0);
         if (pressed && p.swingT <= 0 && p.cooldown <= 0) {
           p.swingT = C.swingTime;
           p.swingHit = false;
@@ -803,7 +808,7 @@
       // A flip strike hits harder.
       if (flip) speed = Math.min(C.maxSpeed, speed + C.flipBonus);
 
-      // Aim: up / straight / down from the throttle axis, bent sideways
+      // Aim: up / straight / down from the pitch axis (stick up/down or W/S; see _stepCars), bent sideways
       // by steering. Steering right (+1) lowers the heading (see car.js),
       // so the bend is subtracted.
       let angle = "straight", elev = 0;
