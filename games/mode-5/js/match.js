@@ -198,6 +198,7 @@ TP.M5 = TP.M5 || {};
       this._pickupId = 0;
       this.trailAge = [0, 0, 0, 0];  // seconds each player's current trail has existed
       this.out = [false, false, false, false]; // has each car left home since its last close?
+      this.outT = [0, 0, 0, 0];                // and for how long
       this._bumpCd = {};             // "a-b" → seconds until that pair can hard-bump again
       this.roundWinner = null;
       this._frozenT = 0;             // self-check: time with no paint change during play
@@ -258,7 +259,11 @@ TP.M5 = TP.M5 || {};
       }
 
       // 1) Drive every car (humans and bots give the same control shape).
-      for (const car of this.cars) this._driveCar(car, dt);
+      //    The order rotates every step: whoever goes first wins a "we
+      //    both crossed each other's trail this step" tie, so no seat may
+      //    always be first.
+      this._turn = ((this._turn || 0) + 1) % 4;
+      for (let k = 0; k < 4; k++) this._driveCar(this.cars[(this._turn + k) % 4], dt);
 
       // 2) Car-vs-car bumps.
       this._bumps(dt);
@@ -301,6 +306,7 @@ TP.M5 = TP.M5 || {};
         ctrl = TP.Input.get(car.player.controller);
       }
       if (car.mega > 0) car.mega = Math.max(0, car.mega - dt);
+      if (this.out[p]) this.outT[p] += dt;
       if (car.grace > 0) car.grace = Math.max(0, car.grace - dt);
 
       const prev = { x: car.pos.x, y: car.pos.y, z: car.pos.z, onGround: car.onGround, surfVy: car._surfVy };
@@ -333,7 +339,7 @@ TP.M5 = TP.M5 || {};
           const k = clamp((air - CFG.landAir[0]) / (CFG.landAir[1] - CFG.landAir[0]), 0, 1);
           const r = lerp(CFG.landR[0], CFG.landR[1], k) * this._mul();
           this._emit("land", { player: p, airtime: air, x: car.pos.x, z: car.pos.z });
-          this._paintCar(car, r, true);
+          this._paintCar(car, r, true, prev);
           this._emit("splat", { player: p, x: car.pos.x, z: car.pos.z, r: r * this.grid.cs });
           if (air > 0.6) this._hint("land", p);
         }
@@ -342,7 +348,7 @@ TP.M5 = TP.M5 || {};
       // The stripe under the car: wider with boost, widest with Mega Roller.
       if (car.boosting) this._hint("boost", p);
       const r = (car.mega > 0 ? CFG.megaR : car.boosting ? CFG.boostR : CFG.paintR) * this._mul();
-      this._paintCar(car, r, false);
+      this._paintCar(car, r, false, prev);
     }
 
     _mul() { return this.overdrive ? CFG.overdriveMul : 1; }
@@ -391,7 +397,7 @@ TP.M5 = TP.M5 || {};
        fresh paint in front of the car every step, so it never left home.)
 
        Finally, anyone whose wet trail the paint touched gets popped. */
-    _paintCar(car, r, isSplat) {
+    _paintCar(car, r, isSplat, prev) {
       const p = car.index, g = this.grid;
       const hadTrail = g.hasTrail(p);
       const res = g.paintCircle(car.pos.x, car.pos.z, r, p, true);
@@ -400,8 +406,12 @@ TP.M5 = TP.M5 || {};
 
       const home = g.isHome(g.cellAt(car.pos.x, car.pos.z), p);
       if (!home) {
+        if (!this.out[p]) this.outT[p] = 0;
         this.out[p] = true;
-      } else if (this.out[p]) {
+      }
+      // (The clip window only opens once we've been out a moment, so the
+      // jagged edge of our turf can't "close" us on the way out.)
+      if (this.out[p] && (home || (this.outT[p] > 0.2 && this._clipsHome(car, prev)))) {
         // Back in from outside: close the loop (if the trail survived).
         this.out[p] = false;
         if (g.hasTrail(p)) this._closeLoop(p);
@@ -412,6 +422,31 @@ TP.M5 = TP.M5 || {};
         this._hint("trail", p);
       }
       if (res.hitWet) this._popMask(res.hitWet, p);
+    }
+
+    /* Clip window: a fill should count when you clip your turf at speed,
+       not only when the car's exact centre lands on it. So coming back in,
+       the loop also closes if either FRONT corner of the car is on home
+       turf, or if the centre passed over a home cell between the last
+       step and this one. (Only the front: on the way OUT, the back of the
+       car is still on your turf, and that mustn't close anything.) */
+    _clipsHome(car, prev) {
+      const g = this.grid, p = car.index;
+      const f = car.forward(), reach = CFG.clipReach;
+      for (const side of [-0.7, 0.7]) {
+        const x = car.pos.x + f.x * reach - f.z * side, z = car.pos.z + f.z * reach + f.x * side;
+        if (g.isHome(g.cellAt(x, z), p)) return true;
+      }
+      // (Swept check only when we were outside last step; leaving home,
+      // the path behind us is home and must not count.)
+      if (prev && !g.isHome(g.cellAt(prev.x, prev.z), p)) {
+        const d = Math.hypot(car.pos.x - prev.x, car.pos.z - prev.z), n = Math.ceil(d / (g.cs * 0.5));
+        for (let k = 1; k < n; k++) {
+          const t = k / n;
+          if (g.isHome(g.cellAt(prev.x + (car.pos.x - prev.x) * t, prev.z + (car.pos.z - prev.z) * t), p)) return true;
+        }
+      }
+      return false;
     }
 
     /* Close p's loop: the trail dries, the flood fill runs. Fills under
@@ -515,20 +550,36 @@ TP.M5 = TP.M5 || {};
       }
     }
 
-    // A pickup appears on open floor, away from obstacles, ramps and cars.
+    /* Where a pickup appears: open floor away from obstacles, ramps, cars
+       and other pickups, and never deep inside someone's turf (that would
+       just be a free gift to the owner). Among 30 random spots we prefer
+       CONTESTED floor: unpainted, or where several colours meet. */
     _spawnPickup() {
-      const A = this.arena, U = TP.util;
-      for (let tries = 0; tries < 40; tries++) {
+      const A = this.arena, g = this.grid, U = TP.util;
+      let best = null, bestScore = -Infinity;
+      for (let tries = 0; tries < 30; tries++) {
         const x = U.rand(-A.half + 8, A.half - 8), z = U.rand(-A.half + 8, A.half - 8);
         if (A.solidAt(x, z, 4) || A.rampAt(x, z)) continue;
         if (this.cars.some((c) => dist2D(c.pos.x, c.pos.z, x, z) < 10)) continue;
         if (this.pickups.some((o) => dist2D(o.x, o.z, x, z) < 14)) continue;
-        const y = A.groundHeightAt(x, z);
-        const pk = { id: ++this._pickupId, kind: U.pick(TP.M5.PICKUP_KINDS), x, z, y };
-        this.pickups.push(pk);
-        TP.M5.emit("pickupSpawn", { id: pk.id, kind: pk.kind, x, z, y });
-        return;
+        // Look at the 7×7 cells around the spot.
+        const owners = new Set();
+        let empty = 0, n = 0;
+        for (let dj = -3; dj <= 3; dj++) for (let di = -3; di <= 3; di++) {
+          const c = g.cellAt(x + di * g.cs, z + dj * g.cs);
+          if (c < 0 || g.blocked[c]) continue;
+          n++;
+          if (g.owner[c]) owners.add(g.owner[c]); else empty++;
+        }
+        if (!n || (owners.size === 1 && empty === 0)) continue; // someone's turf interior
+        const score = empty / n + (owners.size - 1) * 0.5 + U.rand(0, 0.3);
+        if (score > bestScore) { bestScore = score; best = { x, z }; }
       }
+      if (!best) return;
+      const y = A.groundHeightAt(best.x, best.z);
+      const pk = { id: ++this._pickupId, kind: U.pick(TP.M5.PICKUP_KINDS), x: best.x, z: best.z, y };
+      this.pickups.push(pk);
+      TP.M5.emit("pickupSpawn", { id: pk.id, kind: pk.kind, x: pk.x, z: pk.z, y });
     }
 
     _grab(car, pk) {

@@ -348,7 +348,9 @@ TP.M5 = TP.M5 || {};
       const car = this.car;
       let best = null, bestD = this.levelName === "easy" ? 10 : this.levelName === "hard" ? 22 : 16;
       for (const pk of this.match.pickups) {
-        const d = dist2D(car.pos.x, car.pos.z, pk.x, pk.z);
+        // A Mega Roller is worth a longer detour for smarter bots: it's a
+        // free, un-poppable big loop.
+        const d = dist2D(car.pos.x, car.pos.z, pk.x, pk.z) / (pk.kind === "mega" && this.levelName !== "easy" ? 1.5 : 1);
         // Someone else is clearly closer: don't bother.
         const rivalCloser = this.match.cars.some((o) => o !== car && dist2D(o.pos.x, o.pos.z, pk.x, pk.z) < d * 0.6);
         if (d < bestD && !rivalCloser) { bestD = d; best = { x: pk.x, z: pk.z }; }
@@ -362,8 +364,15 @@ TP.M5 = TP.M5 || {};
     _plan() {
       const m = this.match, g = m.grid, A = m.arena, car = this.car, p = car.index, L = this.L;
       const x0 = car.pos.x, z0 = car.pos.z;
-      const greed = L.greed + (m.overdrive ? 0.45 : 0);
-      const sizeMul = m.overdrive ? 1.25 : 1;
+      /* How bold to be. Tight by default; bigger when it's safe (no rival
+         near), in Overdrive (one last greedy push: that's where the lead
+         swings come from), and with a Mega Roller (our trail can't be
+         popped while it lasts, so risk barely matters). */
+      const nearest = Math.min(...this._rivals().map((o) => dist2D(o.pos.x, o.pos.z, x0, z0)), Infinity);
+      const safe = nearest > 22;
+      const mega = car.mega > 1.5;
+      const greed = L.greed + (safe ? 0.4 : 0) + (m.overdrive ? 0.9 : 0) + (mega ? 3 : 0);
+      const sizeMul = (m.overdrive ? 1.4 : 1) * (mega || safe ? 1.2 : 1);
       const rivals = this._rivals();
 
       /* Pass 1: list loop shapes that fit, with a cheap first guess of
@@ -380,7 +389,8 @@ TP.M5 = TP.M5 || {};
         const c = g.nearest(pt.x, pt.z, (k) => g.isHome(k, p), 30);
         return c < 0 ? null : g.centerOf(c);
       };
-      const maxLen = L.maxTrail * (L.reserve >= 35 ? 21 : L.reserve ? 19 : 15);
+      // With Mega, the trail is safe only while Mega lasts (wide paint, fast).
+      const maxLen = Math.max(L.maxTrail * (L.reserve >= 35 ? 21 : L.reserve ? 19 : 15), mega ? car.mega * 22 : 0);
 
       /* Where can a loop start? Right here, or (when we're deep inside our
          own colour, so a loop from here would just repaint our own floor)
@@ -469,7 +479,9 @@ TP.M5 = TP.M5 || {};
         if (len < 8 || len > maxLen || !this._pathOk(pts)) continue;
         const gain = g.estimateLoop(p, pts);
         if (gain < 20) continue;
-        cands.push({ pts: [...pts, pts[pts.length - 1]], len, pre: ch[0].pre, quick: gain, gain, turn: 0, kind: "loop", exact: true });
+        // Hard bots actively want chords: they're the big-fill play.
+        const bonus = this.levelName === "hard" ? 1.25 : 1;
+        cands.push({ pts: [...pts, pts[pts.length - 1]], len, pre: ch[0].pre, quick: gain * bonus, gain: gain * bonus, turn: 0, kind: "loop", exact: true });
       }
 
       // Too long to finish before the trail dries? Drop it.
