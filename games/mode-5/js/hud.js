@@ -71,6 +71,8 @@
   .m5-chip .pips { display: inline-flex; gap: 3px; }
   .m5-chip .pip { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid currentColor; }
   .m5-chip .pip.on { background: currentColor; }
+  .m5-chip.win { border-color: currentColor; box-shadow: 0 0 16px currentColor; }
+  .m5-team { align-self: center; font-size: 11px; font-weight: 800; letter-spacing: .12em; color: #9aa6c8; padding: 0 2px 0 6px; }
   @media (max-width: 520px) { .m5-chip .nm { display: none; } .m5-chip { padding: 2px 7px 2px 4px; gap: 4px; }
     .m5-chip .pct { min-width: 2.4em; } .m5-chip .pips { gap: 2px; } .m5-chip .pip { width: 6px; height: 6px; } }
 
@@ -108,13 +110,15 @@
   @keyframes m5-fadeout { to { opacity: 0; transform: translateY(-50%) scale(.9); } }
 
   /* ----- Floating numbers over the arena ----- */
-  .m5-float { position: absolute; transform: translate(-50%, -50%); font-weight: 900; font-style: italic;
-    white-space: nowrap; text-shadow: 0 3px 0 rgba(0,0,0,.6), 0 0 18px currentColor;
-    -webkit-text-stroke: 1px rgba(0,0,0,.5); animation: m5-rise 1.3s ease-out both; }
-  @keyframes m5-rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.5); }
-    15% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-    30% { transform: translate(-50%, -55%) scale(1); }
-    100% { opacity: 0; transform: translate(-50%, -140%) scale(1); } }
+  /* Floating numbers start just above the car and rise away. */
+  .m5-float { position: absolute; transform: translate(-50%, -100%); font-weight: 900; font-style: italic;
+    white-space: nowrap; text-shadow: 0 2px 0 rgba(0,0,0,.6), 0 0 12px currentColor;
+    -webkit-text-stroke: 1px rgba(0,0,0,.45); animation: m5-rise .9s ease-out both; }
+  .m5-float.huge { text-shadow: 0 3px 0 rgba(0,0,0,.6), 0 0 18px currentColor, 0 0 40px currentColor; }
+  @keyframes m5-rise { 0% { opacity: 0; transform: translate(-50%, -60%) scale(.6); }
+    15% { opacity: 1; transform: translate(-50%, -100%) scale(1.12); }
+    30% { transform: translate(-50%, -110%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -260%) scale(1); } }
 
   /* ----- Hint pill at the bottom ----- */
   .m5-hint { position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -125,19 +129,32 @@
   .m5-hint b { color: var(--m5-gold); }
 
   /* ----- Round / match cards ----- */
-  .m5-card-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    padding: 16px; background: radial-gradient(ellipse at center, rgba(4,5,14,.35), rgba(4,5,14,.75)); opacity: 0;
-    transition: opacity .35s; }
+  /* The results card never covers the floor's middle: on wide screens it's
+     a side panel on the right, on tall screens a bottom sheet. The camera
+     reads its size (safe area) and frames the floor in the rest. */
+  .m5-card-wrap { position: absolute; inset: 0; display: flex; opacity: 0; transition: opacity .35s; pointer-events: none; }
   .m5-card-wrap.show { opacity: 1; }
-  .m5-card { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: clamp(16px, 3vw, 28px);
-    border-radius: 22px; background: rgba(12, 15, 36, .94); border: 2px solid var(--m5-line);
-    box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset; transform: translateY(14px);
-    transition: transform .35s; }
+  .m5-card { overflow: auto; padding: clamp(14px, 2.4vw, 24px); background: rgba(12, 15, 36, .93);
+    border: 2px solid var(--m5-line); box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset;
+    transition: transform .45s cubic-bezier(.2,.9,.25,1); }
+  .m5-card-wrap.side { justify-content: flex-end; align-items: center; padding: 16px max(16px, env(safe-area-inset-right)) 16px 16px; }
+  .m5-card-wrap.side .m5-card { width: min(380px, 38vw); max-height: calc(100vh - 32px); border-radius: 22px; transform: translateX(110%); }
+  .m5-card-wrap.sheet { justify-content: center; align-items: flex-end; }
+  .m5-card-wrap.sheet .m5-card { width: 100%; max-width: 640px; max-height: 54vh; border-radius: 22px 22px 0 0;
+    padding-bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(110%); }
   .m5-card-wrap.show .m5-card { transform: none; }
+  /* Big screens: scale the whole side panel up so it reads from the couch. */
+  @media (min-width: 1500px) and (min-height: 800px) { .m5-card-wrap.side .m5-card { zoom: 1.3; width: min(380px, 30vw); } }
+  @media (max-height: 500px) {
+    .m5-card-wrap.side .m5-card { width: min(330px, 42vw); padding: 12px 14px; }
+    .m5-card h2 { font-size: 24px !important; margin-bottom: 8px !important; }
+    .m5-row { margin: 4px 0 !important; }
+    .m5-stats { font-size: 12px !important; margin-top: 8px !important; }
+  }
   .m5-card .kicker { font-size: 13px; letter-spacing: .18em; color: #9aa6c8; text-transform: uppercase; }
-  .m5-card h2 { margin: 2px 0 14px; font-size: clamp(28px, 6vw, 44px); font-style: italic; font-weight: 900; line-height: 1;
+  .m5-card h2 { margin: 2px 0 14px; font-size: clamp(26px, 3.4vw, 40px); font-style: italic; font-weight: 900; line-height: 1;
     text-shadow: 0 0 24px var(--glow, transparent); }
-  .m5-row { display: grid; grid-template-columns: minmax(70px, 7em) 1fr 3.6em; gap: 10px; align-items: center; margin: 8px 0; }
+  .m5-row { display: grid; grid-template-columns: minmax(64px, 6.5em) 1fr 3.4em; gap: 10px; align-items: center; margin: 8px 0; }
   .m5-row .nm { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .m5-row .track { height: 18px; border-radius: 999px; background: #1a2042; overflow: hidden; }
   .m5-row .fill { display: block; height: 100%; width: 0; border-radius: 999px; transition: width 1.1s cubic-bezier(.2,.8,.2,1);
@@ -214,14 +231,20 @@
     // New match: clear anything left over from the last one.
     reset() {
       this.hideCard();
+      this.countUp = null;
       this.clearBanner();
-      clearTimeout(this.cardTimer);
       this.overdrive = false;
       this.countdownLeft = 0;
       this.floatLayer.innerHTML = "";
       this.timerEl.classList.remove("warn", "od");
     }
-    setPlayers(players) { this.players = players; this.buildBar(); }
+    // teams: true when the match is 2v2 (players carry .team); chips are
+    // then grouped by team with a small label in front of each group.
+    setPlayers(players, teams = false) {
+      this.teams = !!teams;
+      this.players = this.teams ? players.slice().sort((a, b) => (a.team ?? 0) - (b.team ?? 0) || a.index - b.index) : players;
+      this.buildBar();
+    }
     show(on) { this.root.style.display = on ? "" : "none"; this.measureSafeArea(); }
     showTop(on) { this.root.querySelector(".m5-top").style.visibility = on ? "" : "hidden"; }
 
@@ -230,12 +253,18 @@
       const ps = this.players || [];
       this.barEl.innerHTML = "";
       this.chipsEl.innerHTML = "";
+      let lastTeam = null;
       this.segs = ps.map((p) => {
         const i = p.index ?? 0;
+        if (this.teams && p.team !== lastTeam) {
+          lastTeam = p.team;
+          el("span", "m5-team", this.chipsEl).textContent = `TEAM ${(p.team ?? 0) + 1}`;
+        }
         const seg = el("div", "m5-seg", this.barEl);
         seg.style.background = CSS()[i % 4];
         seg.style.width = "0%";
         const chip = el("div", "m5-chip", this.chipsEl);
+        chip.dataset.i = i;
         chip.style.color = CSS()[i % 4];
         chip.innerHTML = `<span class="dot"></span><span class="nm" style="color:#f2f5ff">${esc(p.name)}</span>
           <span class="pct" style="color:#f2f5ff">0%</span><span class="pips"></span>`;
@@ -260,7 +289,15 @@
       }
 
       // Score bar + chips (only touch the DOM when a value changes).
-      const pcts = toPercents(state.scores);
+      // After a round ends the bars count up from zero to the final floor.
+      let pcts = toPercents(state.scores);
+      if (this.countUp) {
+        const c = this.countUp;
+        c.t += dt;
+        const u = Math.min(1, c.t / c.dur), ease = 1 - Math.pow(1 - u, 3);
+        pcts = c.final.map((v) => v * ease);
+        if (u >= 1) this.countUp = null;
+      }
       if (pcts && this.segs.length) {
         const lead = Math.max(...pcts);
         this.segs.forEach((s, k) => {
@@ -282,6 +319,12 @@
             s.pips.innerHTML = Array.from({ length: need }, (_, n) => `<span class="pip ${n < wins ? "on" : ""}"></span>`).join("");
           }
         });
+      }
+
+      // A card waiting to slide in (counted in game time, so ?speed works).
+      if (this.pending) {
+        this.pending.t -= dt;
+        if (this.pending.t <= 0) { const fn = this.pending.fn; this.pending = null; fn(); }
       }
 
       // Tell the camera how much of the screen the HUD covers (top / bottom),
@@ -311,8 +354,8 @@
     }
 
     measureSafeArea() {
-      const H = innerHeight || 1;
-      let top = 0, bottom = 0;
+      const W = innerWidth || 1, H = innerHeight || 1;
+      let top = 0, bottom = 0, right = 0;
       if (this.root.style.display !== "none") {
         for (const e of [this.timerEl, this.barEl, this.chipsEl]) {
           const r = e.getBoundingClientRect();
@@ -320,9 +363,17 @@
           if (r.top + r.height / 2 < H / 2) top = Math.max(top, r.bottom / H);
           else bottom = Math.max(bottom, (H - r.top) / H);
         }
+        // An open results card: side panel → right edge, bottom sheet → bottom.
+        if (this.cardWrap.classList.contains("show")) {
+          const r = this.cardWrap.firstElementChild && this.cardWrap.firstElementChild.getBoundingClientRect();
+          if (r && r.width) {
+            if (this.cardWrap.classList.contains("side")) right = (W - r.left) / W;
+            else bottom = Math.max(bottom, (H - r.top) / H);
+          }
+        }
       }
       // A little breathing room past the HUD edge.
-      TP.M5.safeArea = { top: top ? top + 0.01 : 0, bottom: bottom ? bottom + 0.01 : 0 };
+      TP.M5.safeArea = { top: top ? top + 0.01 : 0, bottom: bottom ? bottom + 0.01 : 0, left: 0, right: right ? right + 0.01 : 0 };
     }
 
     /* ---------- Big centre banner ----------
@@ -347,22 +398,32 @@
     }
 
     /* ---------- Floating text at a world position ---------- */
-    floater(text, x, z, color = "#fff", size = 1) {
+    /* size: 0.5 (small) … 1.6 (huge). Font scales with the smaller screen
+       side (vmin), so it's the same share of the screen on a phone or a TV. */
+    floater(text, x, z, color = "#fff", size = 1, life = 0.9) {
       let left = 50, top = 45;
       if (this.camera) {
-        const v = new THREE.Vector3(x, 1.5, z).project(this.camera);
-        left = Math.min(88, Math.max(12, (v.x * 0.5 + 0.5) * 100));
-        top = Math.min(85, Math.max(18, (-v.y * 0.5 + 0.5) * 100));
+        const v = new THREE.Vector3(x, 3.2, z).project(this.camera);   // just above the car
+        left = Math.min(90, Math.max(10, (v.x * 0.5 + 0.5) * 100));
+        top = Math.min(88, Math.max(16, (-v.y * 0.5 + 0.5) * 100));
       }
-      const f = el("div", "m5-float", this.floatLayer);
+      const f = el("div", "m5-float" + (size >= 1.4 ? " huge" : ""), this.floatLayer);
       f.style.left = left + "%";
       f.style.top = top + "%";
       f.style.color = color;
-      f.style.fontSize = `clamp(${Math.round(22 * size)}px, ${(4.5 * size).toFixed(1)}vw, ${Math.round(64 * size)}px)`;
+      f.style.fontSize = `clamp(13px, ${(2.4 * size + 0.6).toFixed(2)}vmin, ${Math.round(18 + 34 * size)}px)`;
+      f.style.animationDuration = life + "s";
       f.textContent = text;
       f.addEventListener("animationend", () => f.remove());
       // Safety net in case animationend never fires (hidden tab, reduced motion).
-      setTimeout(() => f.remove(), 2000);
+      setTimeout(() => f.remove(), life * 1000 + 600);
+    }
+
+    // World position of a player's car, or null.
+    carPos(p) {
+      const m = TP.M5.match;
+      const car = m && m.cars ? m.cars[TP.M5.pi(p)] : null;
+      return car ? car.pos : null;
     }
 
     /* ---------- Hint pill ---------- */
@@ -375,6 +436,7 @@
 
     /* ---------- Round end card ---------- */
     roundCard(e = {}, state = TP.M5.match || {}) {
+      this.layoutCard();
       const ps = this.players || [];
       const pcts = toPercents(e.scores || state.scores) || ps.map(() => 0);
       const winner = e.winner;
@@ -399,7 +461,10 @@
        e.standings: player indices best-first (or [{index, ...}])
        e.stats:     per player { bestFill, pops, painted, distance, ... } — any keys shown */
     matchCard(e = {}) {
+      this.layoutCard();
       const ps = this.players || [];
+      const st = TP.M5.match || {};
+      const oneRound = (st.rounds || 0) <= 1 || !e.roundWins;
       const nameOf = (i) => { const p = ps.find((q, k) => (q.index ?? k) === i); return p ? p.name : `P${i + 1}`; };
       const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.player ?? s.index));
       const champ = order[0];
@@ -417,19 +482,29 @@
       this.openCard(`
         <div class="kicker">Match over</div>
         <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${draw ? "It's a draw!" : esc(nameOf(champ)) + " wins!"}</h2>
-        <div class="m5-row head"><span>Player</span><span>Rounds won</span><span style="text-align:right">Wins</span></div>
+        <div class="m5-row head"><span>Player</span><span>${oneRound ? "Final floor" : "Rounds won"}</span><span style="text-align:right">${oneRound ? "%" : "Wins"}</span></div>
         ${order.map((i, rank) => {
-          // Bar = rounds won, as a share of the most anyone won.
+          // One round: bars = final % of the floor. Several: bars = rounds won.
+          const sd = (e.standings || []).find((x) => x && x.player === i);
+          const pct = sd && sd.totalPct != null ? sd.totalPct : (toPercents(st.scores) || [])[i] || 0;
           const wins = e.roundWins ? e.roundWins[i] || 0 : 0;
           const most = e.roundWins ? Math.max(1, ...e.roundWins) : 1;
-          return `<div class="m5-row ${rank === 0 ? "win" : ""}" style="color:${CSS()[i % 4]}">
+          const w = oneRound ? Math.min(100, pct) : (wins / most) * 100;
+          return `<div class="m5-row ${rank === 0 && !draw ? "win" : ""}" style="color:${CSS()[i % 4]}">
           <span class="nm" style="color:#f2f5ff">${rank + 1}. ${esc(nameOf(i))}</span>
-          <span class="track"><span class="fill" data-w="${e.roundWins ? (wins / most) * 100 : 100 - rank * 22}"></span></span>
-          <span class="val" style="color:#f2f5ff">${e.roundWins ? wins : ""}</span></div>`;
+          <span class="track"><span class="fill" data-w="${w.toFixed(1)}"></span></span>
+          <span class="val" style="color:#f2f5ff">${oneRound ? Math.round(pct) + "%" : wins}</span></div>`;
         }).join("")}
         ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
           ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
             ${keys.map((k) => `<td>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
+    }
+
+    // Side panel on wide screens, bottom sheet on tall ones.
+    layoutCard() {
+      const side = innerWidth / Math.max(1, innerHeight) >= 1.1;
+      this.cardWrap.classList.toggle("side", side);
+      this.cardWrap.classList.toggle("sheet", !side);
     }
 
     openCard(html) {
@@ -439,8 +514,13 @@
       this.cardWrap.classList.add("show");
       // Let the bars grow from zero (CSS transition) a moment after showing.
       setTimeout(() => this.cardWrap.querySelectorAll(".fill").forEach((f) => { f.style.width = f.dataset.w + "%"; }), 60);
+      setTimeout(() => this.measureSafeArea(), 500);
     }
-    hideCard() { this.cardWrap.classList.remove("show"); }
+    hideCard() {
+      this.cardWrap.classList.remove("show");
+      this.pending = null;
+      this.segs.forEach((s) => s.chip.classList.remove("win"));
+    }
 
     /* ---------- Events ---------- */
     listen() {
@@ -483,29 +563,41 @@
         // Tiny fills (closing a loop around a sliver) happen constantly;
         // only real ones earn a number on screen.
         if (pct < 0.5) return;
-        // Big fills get a bigger number.
-        const size = pct >= 10 ? 1.5 : pct >= 4 ? 1.15 : 0.85;
-        this.floater(`FILL +${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`, e.cx || 0, e.cz || 0, colorOf(e.player), size);
+        // Size grows with the fill: small for 1–3 %, big and loud from 10 %.
+        const size = pct >= 10 ? 1.6 : pct >= 3 ? 0.7 + ((pct - 3) / 7) * 0.6 : 0.5;
+        const p = this.carPos(e.player) || { x: e.cx || 0, z: e.cz || 0 };
+        const txt = `+${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`;
+        this.floater(pct >= 10 ? `FILL ${txt}!` : txt, p.x, p.z, colorOf(e.player), size, pct >= 10 ? 1.4 : 0.9);
       });
-      on("pop", (e) => this.floater("POPPED!", e.x || 0, e.z || 0, colorOf(e.victim), 0.9));
+      on("pop", (e) => this.floater("POPPED!", e.x || 0, e.z || 0, colorOf(e.victim), 0.75, 1.0));
       on("pickup", (e) => {
         const NAMES = { bomb: "PAINT BOMB!", mega: "MEGA ROLLER!", boost: "BOOST!" };
-        const car = (TP.M5.match && TP.M5.match.cars) ? TP.M5.match.cars[TP.M5.pi(e.player)] : null;
-        if (car) this.floater(NAMES[e.kind] || "PICKUP!", car.pos.x, car.pos.z, "#ffffff", 0.7);
+        const p = this.carPos(e.player);
+        if (p) this.floater(NAMES[e.kind] || "PICKUP!", p.x, p.z, "#ffffff", 0.55);
+      });
+      // Tie-break round from Gameplay.
+      on("suddenDeath", () => {
+        this.banner("SUDDEN DEATH", { sub: "Tie-break round · most floor wins", color: "#ff3d6e", glow: "#ff3d6e", hold: 2.4 });
       });
       on("hint", (e) => this.hint(e.text || "", e.seconds || 3.5));
+      /* Round over: a quick "TIME!", then ~2 s of the clean final floor
+         (overhead camera) while the score bar counts up from zero and the
+         winner's chip lights up, THEN the card slides in from the side.
+         On the deciding round we skip the round card: the floor stays clean
+         until the match card. */
       on("roundEnd", (e) => {
         this.overdrive = false;
         this.timerEl.classList.remove("warn", "od");
-        this.banner("TIME!", { color: "#ffffff", glow: "#7dd3fc", hold: 1.0 });
-        clearTimeout(this.cardTimer);
-        this.cardTimer = setTimeout(() => this.roundCard(e), 1100 / (TP.M5.speed || 1));
+        this.banner("TIME!", { color: "#ffffff", glow: "#7dd3fc", hold: 0.8 });
+        this.countUp = { t: 0, dur: 1.6, final: toPercents(e.scores) || [] };
+        this.segs.forEach((s) => s.chip.classList.toggle("win", (s.chip.dataset.i | 0) === e.winner));
+        const st = TP.M5.match || {};
+        const wins = e.roundWins || st.roundWins || [];
+        const need = Math.floor((st.rounds || 1) / 2) + 1;
+        const final = (st.rounds || 1) <= 1 || Math.max(0, ...wins) >= need || (e.round || st.round) >= (st.rounds || 1);
+        this.pending = final ? null : { t: 2.0, fn: () => this.roundCard(e) };
       });
-      // The match card replaces the round card (and wins if both are pending).
-      on("matchEnd", (e) => {
-        clearTimeout(this.cardTimer);
-        this.cardTimer = setTimeout(() => this.matchCard(e), 1400 / (TP.M5.speed || 1));
-      });
+      on("matchEnd", (e) => { this.pending = { t: 0.2, fn: () => this.matchCard(e) }; });
     }
 
     dispose() { this.root.remove(); }

@@ -231,16 +231,32 @@
             vec2 m5f = fract(vPaintUv * uGridN);
             m5Edge = min(min(m5f.x, 1.0 - m5f.x), min(m5f.y, 1.0 - m5f.y)); // 0 at tile edge, .5 centre
             m5Tile = smoothstep(0.0, 0.14, m5Edge);                         // bevel: dark rim per tile
-            diffuseColor.rgb = mix(diffuseColor.rgb, m5Paint.rgb * 0.30, m5Painted);
+            diffuseColor.rgb = mix(diffuseColor.rgb, m5Paint.rgb * (0.30 - 0.18 * m5Wet), m5Painted);
             float m5Grout = 1.0 - smoothstep(0.0, 0.035, m5Edge);
             diffuseColor.rgb += vec3(0.05, 0.07, 0.12) * m5Grout * (1.0 - m5Painted);`)
           // 2) Glow: painted tiles emit their colour; wet trails pulse with a moving ripple.
           .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
-            vec2 m5c = floor(vPaintUv * uGridN);
-            float m5Pulse = 0.5 + 0.5 * sin(uTime * 7.0 - (m5c.x + m5c.y) * 0.55);
             float m5Level = m5Paint.a * (0.55 + 0.45 * m5Tile);
-            float m5WetBoost = m5Wet * (0.45 + 0.9 * m5Pulse);
-            totalEmissiveRadiance += m5Paint.rgb * m5Painted * uGlow * (m5Level * 0.9 + m5WetBoost);`);
+            // DRY turf: steady glow.
+            totalEmissiveRadiance += m5Paint.rgb * m5Painted * (1.0 - m5Wet) * uGlow * m5Level * 0.9;
+            // WET trail ("danger, unfinished"): diagonal hazard stripes that
+            // slide along, a fast throb, and a white-hot outline where the
+            // trail meets anything that isn't trail. Neighbour cells are
+            // looked up in the paint texture to find those outline edges.
+            if (m5Wet > 0.5) {
+              float m5Throb = 0.6 + 0.4 * sin(uTime * 9.0);
+              float m5Stripe = step(0.5, fract((vPaintUv.x + vPaintUv.y) * uGridN * 0.5 - uTime * 1.4));
+              float tx = 1.0 / uGridN;
+              float wL = step(0.9, texture2D(paintMap, vPaintUv + vec2(-tx, 0.0)).a);
+              float wR = step(0.9, texture2D(paintMap, vPaintUv + vec2(tx, 0.0)).a);
+              float wD = step(0.9, texture2D(paintMap, vPaintUv + vec2(0.0, -tx)).a);
+              float wU = step(0.9, texture2D(paintMap, vPaintUv + vec2(0.0, tx)).a);
+              float e = 0.22;
+              float m5Out = max(max((1.0 - wL) * (1.0 - smoothstep(0.0, e, m5f.x)), (1.0 - wR) * (1.0 - smoothstep(0.0, e, 1.0 - m5f.x))),
+                                max((1.0 - wD) * (1.0 - smoothstep(0.0, e, m5f.y)), (1.0 - wU) * (1.0 - smoothstep(0.0, e, 1.0 - m5f.y))));
+              vec3 m5Hot = mix(m5Paint.rgb, vec3(1.0), 0.45);
+              totalEmissiveRadiance += uGlow * (m5Paint.rgb * (0.25 + 1.1 * m5Stripe * m5Throb) + m5Hot * m5Out * 1.6 * m5Throb);
+            }`);
       };
 
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(this.size, this.size), mat);
@@ -727,6 +743,7 @@
       if (this.camera.aspect !== this.aspect) this.setAspect(this.aspect);
       const half = this.size / 2;
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, count = 0;
+      this.cars = cars;
       for (const car of cars || []) {
         if (!car) continue;
         this.decorateCar(car);
@@ -739,82 +756,103 @@
       }
 
       // Where to look and how much must fit.
-      // Tall (portrait) screens have spare height but little width, so look
-      // down more steeply: the floor is less squashed and fills more of the screen.
+      // Tall (portrait) screens are narrow, so look down more steeply: a
+      // top-down floor is as tall as it is wide, which uses the height best.
       const portrait = Math.min(1, Math.max(0, (1.2 - this.aspect) / 0.7));
-      let cx = 0, cz = 0, rx = half, rz = half, pitch = 0.98 + portrait * 0.3;
+      let cx = 0, cz = 0, rx = half, rz = half, pitch = 0.98 + portrait * 0.42;
       if (this.camMode === "overview" || !count) {
-        pitch = 1.22 + portrait * 0.12; // steeper: almost straight down
-        rx = half + 4; rz = half + 4;
+        pitch = 1.22 + portrait * 0.2;  // steeper: almost straight down
+        rx = half + 3; rz = half + 3;
       } else {
-        const margin = 8 + portrait * 4; // keep some floor visible around the cars
+        const margin = 7;               // floor kept visible around the outermost cars
         cx = (minX + maxX) / 2; cz = (minZ + maxZ) / 2;
         rx = (maxX - minX) / 2 + margin; rz = (maxZ - minZ) / 2 + margin;
         // Never zoom in so far that the play feels claustrophobic.
         rx = Math.max(rx, 18); rz = Math.max(rz, 14);
-        // Lean the look-point a little toward the arena centre (steadier), but
-        // mostly frame the cars themselves.
-        cx *= 0.85; cz *= 0.85;
       }
+      this.box = { rx, rz };
 
-      // Find the distance at which all four corners of the box (cx±rx, cz±rz)
-      // land inside the screen. Perspective makes the near edge look bigger
-      // than the far edge, so we test the real projection rather than guess:
-      // a quick binary search over the distance (12 steps, 4 points each).
+      // Find the distance at which the whole box (cx±rx, cz±rz, and a car's
+      // height above it) lands inside the HUD-free part of the screen.
       const dist = this.fitDistance(cx, cz, rx, rz, pitch);
-      // Smooth everything (exponential ease) so the camera never snaps.
-      const k = 1 - Math.exp(-(this.camMode === "overview" ? 1.8 : 2.6) * (dt || 0.016));
-      this.camTarget.x += (cx - this.camTarget.x) * k;
-      this.camTarget.z += (cz - this.camTarget.z) * k;
-      this.camDist += (dist - this.camDist) * k;
-      this.camPitch += (pitch - this.camPitch) * k;
+      // Smooth everything (exponential ease) so the camera never snaps, but
+      // zoom OUT quickly: a car must never slip off screen while we catch up.
+      const dt0 = dt || 0.016;
+      const kIn = 1 - Math.exp(-(this.camMode === "overview" ? 1.8 : 2.2) * dt0);
+      const kOut = 1 - Math.exp(-7 * dt0);
+      const kMove = 1 - Math.exp(-3.5 * dt0);
+      this.camTarget.x += (cx - this.camTarget.x) * kMove;
+      this.camTarget.z += (cz - this.camTarget.z) * kMove;
+      this.camDist += (dist - this.camDist) * (dist > this.camDist ? kOut : kIn);
+      this.camPitch += (pitch - this.camPitch) * kIn;
+      this.portrait = portrait;
       this.placeCamera(false, dt);
     }
 
-    fitDistance(cx, cz, rx, rz, pitch) {
-      const cam = this._fitCam || (this._fitCam = this.camera.clone());
+    // Point the scratch camera like the real one would be for (target, pitch, dist).
+    _aimFit(cx, cz, pitch, d) {
+      const cam = this._fitCam || (this._fitCam = new THREE.PerspectiveCamera());
       cam.fov = this.camera.fov;
       cam.aspect = this.aspect;
-      cam.clearViewOffset();   // the HUD shift is handled by yLim below, not twice
+      cam.near = this.camera.near; cam.far = this.camera.far;
       cam.updateProjectionMatrix();
+      cam.position.set(cx, Math.sin(pitch) * d, cz + Math.cos(pitch) * d);
+      cam.lookAt(cx, 0, cz);
+      cam.updateMatrixWorld();
+      return cam;
+    }
+
+    fitDistance(cx, cz, rx, rz, pitch) {
       const v = this._fitV || (this._fitV = new THREE.Vector3());
-      const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
-      // The HUD covers part of the top (and on phones, the bottom) of the
-      // screen. placeCamera() shifts the picture so its centre sits in the
-      // free space between them; here the box only has to fit that space.
+      // The HUD (and an open results card) cover parts of the screen.
+      // placeCamera() shifts the picture into the free space; here the box
+      // only has to fit that space's size.
       const sa = this.safeArea();
-      const yLim = Math.max(0.3, 1 - sa.top - sa.bottom) * 0.97;
+      const xLim = Math.max(0.3, 1 - sa.left - sa.right) * 0.95;
+      const yLim = Math.max(0.3, 1 - sa.top - sa.bottom) * 0.95;
       const fits = (d) => {
-        cam.position.set(cx, Math.sin(pitch) * d, cz + Math.cos(pitch) * d);
-        cam.lookAt(cx, 0, cz);
-        cam.updateMatrixWorld();
-        for (const [sx, sz] of corners) {
-          v.set(cx + sx * rx, 0, cz + sz * rz).project(cam);
-          if (Math.abs(v.x) > 0.96 || Math.abs(v.y) > yLim || v.z > 1) return false;
+        const cam = this._aimFit(cx, cz, pitch, d);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const y of [0, 3.5]) {
+          v.set(cx + sx * rx, y, cz + sz * rz).project(cam);
+          if (Math.abs(v.x) > xLim || Math.abs(v.y) > yLim || v.z > 1) return false;
         }
         return true;
       };
-      let lo = 10, hi = this.size * 3;
-      for (let k = 0; k < 12; k++) {
+      let lo = 10, hi = this.size * 4;
+      for (let k = 0; k < 14; k++) {
         const mid = (lo + hi) / 2;
         if (fits(mid)) hi = mid; else lo = mid;
       }
       return hi;
     }
 
-    // Fractions of the screen height the HUD covers at the top and bottom.
-    // The HUD publishes them as TP.M5.safeArea; sensible default otherwise.
+    // Fractions of the screen the HUD covers on each side. The HUD
+    // publishes them as TP.M5.safeArea; sensible default otherwise.
     safeArea() {
-      const s = TP.M5.safeArea;
-      return { top: s ? s.top : 0.12, bottom: s ? s.bottom : 0 };
+      const s = TP.M5.safeArea || {};
+      return { top: s.top ?? 0.12, bottom: s.bottom ?? 0, left: s.left ?? 0, right: s.right ?? 0 };
     }
 
     placeCamera(snap, dt = 0) {
-      // Shift the projection so the picture centres in the HUD-free space.
-      const sa = this.safeArea();
-      const H = 1000, W = H * this.aspect;
-      this.camera.setViewOffset(W, H, 0, -((sa.top - sa.bottom) / 2) * H, W, H);
       const p = this.camPitch, d = this.camDist, t = this.camTarget;
+      const sa = this.safeArea();
+      /* Shift the picture into the free space (a pure 2D shift of the
+         projection, in NDC units: +1 = half the screen). Normally centred;
+         on portrait screens the floor is pushed up to sit right under the
+         top HUD, so the spare height collects at the bottom (by the chips)
+         instead of as empty sky. */
+      let sx = sa.left - sa.right, sy = sa.bottom - sa.top;
+      if (this.portrait > 0.5 && this.box) {
+        const cam = this._aimFit(t.x, t.z, p, d);
+        const v = this._fitV || (this._fitV = new THREE.Vector3());
+        const yFar = v.set(t.x, 0, t.z - this.box.rz).project(cam).y;
+        const yNear = v.set(t.x, 0, t.z + this.box.rz).project(cam).y;
+        const top = 1 - 2 * sa.top - 0.03, bottom = -1 + 2 * sa.bottom + 0.03;
+        const up = top - yFar;
+        if (yNear + up >= bottom) sy = up;
+      }
+      const H = 1000, W = H * this.aspect;
+      this.camera.setViewOffset(W, H, -(sx / 2) * W, (sy / 2) * H, W, H);
       this.camera.position.set(t.x, Math.sin(p) * d, t.z + Math.cos(p) * d);
       if (this.shakeAmt > 0.001) {
         const s = this.shakeAmt;
@@ -829,6 +867,53 @@
         this.scene.fog.near = d * 0.9 + this.size * 0.3;
         this.scene.fog.far = d * 1.6 + this.size * 1.6;
       }
+      this.updateCelebration(dt);
+    }
+
+    /* ---------------------------------------------------------------
+       Round winner celebration: a tall light beam in the winner's colour
+       on their car, with rings rising up it, until the next countdown.
+       --------------------------------------------------------------- */
+    celebrate(player) {
+      this.endCelebration();
+      if (player == null || player < 0) return;
+      const color = NEON[player % 4];
+      const g = new THREE.Group();
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 60, 24, 1, true), new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      beam.position.y = 30;
+      g.add(beam);
+      const rings = [];
+      for (let k = 0; k < 3; k++) {
+        const r = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.18, 6, 32), new THREE.MeshBasicMaterial({
+          color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        r.rotation.x = Math.PI / 2;
+        g.add(r);
+        rings.push(r);
+      }
+      this.group.add(g);
+      this.cel = { player, g, rings, t: 0 };
+    }
+    endCelebration() {
+      if (!this.cel) return;
+      this.group.remove(this.cel.g);
+      this.cel.g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      this.cel = null;
+    }
+    updateCelebration(dt) {
+      const c = this.cel;
+      if (!c) return;
+      c.t += dt;
+      const car = this.cars && this.cars[c.player];
+      if (car) c.g.position.set(car.pos.x, 0, car.pos.z);
+      c.rings.forEach((r, k) => {
+        const u = (c.t * 0.6 + k / 3) % 1;          // 0 → 1 up the beam
+        r.position.y = u * 22;
+        r.scale.setScalar(1 + u * 0.6);
+        r.material.opacity = 1 - u;
+      });
     }
 
     // Spin the roller with ground speed and dim the underglow while airborne.
@@ -923,8 +1008,8 @@
       const on = (n, fn) => { const off = TP.M5.on(n, fn); if (typeof off === "function") this.offs.push(off); };
       on("fill", (e) => this.queueFill(e.player, e.cx, e.cz, e.cellsList));
       on("overdrive", () => this.setOverdrive(true));
-      on("roundCountdown", () => { this.setOverdrive(false); this.overview(false); this.resetPaint(); });
-      on("roundEnd", () => this.overview(true));
+      on("roundCountdown", () => { this.setOverdrive(false); this.overview(false); this.resetPaint(); this.endCelebration(); });
+      on("roundEnd", (e) => { this.overview(true); this.celebrate(e.winner); });
       on("bump", (e) => { if (e.hard || e.impact > 9) this.shake(0.5); });
       on("pop", () => this.shake(0.35));
       on("land", (e) => { if (e.airtime > 0.8) this.shake(0.25); });
@@ -1008,7 +1093,7 @@
       // One HUD for the whole page (it's DOM, not 3D); new players each match.
       if (TP.M5.Hud) {
         TP.M5.hud = TP.M5.hud || new TP.M5.Hud();
-        TP.M5.hud.setPlayers(match.players.map((p) => ({ name: p.name, index: p.index })));
+        TP.M5.hud.setPlayers(match.players.map((p) => ({ name: p.name, index: p.index, team: p.team })), !!match.teams);
         TP.M5.hud.setCamera(this.camera);
         TP.M5.hud.reset();
         TP.M5.hud.show(!(TP.M5.Menu && TP.M5.Menu.isOpen));

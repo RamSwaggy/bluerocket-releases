@@ -301,6 +301,12 @@
       tone(hz(93), hz(93), 0.4, "sine", 0.06, 0.12);
     },
     trail() { tone(700, 1000, 0.05, "sine", 0.035); },
+    // Sudden death: a heartbeat thump-thump, then a falling minor stab.
+    suddenDeath() {
+      tone(70, 40, 0.25, "sine", 0.5); tone(70, 40, 0.25, "sine", 0.45, 0.28);
+      [74, 77, 81].forEach((n) => tone(hz(n), hz(n - 12), 0.9, "sawtooth", 0.06, 0.62));
+      noise(0.8, "bandpass", 4000, 300, 0.15, 0.62, 1.4);
+    },
     hint() { tone(hz(81), hz(81), 0.08, "sine", 0.06); tone(hz(88), hz(88), 0.12, "sine", 0.05, 0.08); },
   };
 
@@ -361,6 +367,7 @@
       on("pickupSpawn", () => Audio.play("pickupSpawn"));
       on("trailStart", () => { if (ok("trail", 0.15)) Audio.play("trail"); });
       on("hint", () => Audio.play("hint"));
+      on("suddenDeath", () => Audio.play("suddenDeath"));
     },
   };
 
