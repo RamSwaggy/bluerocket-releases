@@ -8,6 +8,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let toastTimer = null;
+  let calloutTimer = null;
   let lastHud = "";
   let nav = null;   // gamepad/arrow-key navigation on the current card (TP.MenuNav)
 
@@ -140,6 +141,21 @@
     },
 
     hint(html) { $("hint").innerHTML = html || ""; },
+
+    /* Announcer callout: a big word that punches in and fades ("FAST!",
+       "FLIP STRIKE!", "PERFECT!"). big = an even bigger one. */
+    callout(text, color = "", big = false) {
+      const el = $("callout");
+      if (!el) { TP.HUD.toast(text, color, 1.0); return; }
+      el.textContent = text;
+      el.style.color = color || "#ffffff";
+      el.classList.toggle("big", !!big);
+      el.classList.remove("show");
+      void el.offsetWidth; // restart the animation
+      el.classList.add("show");
+      clearTimeout(calloutTimer);
+      calloutTimer = setTimeout(() => el.classList.remove("show"), big ? 1500 : 1000);
+    },
 
     card(html) {
       $("card").innerHTML = html;
@@ -343,13 +359,52 @@
         : winName ? `<span style="color:${winCss}">${esc(winName)}</span> wins!` : "Draw!";
       const sub = { stock: "Last car standing.", teams: "Last team standing.", time: "Most KOs when the clock ran out." }[mode] || "";
       const wTeam = teams ? result.winnerTeam : null;
+
+      /* MVP tags: each goes to the single best player for that stat (and
+         only if they actually did it). One player can collect several. */
+      const tags = places.map(() => []);
+      const award = (label, val) => {
+        let best = -1, bi = -1, tie = false;
+        places.forEach((p, i) => { const v = val(p); if (v > best) { best = v; bi = i; tie = false; } else if (v === best) tie = true; });
+        if (bi >= 0 && best > 0 && !tie) tags[bi].push(label);
+      };
+      const st = (p) => p.stats || {};
+      award("MOST KOs", (p) => p.kos || 0);
+      award("SPEED DEMON", (p) => st(p).topSpeed || 0);
+      award("AIR ACE", (p) => st(p).aerial || 0);
+      award("FLIP MASTER", (p) => st(p).flips || 0);
+      award("RESET KING", (p) => st(p).bunts || 0);
+      award("THE WALL", (p) => st(p).returns || 0);
+
+      // The podium (top three) for everything except Teams.
+      const podium = !teams && places.length >= 2 ? `
+        <div class="podium">
+          ${[1, 0, 2].filter((k) => places[k]).map((k) => `
+            <div class="step p${k + 1}" style="border-color:${places[k].css}">
+              <div class="pnum">${k + 1}</div>
+              <div class="pname" style="color:${places[k].css}">${esc(places[k].name)}</div>
+            </div>`).join("")}
+        </div>` : "";
+      const matchStats = result && (result.topSpeed || result.bestRally) ? `
+        <div class="match-stats">
+          <span>Top speed <b>${Math.round(result.topSpeed || 0)}</b></span>
+          <span>Longest rally <b>${result.bestRally || 0}</b> strikes</span>
+          ${result.duration ? `<span>Time <b>${Math.floor(result.duration / 60)}:${String(Math.round(result.duration % 60)).padStart(2, "0")}</b></span>` : ""}
+        </div>` : "";
+      const pline = (p) => {
+        const q = st(p);
+        if (!p.stats) return "";
+        return `<div class="pstats">top ${Math.round(q.topSpeed || 0)} · ${q.returns || 0} returns · ${q.aerial || 0} aerial · ${q.flips || 0} flip · ${q.bunts || 0} bunt</div>`;
+      };
       const card = TP.HUD.card(`
         <h2>${headline}</h2>
         <p>${sub}</p>
+        ${podium}
+        ${matchStats}
         ${places.map((p, i) => `
           <div class="result-row ${(teams ? p.team === wTeam : i === 0) && winName ? "win" : ""}" style="border-color:${p.css}">
             <span class="place">${teams ? (p.team === wTeam ? "WIN" : "") : ord(i + 1)}</span>
-            <span class="who" style="color:${p.css}">${teams ? (p.team === 0 ? "▲ " : "■ ") : ""}${esc(p.name)}</span>
+            <span class="who" style="color:${p.css}">${teams ? (p.team === 0 ? "▲ " : "■ ") : ""}${esc(p.name)}${tags[i].map((t) => `<span class="mvp">${t}</span>`).join("")}${pline(p)}</span>
             <span class="stat">${p.kos ?? 0} KO${(p.kos ?? 0) === 1 ? "" : "s"}</span>
             <span class="stat">${mode === "time" ? "" : (p.livesLeft ?? 0) > 0 ? "♥".repeat(p.livesLeft) : "OUT"}</span>
           </div>`).join("")}

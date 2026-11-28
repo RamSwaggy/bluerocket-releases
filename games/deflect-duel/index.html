@@ -69,6 +69,38 @@
     }
     #toast.show { opacity: 1; }
 
+    /* ---------- Announcer callouts ("FAST!", "FLIP STRIKE!", "PERFECT!") ----------
+       A big slanted word under the speed readout that punches in and fades. */
+    #callout {
+      top: 110px; left: 50%; transform: translateX(-50%) scale(.6);
+      font-size: 44px; font-weight: 900; font-style: italic; letter-spacing: .02em;
+      text-shadow: 0 4px 0 rgba(0,0,0,.45), 0 0 24px currentColor;
+      opacity: 0; pointer-events: none; white-space: nowrap;
+    }
+    #callout.big { font-size: 68px; }
+    #callout.show { animation: callout-pop 1s ease-out forwards; }
+    #callout.big.show { animation-duration: 1.5s; }
+    @keyframes callout-pop {
+      0% { opacity: 0; transform: translateX(-50%) scale(.6); }
+      12% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+      25% { transform: translateX(-50%) scale(1); }
+      75% { opacity: 1; }
+      100% { opacity: 0; transform: translateX(-50%) scale(1.05) translateY(-8px); }
+    }
+
+    /* ---------- Results: podium, match stats, MVP tags ---------- */
+    .podium { display: flex; align-items: flex-end; justify-content: center; gap: 10px; margin: 10px 0 14px; }
+    .podium .step { width: 120px; border-radius: 10px 10px 0 0; text-align: center; padding: 8px 6px 6px;
+      background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03)); border-top: 4px solid; }
+    .podium .step .pname { font-weight: 800; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .podium .step .pnum { font-size: 30px; font-weight: 900; opacity: .9; }
+    .podium .p1 { height: 110px; } .podium .p2 { height: 80px; } .podium .p3 { height: 60px; }
+    .match-stats { display: flex; gap: 18px; justify-content: center; color: var(--muted); font-size: 15px; margin-bottom: 8px; }
+    .match-stats b { color: var(--text); }
+    .mvp { display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px;
+      background: rgba(255,225,77,.15); color: var(--accent2); margin-left: 6px; white-space: nowrap; }
+    .pstats { color: var(--muted); font-size: 13px; }
+
     #hint {
       bottom: 16px; left: 50%; transform: translateX(-50%);
       padding: 8px 16px; border-radius: 10px; background: var(--panel);
@@ -186,6 +218,7 @@
   <div id="hud" class="layer"></div>
   <div id="center-msg" class="layer"></div>
   <div id="toast" class="layer"></div>
+  <div id="callout" class="layer"></div>
   <div id="hint" class="layer"></div>
   <div id="overlay" class="layer"><div class="card" id="card"></div></div>
 
@@ -205,6 +238,7 @@
   <script src="js/arena.js"></script>
   <script src="js/duel.js"></script>
   <script src="js/tutorial.js"></script>
+  <script src="js/presentation.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

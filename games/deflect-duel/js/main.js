@@ -92,7 +92,13 @@
     if (duel && duel.paused) {
       // A test is driving the match by hand: leave it alone.
     } else if (duel) {
-      duel.update(dt);     // 3) the rules (fixed steps inside)
+      // 3) the rules (fixed steps inside), or, during an instant replay,
+      //    the replay instead (the rules wait until it's over).
+      if (TP.DuelShow && TP.DuelShow.replaying) TP.DuelShow.replayStep(dt / SPEED);
+      else {
+        duel.update(dt);
+        if (TP.DuelShow) TP.DuelShow.record(dt / SPEED);
+      }
       showCountdown();
       updateHud();
       duel.camera.aspect = aspect;
@@ -140,6 +146,8 @@
   /* ---------- Things that happen during a match ----------
      Callouts and sounds. (Art and UI can add more through duel.hooks.) */
   function onEvent(name, data) {
+    // The show (callouts, crowd, music) hears everything first.
+    if (TP.DuelShow) TP.DuelShow.event(name, data);
     switch (name) {
       case "go":
         TP.HUD.center("GO!", "", "#ffe14d");
@@ -155,6 +163,8 @@
         break;
       case "ko":
         TP.sfx.play("ko");
+        // A big KO (a fast ball) gets an instant replay, in real play only.
+        if (!DEMO && TP.DuelShow && TP.DuelShow.wantsReplay(data.speed, false)) TP.DuelShow.queueReplay(null);
         TP.HUD.toast(
           data.victim.lives > 0
             ? `${data.owner ? data.owner.name : "?"} KO'd ${data.victim.name}!`
@@ -202,6 +212,7 @@
       countdown: config.countdown,
     });
     if (config.mode === "practice" && TP.DuelPractice) TP.DuelPractice.start(duel, { tutorial: !!config.tutorial });
+    if (TP.DuelShow) TP.DuelShow.start(duel);
     if (config.mode !== "practice") showHints(config.players);
   }
 
@@ -222,12 +233,17 @@
     if (result.mode === "teams") TP.HUD.center(`${result.winnerTeamName} WIN!`, "", result.winnerCss);
     else TP.HUD.center(`${result.winnerName} WINS!`, "", result.winnerCss);
     TP.HUD.hint("");
-    // Let the moment land before the results card covers the arena.
-    TP.sched.wait(2).then(() => {
+    // Let the moment land before the results card covers the arena. In
+    // real play the winning KO gets an instant replay first.
+    const after = (fn) => {
+      if (!DEMO && TP.DuelShow && TP.DuelShow.wantsReplay(0, true)) TP.DuelShow.queueReplay(() => TP.sched.wait(0.8).then(fn));
+      else TP.sched.wait(2).then(fn);
+    };
+    after(() => {
       TP.HUD.center("");
       if (typeof TP.HUD.showResults === "function") {
         // Art's card wants { winner, places: [{ name, css, kos, livesLeft }] }.
-        const places = result.standings.map((s) => ({ name: s.name, css: s.css, kos: s.kos, livesLeft: s.lives, team: s.team, score: s.score }));
+        const places = result.standings.map((s) => ({ name: s.name, css: s.css, kos: s.kos, livesLeft: s.lives, team: s.team, score: s.score, stats: s.stats }));
         TP.HUD.showResults(Object.assign({}, result, { winner: places[0] || null, places }), rematch, backToMenu);
       } else {
         showResultsFallback(result);
@@ -239,6 +255,7 @@
 
   function backToMenu() {
     if (TP.DuelPractice) TP.DuelPractice.stop();
+    if (TP.DuelShow) TP.DuelShow.stop();
     if (duel) { duel.dispose(); duel = null; }
     TP.sched.clear();
     TP.HUD.update(null);

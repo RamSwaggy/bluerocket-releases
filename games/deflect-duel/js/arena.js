@@ -375,6 +375,11 @@
        isn't just empty ground. Purely visual, well outside the walls. */
     const standMat = keep(new THREE.MeshStandardMaterial({ color: 0x121636, roughness: 0.9 }));
     const dotMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonA, transparent: true, opacity: 0.7 }));
+    // The dots are the CROWD: they bounce and glow when the action heats up
+    // (see cheer() and the crowd part of update()).
+    const crowdDots = [];
+    let crowd = 0;                               // excitement, 0..1, decays
+    const crowdColor = new THREE.Color(COL.neonA);
     const dotGeo = keep(new THREE.SphereGeometry(0.12, 8, 6));
     const STAND = 3;
     for (const sz of [-1, 1]) {
@@ -385,6 +390,8 @@
       for (let x = -W / 2 - 4; x <= W / 2 + 4; x += 2) {
         const d = new THREE.Mesh(dotGeo, dotMat);
         d.position.set(x, 0.95, sz * (D / 2 + T + 1 + 0.3));
+        d.userData.phase = Math.random() * Math.PI * 2;
+        crowdDots.push(d);
         group.add(d);
       }
     }
@@ -533,6 +540,18 @@
         p.ringMat.color.copy(base).lerp(p.color, p.pulse);
       }
 
+      // The crowd: excitement decays; while it's up the dots jump (each
+      // with its own rhythm), grow and glow, tinted toward the colour of
+      // whoever caused the cheer.
+      crowd = Math.max(0, crowd - dt * 0.35);
+      dotMat.opacity = 0.55 + 0.45 * crowd;
+      dotMat.color.setHex(COL.neonA).lerp(crowdColor, Math.min(1, crowd * 1.2));
+      for (const d of crowdDots) {
+        const j = Math.max(0, Math.sin(t * (6 + 4 * crowd) + d.userData.phase));
+        d.position.y = 0.95 + j * crowd * 0.9;
+        d.scale.setScalar(1 + crowd * 0.8);
+      }
+
       // Wall flashes: grow out a little and fade.
       for (const f of flashes) {
         if (f.life <= 0) continue;
@@ -565,6 +584,11 @@
     return {
       group,
       update(dt) { update(dt); if (effects) effects.update(dt); },
+      // The crowd reacts: amount 0..1 (a big moment = 1), css tints it.
+      cheer(amount, css) {
+        crowd = Math.min(1, Math.max(crowd, amount));
+        if (css) crowdColor.set(css);
+      },
       flashWall,
       dispose,
       // duel.js copies these onto duel.hooks.

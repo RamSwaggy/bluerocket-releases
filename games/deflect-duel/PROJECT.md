@@ -126,6 +126,20 @@ on the base branch until the Director verifies v2 and swaps it in.
   because aim reads the pitch axis. The menu mentions them.
 - **New rule test** `modes` checks teams, time, overtime, sudden death, practice and bot levels.
 
+**Round 3, phase 2 (presentation): built** (`js/presentation.js`, plus small additions to
+`arena.js`, `hud.js` and `index.html`).
+- **Music** (`TP.sfx` track "duel"): the tempo rises from 118 to 152 and layers join as the ball
+  speeds up.
+- **Announcer callouts:** FAST! / BLAZING! / INSANE! / 200!! (once per rally), FLIP STRIKE!,
+  AERIAL!, RALLY ×10, RESET! (bunt), FIRST KO!, OBLITERATED! (150+ KO), and PERFECT! / CLUTCH! at
+  the end.
+- **Crowd:** the stand lights bounce and glow in the cheering player's colour, with a noise
+  "roar".
+- **Instant replay** of big KOs (100+) and the winning KO, in slow motion; Hit or Jump skips.
+  Real play only: never in `?demo`/`?test` or practice.
+- **Results:** a podium, match stats (top speed, longest rally, time), a stats line per player,
+  and MVP tags: MOST KOs, SPEED DEMON, AIR ACE, FLIP MASTER, RESET KING, THE WALL.
+
 **Still open:**
 - Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
 - The tunables in `TP.DUEL_CFG`.

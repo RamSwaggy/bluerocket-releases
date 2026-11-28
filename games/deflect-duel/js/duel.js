@@ -1315,6 +1315,26 @@
           order = [...order.filter((k) => this.players[k].team === wt), ...order.filter((k) => this.players[k].team !== wt)];
         }
       }
+      // Match stats for the results screen, worked out from the counted
+      // events: each player's fastest strike, aerial and flip strikes,
+      // bunts and returns (strikes on someone else's ball), plus the
+      // match's top speed and longest rally.
+      const per = this.players.map(() => ({ topSpeed: 0, aerial: 0, flips: 0, bunts: 0, returns: 0, strikes: 0 }));
+      let rally = 0, bestRally = 0, topSpeed = 0;
+      for (const e of this.events) {
+        if (e.type === "strike" && per[e.player]) {
+          const q = per[e.player];
+          q.strikes++;
+          q.topSpeed = Math.max(q.topSpeed, e.speed || 0);
+          if (e.aerial && (e.carY || 0) > 1.2) q.aerial++;
+          if (e.flip) q.flips++;
+          if (e.from !== null && e.from !== undefined && e.from !== e.player) q.returns++;
+          topSpeed = Math.max(topSpeed, e.speed || 0);
+          rally++;
+          bestRally = Math.max(bestRally, rally);
+        } else if (e.type === "bunt" && per[e.player]) per[e.player].bunts++;
+        else if (e.type === "ko" || e.type === "stalemate") rally = 0;
+      }
       const w = this.players[winnerIdx];
       const teamNames = ["Blue & Green", "Orange & Pink"];
       this.result = {
@@ -1322,12 +1342,14 @@
         winnerTeam: this.mode === "teams" && w ? w.team : null,
         winnerTeamName: this.mode === "teams" && w ? teamNames[w.team] : "",
         winner: winnerIdx,
+        topSpeed: +topSpeed.toFixed(0),
+        bestRally,
         winnerName: w ? w.name : "",
         winnerCss: w ? w.css : "",
         duration: +this.time.toFixed(1),
         standings: order.map((idx, k) => {
           const p = this.players[idx];
-          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, livesLeft: p.lives, kos: p.kos, hits: p.hits, team: p.team, score: p.score, knockedOut: p.knockedOut || 0 };
+          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, livesLeft: p.lives, kos: p.kos, hits: p.hits, team: p.team, score: p.score, knockedOut: p.knockedOut || 0, stats: per[idx] };
         }),
         koLog: this.koLog.slice(),
         stats: Object.assign({}, this.stats),
