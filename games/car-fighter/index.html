@@ -238,10 +238,108 @@
     .rounds .r .w { font-weight: 800; flex: 1; }
     .rounds .r .how { color: var(--muted); font-size: 13px; }
 
+    /* ---------- Combo counter, under the attacker's meters ---------- */
+    .combo {
+      font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: .04em;
+      color: #fff; text-shadow: 0 3px 0 rgba(0,0,0,.55), 0 0 14px var(--seat);
+      opacity: 0; transition: opacity .25s; min-height: 30px;
+    }
+    .combo b { font-size: 30px; color: var(--seat); }
+    .combo.show { opacity: 1; }
+    .combo.pop { animation: pop .22s cubic-bezier(.2, 1.8, .4, 1); }
+    .side.p1 .combo { transform-origin: left center; }
+    .side.p2 .combo { transform-origin: right center; }
+    @keyframes pop { from { transform: scale(1.5); } to { transform: scale(1); } }
+
+    /* ---------- Signature move banner ----------
+       A dark band across the screen with the move's name in the
+       attacker's colour, sliding in from the attacker's side. */
+    #sig { left: 0; right: 0; top: 54%; opacity: 0; transition: opacity .2s; }
+    #sig.show { opacity: 1; }
+    #sig .band {
+      display: flex; align-items: baseline; gap: 14px; justify-content: center;
+      padding: 8px 16px; background: linear-gradient(90deg, transparent, rgba(5,8,20,.85) 15%, rgba(5,8,20,.85) 85%, transparent);
+      border-top: 2px solid var(--seat); border-bottom: 2px solid var(--seat);
+    }
+    #sig .who { font-weight: 700; color: var(--muted); font-size: clamp(13px, 2.4vw, 18px); text-transform: uppercase; letter-spacing: .12em; }
+    #sig .nm {
+      font-size: clamp(30px, min(8vw, 12vh), 72px); font-weight: 900; font-style: italic; color: var(--seat);
+      text-shadow: 0 0 24px var(--seat), 0 4px 0 rgba(0,0,0,.5); text-transform: uppercase;
+    }
+    #sig.show.p1 .band { animation: sigL .3s cubic-bezier(.2, 1.2, .4, 1); }
+    #sig.show.p2 .band { animation: sigR .3s cubic-bezier(.2, 1.2, .4, 1); }
+    @keyframes sigL { from { transform: translateX(-40vw); } to { transform: none; } }
+    @keyframes sigR { from { transform: translateX(40vw); } to { transform: none; } }
+
+    /* =================================================================
+       CHARACTER SELECT
+       Two panels at the sides, the live 3D preview in the middle (the
+       card itself is see-through), the buttons along the bottom.
+       ================================================================= */
+    .card.select {
+      width: min(1180px, 100%); height: calc(100vh - 32px); max-height: none; overflow: visible;
+      background: none; border: 0; box-shadow: none; backdrop-filter: none; padding: 0;
+      display: grid; grid-template-columns: minmax(0, 330px) 1fr minmax(0, 330px);
+      grid-template-rows: auto 1fr auto; gap: 12px; align-items: start;
+    }
+    #overlay.select-mode { background: radial-gradient(ellipse at 50% 55%, transparent 30%, rgba(7,11,26,.6)); }
+    .select .title {
+      grid-column: 1 / -1; text-align: center; margin: 0; font-size: clamp(28px, 5vw, 44px);
+      text-shadow: 0 4px 0 rgba(0,0,0,.5);
+    }
+    .pick {
+      grid-row: 2; padding: 14px; border-radius: 16px; background: var(--panel);
+      border: 1px solid var(--line); border-top: 5px solid var(--seat); backdrop-filter: blur(6px);
+      max-height: 100%; overflow: auto;
+    }
+    .pick.p1 { grid-column: 1; }
+    .pick.p2 { grid-column: 3; }
+    .pick .who { font-size: 15px; margin-bottom: 10px; }
+    .pick .who b { color: var(--seat); font-style: italic; margin-right: 4px; }
+    .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .tile {
+      font: inherit; cursor: pointer; text-align: left; padding: 8px; border-radius: 10px;
+      background: var(--panel-2); border: 2px solid transparent; color: var(--text);
+      display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    }
+    .tile .tn { font-weight: 900; font-style: italic; font-size: 16px; }
+    .tile .tr { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tile.on { border-color: var(--seat); background: #222c5c; box-shadow: 0 0 14px -4px var(--seat); }
+    .tile[disabled] { opacity: .4; cursor: not-allowed; }
+    .detail { margin-top: 12px; }
+    .carname { font-size: 26px; font-weight: 900; font-style: italic; color: var(--seat); line-height: 1.1; }
+    .carrole { color: var(--muted); font-size: 13px; margin: 2px 0 10px; }
+    .stats { display: flex; flex-direction: column; gap: 5px; }
+    .stat { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .pips { display: flex; gap: 4px; }
+    .pips i { width: 26px; height: 9px; border-radius: 3px; background: #1a2040; border: 1px solid rgba(255,255,255,.18); }
+    .pips i.on { background: var(--seat); border-color: transparent; box-shadow: 0 0 8px -2px var(--seat); }
+    .blurb { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 10px 0 6px; }
+    .sig { font-size: 13px; margin-top: 8px; }
+    .sig b { color: var(--accent); font-style: italic; }
+    .select .actions { grid-column: 1 / -1; grid-row: 3; justify-content: center; margin: 0; }
+
+    @media (max-width: 720px) {
+      /* Phone: both panels side by side at the top, compact; the preview
+         shows underneath them; buttons at the bottom. */
+      .card.select { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .pick.p2 { grid-column: 2; }
+      .pick { padding: 8px; max-height: 52vh; }
+      .tiles { grid-template-columns: 1fr; gap: 4px; }
+      .tile { padding: 5px 8px; flex-direction: row; justify-content: space-between; align-items: baseline; }
+      .tile .tn { font-size: 14px; }
+      .tile .tr { display: none; }
+      .carname { font-size: 18px; }
+      .pips i { width: 12px; height: 7px; }
+      .blurb, .sig .muted { display: none; }
+      .stat, .carrole, .sig { font-size: 11px; }
+    }
+
     @media (max-width: 640px) {
       .seats { grid-template-columns: 1fr; }
       .side .who { font-size: 14px; }
       .side .who .car { display: none; }   /* no room: the name matters more than the car */
+      .combo { font-size: 15px; } .combo b { font-size: 20px; }
       .seg { width: 22px; }
       .timer b { width: 24px; height: 34px; font-size: 25px; line-height: 30px; }
       .gauge { height: 16px; }
@@ -262,6 +360,7 @@
     <div class="side p2" id="side1"></div>
   </div>
   <div id="call" class="layer"></div>
+  <div id="sig" class="layer"></div>
   <div id="hint" class="layer"></div>
   <div id="overlay" class="layer"><div class="card" id="card"></div></div>
 
@@ -274,6 +373,7 @@
   <script src="../shared/js/util.js"></script>
   <script src="../shared/js/input.js"></script>
   <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/menunav.js"></script>
   <script src="../shared/js/car.js"></script>
   <script src="../shared/js/fx.js"></script>
   <script src="../shared/js/sfx.js"></script>
@@ -286,7 +386,9 @@
 
   <!-- Look and screens (Art and UI). main.js decides whether the menu
        starts the match (it sets TP.MATCH_MANUAL_START before match.js). -->
+  <script src="js/bodies.js"></script>
   <script src="js/fx-fight.js"></script>
+  <script src="js/sfx-fight.js"></script>
   <script src="js/view.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>

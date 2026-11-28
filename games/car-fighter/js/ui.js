@@ -43,6 +43,8 @@
       shown: [1, 1],             // health fraction last frame
       cache: {},                 // last values written to the DOM (skip no-op writes)
       rounds: [],                // our own round log for the results card
+      combo: [0, 0],             // combo count last shown per side
+      comboHold: [0, 0],         // seconds the finished combo stays up
       lastRound: 0,
       ended: false,
     };
@@ -73,11 +75,23 @@
         <div class="meters">
           <div class="super">${[0, 1, 2].map(() => `<div class="seg"><i></i></div>`).join("")}</div>
           <div class="boostbar" title="Boost"><i></i></div>
-        </div>`;
+        </div>
+        <div class="combo" aria-live="polite"></div>`;
     }
     $("pips").innerHTML = [0, 1].map((i) =>
       `<div class="set p${i + 1}" style="--seat:${TP.PLAYER_CSS[i]}"></div>`).join("");
     T.cache = {};
+  }
+
+  // Play one of sfx-fight.js's sounds, if it's loaded.
+  const snd = (name) => { if (TP.FightSfx && TP.FightSfx[name]) TP.FightSfx[name](); };
+
+  /* Fighter display name for a fighter id: Gameplay's displayName/name,
+     else the look table's, else the id itself. */
+  function fighterName(id) {
+    const d = TP.FIGHTERS && TP.FIGHTERS[id];
+    if (d) return d.displayName || d.name || id;
+    return id ? id.charAt(0).toUpperCase() + id.slice(1) : "Rivet";
   }
 
   /* Show a big centre call until fight frame `until`. */
@@ -132,9 +146,10 @@
       const sudden = state.suddenDeath || round > winsNeeded * 2 - 1;
       call(sudden ? "SUDDEN DEATH" : last ? "FINAL ROUND" : `ROUND ${round}`, "", "#f2f5ff", f + 600, "intro" + round);
       T.lastRound = round;
+      snd("roundSting");
     } else if (phase === "fight" && prev === "countdown") {
       call("FIGHT!", "", "#ffcc33", f + 45, "fight" + round);
-      if (TP.sfx) TP.sfx.play("go");
+      snd("fightSting");
       $("hint").classList.add("dim");
     } else if (phase === "roundEnd") {
       const r = judgeRound(state);
@@ -145,10 +160,11 @@
       else if (r.how === "Double KO") call("DOUBLE K.O.", "Draw: a round each", "#ff5a3c", f + 100000, "end" + round);
       else if (r.winner < 0) call("DRAW", "Time! A round each", "#f2f5ff", f + 100000, "end" + round);
       else call("TIME", `${who} takes round ${round}`, color, f + 100000, "end" + round);
-      if (TP.sfx) TP.sfx.play(r.how === "KO" || r.how === "Double KO" ? "lose" : "count");
+      if (r.how !== "KO" && r.how !== "Double KO") snd("roundSting");   // a KO already has its own sting
     } else if (phase === "matchEnd" && !T.ended) {
       T.ended = true;
       clearCall();
+      snd("winSting");
       // Let the last KO breathe before the results card covers the stage.
       setTimeout(() => { if (UI.onMatchEnd) UI.onMatchEnd(state, T.rounds.slice()); }, 900);
     }
@@ -165,9 +181,12 @@
     get players() { return players; },
     get winsNeeded() { return winsNeeded; },
 
-    /* view.js calls this from init(): a new match starts. */
-    startMatch() {
+    /* view.js calls this from init(): a new match starts. The car names
+       on the HUD come from the fight itself (the fighters really playing). */
+    startMatch(fight) {
       T = freshTracking();
+      const cs = fight && fight.state && fight.state.cars;
+      if (cs) players = players.map((p, i) => Object.assign({}, p, cs[i] && cs[i].fighter ? { fighter: fighterName(cs[i].fighter) } : {}));
       buildHud();
       clearCall();
       UI.hideCard();
@@ -195,7 +214,7 @@
         let n = state.phaseFramesLeft != null ? Math.ceil(Number(state.phaseFramesLeft) / FPS - 1e-6)
                                               : 3 - Math.floor((f - T.phaseStart) / FPS);
         n = Math.max(1, Math.min(3, n));
-        if (T.callKey !== "count" + n + state.round && TP.sfx) TP.sfx.play("count");
+        if (T.callKey !== "count" + n + state.round) snd("count");
         call(String(n), `Round ${state.round || 1}`, "#f2f5ff", f + FPS, "count" + n + state.round);
       }
       if (T.call && f > T.call.until) clearCall();
@@ -228,6 +247,25 @@
         });
         const boost = Math.max(0, Math.min(100, Number(c.boost ?? 100)));
         setStyle(side.querySelector(".boostbar i"), "b" + i, "width", boost.toFixed(0) + "%");
+
+        // Combo counter by the ATTACKER's bar: state.cars[i].combo is how
+        // many hits car i has landed in its current combo. It pops on
+        // every new hit and stays up a moment after the combo ends.
+        const n = Number(c.combo) || 0;
+        const el = side.querySelector(".combo");
+        if (n >= 2 && n !== T.combo[i]) {
+          el.innerHTML = `<b>${n}</b> HITS`;
+          el.classList.remove("pop");
+          void el.offsetWidth;            // restart the pop animation
+          el.classList.add("pop", "show");
+          T.comboHold[i] = 1.1;
+        }
+        if (n >= 2) T.comboHold[i] = Math.max(T.comboHold[i], 0.4);
+        T.combo[i] = n;
+        T.comboHold[i] -= dt;
+        if (phase !== "fight") T.comboHold[i] = Math.min(T.comboHold[i], 0.3);   // don't carry into the next round
+        if (T.comboHold[i] <= 0) setClass(el, "cs" + i, "show", false);
+        else T.cache["cs" + i] = true;
       }
 
       // ----- Timer: two flip digits -----
@@ -270,6 +308,21 @@
       el.innerHTML = rows;
       el.classList.remove("dim");
     },
+
+    /* Signature move banner: the move's name slams across the screen in
+       the attacker's seat colour for about a second. */
+    signature(i, name) {
+      const el = $("sig");
+      el.style.setProperty("--seat", TP.PLAYER_CSS[i]);
+      el.className = "layer " + (i ? "p2" : "p1");
+      el.innerHTML = `<div class="band"><span class="who">${esc(players[i].name)}</span><span class="nm">${esc(name)}</span></div>`;
+      void el.offsetWidth;
+      el.classList.add("show");
+      clearTimeout(UI._sigTimer);
+      UI._sigTimer = setTimeout(() => el.classList.remove("show"), 1100);
+    },
+
+    fighterName,
 
     /* Generic big centre text, e.g. errors. Pass "" to clear. */
     message(text, sub = "", color = "") {

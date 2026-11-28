@@ -93,7 +93,8 @@
        camera side (it casts the shadows); two coloured rim lights from
        behind so the cars' outlines pop against the dark junk. decay = 0
        keeps the spotlights from fading with distance (simpler to tune). */
-    root.add(new THREE.HemisphereLight(0x8fa8ff, 0x0b0e18, 0.55));
+    const hemi = new THREE.HemisphereLight(0x8fa8ff, 0x0b0e18, 0.55);
+    root.add(hemi);
     const key = new THREE.SpotLight(0xfff1d6, 2.4, 0, 0.55, 0.6, 0);
     key.position.set(0, 30, 26);
     key.target.position.set(0, 0, 0);
@@ -103,12 +104,20 @@
     key.shadow.camera.far = 90;
     key.shadow.bias = -0.0006;
     root.add(key, key.target);
+    const lights = [hemi, key];
     for (const [x, color] of [[-30, 0xffc98a], [30, 0x9cc2ff]]) {
       const rim = new THREE.SpotLight(color, 2.2, 0, 0.5, 0.7, 0);
       rim.position.set(x, 24, -24);
       rim.target.position.set(x * 0.15, 0, 0);
       root.add(rim, rim.target);
+      lights.push(rim);
     }
+    lights.forEach((l) => { l.userData.base = l.intensity; });
+    // The "signature" spotlight: off until a signature move, then a hard
+    // white-and-seat-colour light straight down on the attacker.
+    const sigLight = new THREE.SpotLight(0xffffff, 0, 0, 0.32, 0.45, 0);
+    sigLight.position.set(0, 16, 6);
+    root.add(sigLight, sigLight.target);
 
     /* ----- Ground: packed dirt around the turntable ----- */
     const ground = new THREE.Mesh(
@@ -234,6 +243,7 @@
        glowing panels, plus a faint additive "beam" cone toward the stage. */
     const mastMat = new THREE.MeshStandardMaterial({ color: 0x3a3226, metalness: 0.5, roughness: 0.7 });
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff4cf });
+    const LAMP_ON = new THREE.Color(0xfff4cf);
     const beamMat = new THREE.MeshBasicMaterial({
       color: 0xfff1c4, transparent: true, opacity: 0.05, depthWrite: false,
       blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -345,6 +355,23 @@
         const head = Math.floor(t * 9) % chasers.length;
         chasers.forEach((m, i) => m.color.setHex(((i - head + chasers.length) % 7) === 0 ? 0xffe9a8 : 0x3a3020));
       },
+      /* Floodlights at fraction k of full power (1 = normal). Used to
+         black the stage out around a signature move. The lamp panels and
+         beams dim with them, so it reads as the floodlights cutting out. */
+      dim(k) {
+        lights.forEach((l) => { l.intensity = l.userData.base * k; });
+        lampMat.color.copy(LAMP_ON).multiplyScalar(0.15 + 0.85 * k);
+        beamMat.opacity = 0.05 * k;
+      },
+      /* The signature spotlight: on the attacker at (x, z), in `color`, at
+         `power` (0 = off). */
+      spot(x, z, color, power) {
+        sigLight.intensity = power;
+        if (power <= 0) return;
+        sigLight.color.set(color).lerp(new THREE.Color(0xffffff), 0.45);
+        sigLight.position.set(x, 16, z + 5);
+        sigLight.target.position.set(x, 0.5, z);
+      },
       // wins: [p1Rounds, p2Rounds]; colors: [hex, hex]
       setWins(wins, colors) {
         for (let side = 0; side < 2; side++) {
@@ -380,30 +407,144 @@
 
   /* =====================================================================
      CARS
-     The fight creates both cars (TP.Car, with the shared mesh). We take
-     over posing the body: flips, spins, recoil and knockdowns all happen
-     on mesh.userData.body, around a pivot at the car's middle.
+     The fight creates both cars (TP.Car, with the shared mesh). We swap
+     the shared model for the car's fighter body from bodies.js (painted in
+     the seat colour), and take over posing it: flips, spins, recoil and
+     knockdowns all happen on mesh.userData.body, around the car's middle.
      ===================================================================== */
-  function prepareCar(car) {
+  function prepareCar(car, fighterId, seatColor) {
     car.manualBodyPose = true;
-    const ud = car.mesh.userData;
-    // Move the body's pivot from the ground up to the car's middle, so a
-    // flip turns the car over around its centre instead of its tyres.
-    if (!ud.cfPivot) {
-      ud.body.children.forEach((c) => { c.position.y -= PIVOT_Y; });
-      ud.body.position.y = PIVOT_Y;
-      ud.cfPivot = true;
-    }
-    if (ud.marker) ud.marker.visible = false;   // the HUD sides say who's who; the arrow would clutter
+    const mesh = car.mesh;
+    const B = TP.FightBodies.build(fighterId, seatColor);
+    // Out with the shared model, in with the fighter body. The shared Car
+    // still reads userData.body / flame / marker in syncMesh, so we keep
+    // that shape (the marker is an empty, hidden placeholder).
+    while (mesh.children.length) mesh.remove(mesh.children[0]);
+    const marker = new THREE.Object3D();
+    marker.visible = false;
+    mesh.add(B.body, marker);
+    mesh.userData = { body: B.body, flame: B.flame, marker, cfPivot: true };
     return {
       car,
-      body: ud.body,
+      build: B,
+      body: B.body,
       yaw: null,            // displayed heading (smoothed when they swap sides)
       pitch: 0, roll: 0, spinY: 0,
       squash: 1,
       tumble: 0,            // continuous flip angle while juggled / thrown
       lastState: "",
+      lastMove: "",
+      sigOn: false,         // a signature move is under way (flash fired)
+      dmg: 0,               // damage look level 0..4 (see updateDamage)
+      debris: [],           // parts that flew off, flying or lying on the floor
+      smokeT: 0,
+      round: 0,
     };
+  }
+
+  /* =====================================================================
+     DAMAGE LOOKS, driven by health %:
+       level 1 (≤ 75%)  dents: panels knocked a little out of true, paint scuffed
+       level 2 (≤ 50%)  the bumpers and the spoiler fly off
+       level 3 (≤ 25%)  the hubcaps go too, and the bonnet smokes
+       level 4 (KO)     thick black smoke
+     Parts that fly off land and stay on the turntable until the round
+     resets, when everything is put back.
+     ===================================================================== */
+  function damageTarget(s) {
+    if (s.state === "ko") return 4;
+    const f = s.maxHealth ? s.health / s.maxHealth : 1;
+    return f <= 0.25 ? 3 : f <= 0.5 ? 2 : f <= 0.75 ? 1 : 0;
+  }
+
+  function knockOff(P, part, scene) {
+    const m = part.mesh;
+    if (m.parent !== part.home.parent) return;     // already gone
+    scene.attach(m);                               // keep its place in the world
+    const side = Math.random() < 0.5 ? -1 : 1;
+    P.debris.push({
+      mesh: m,
+      vel: new THREE.Vector3((Math.random() - 0.5) * 6, 6 + Math.random() * 4, side * (1.5 + Math.random() * 2.5)),
+      spin: new THREE.Vector3(Math.random() * 12 - 6, Math.random() * 12 - 6, Math.random() * 12 - 6),
+      resting: false,
+    });
+  }
+
+  function applyDamage(P, level, scene) {
+    const B = P.build;
+    if (level >= 1 && P.dmg < 1) {
+      // Dents: knock every painted panel a little out of true, scuff the paint.
+      for (const pm of B.panels) {
+        pm.rotation.x += (Math.random() - 0.5) * 0.09;
+        pm.rotation.z += (Math.random() - 0.5) * 0.09;
+        pm.scale.y *= 0.93 + Math.random() * 0.05;
+      }
+      B.paint.color.copy(B.paintColor).multiplyScalar(0.82);
+      B.paint.roughness = 0.7;
+    }
+    if (level >= 2 && P.dmg < 2) B.parts.filter((p) => p.kind !== "hubcap").forEach((p) => knockOff(P, p, scene));
+    if (level >= 3 && P.dmg < 3) {
+      B.parts.filter((p) => p.kind === "hubcap").forEach((p) => knockOff(P, p, scene));
+      B.paint.color.copy(B.paintColor).multiplyScalar(0.68);
+    }
+    P.dmg = level;
+  }
+
+  function resetDamage(P) {
+    const B = P.build;
+    for (const p of B.parts) {
+      const h = p.home;
+      if (p.mesh.parent !== h.parent) h.parent.add(p.mesh);
+      p.mesh.position.copy(h.pos);
+      p.mesh.quaternion.copy(h.quat);
+      p.mesh.scale.copy(h.scale);
+    }
+    for (const pm of B.panels) {
+      pm.rotation.copy(pm.userData.home.rot);
+      pm.scale.copy(pm.userData.home.scale);
+    }
+    B.paint.color.copy(B.paintColor);
+    B.paint.roughness = 0.4;
+    P.debris.length = 0;
+    P.dmg = 0;
+  }
+
+  const _v = new THREE.Vector3();
+  function updateDamage(P, s, dt, frozen, round) {
+    // A new round (or full health again) puts the car back together.
+    if (round !== P.round) {
+      P.round = round;
+      if (P.dmg > 0) resetDamage(P);
+      M.fx.clearSmoke();
+    }
+    const want = damageTarget(s);
+    if (want > P.dmg) applyDamage(P, want, M.scene);
+    if (frozen) return;
+    // Flying parts: tumble, fall, bounce once or twice, then lie still.
+    for (const d of P.debris) {
+      if (d.resting) continue;
+      d.vel.y -= 26 * dt;
+      d.mesh.position.addScaledVector(d.vel, dt);
+      d.mesh.rotation.x += d.spin.x * dt;
+      d.mesh.rotation.y += d.spin.y * dt;
+      d.mesh.rotation.z += d.spin.z * dt;
+      if (d.mesh.position.y < 0.08) {
+        d.mesh.position.y = 0.08;
+        d.vel.y = Math.abs(d.vel.y) * 0.3;
+        d.vel.x *= 0.6; d.vel.z *= 0.6;
+        d.spin.multiplyScalar(0.5);
+        if (d.vel.y < 1) { d.resting = true; d.mesh.rotation.x = Math.round(d.mesh.rotation.x / Math.PI) * Math.PI; }
+      }
+    }
+    // Smoke from the bonnet: a thin grey trail at level 3, thick black on a KO.
+    if (P.dmg >= 3) {
+      const rate = P.dmg >= 4 ? 14 : 5;
+      P.smokeT += dt * rate;
+      while (P.smokeT >= 1) {
+        P.smokeT -= 1;
+        M.fx.smoke(P.body.localToWorld(_v.copy(P.build.smokeAt)), P.dmg >= 4 ? 0.85 : 0.2);
+      }
+    }
   }
 
   // Total length in frames of a move, from Gameplay's move table if it's there.
@@ -531,35 +672,70 @@
       const scene = new THREE.Scene();
       const stage = buildStage(scene, DEFAULT_HALF_WIDTH);
       stage.setWins([0, 0], [TP.PLAYER_COLORS[0], TP.PLAYER_COLORS[1]]);
-      // Two parked cars facing off, for the poster shot.
-      const cars = [0, 1].map((i) => {
-        const mesh = TP.buildCarMesh(TP.PLAYER_COLORS[i]);
-        mesh.userData.marker.visible = false;
-        mesh.position.set(i ? 4.2 : -4.2, 0, 0);
-        mesh.rotation.y = i ? -Math.PI / 2 : Math.PI / 2;
-        scene.add(mesh);
-        return mesh;
-      });
+      // Two parked fighters facing off, for the poster shot. On the
+      // character select screen they become the live preview (preview()).
+      const cars = [null, null];
       const camera = makeCamera();
       let last = performance.now(), t = 0;
-      B = { scene, stage, camera, cars, raf: 0 };
+      B = { scene, stage, camera, cars, ids: [null, null], raf: 0, select: false, spin: [0, 0] };
+      FightView.preview(["rivet", "rivet"]);
       const loop = (now) => {
         if (!B) return;
         const dt = Math.min(0.05, (now - last) / 1000);
         last = now;
         t += dt;
         stage.update(dt);
-        // A slow swing across the front of the stage: a 3/4 view that
-        // drifts left and right, never round the back.
-        const a = Math.sin(t * 0.12) * 0.7;
-        camera.position.set(Math.sin(a) * 30, 8.5, Math.cos(a) * 30);
-        camera.lookAt(0, 2.2, 0);
+        if (B.select) {
+          // Character select: a closer front shot, and each car turns
+          // slowly on its spot so you see the whole body.
+          camera.position.set(0, 4.6, aspect < 1 ? 34 : 16.5);
+          camera.lookAt(0, aspect < 1 ? 3.4 : 1.6, 0);
+          B.cars.forEach((m, i) => {
+            if (!m) return;
+            // Closer together than the poster shot, so the side panels of
+            // the select screen don't cover them.
+            m.position.x = (i ? 1 : -1) * (aspect < 1 ? 2.1 : 2.8);
+            B.spin[i] += dt * 0.6;
+            m.rotation.y = (i ? -Math.PI / 2 : Math.PI / 2) + Math.sin(B.spin[i]) * 1.1;
+          });
+        } else {
+          // A slow swing across the front of the stage: a 3/4 view that
+          // drifts left and right, never round the back.
+          const a = Math.sin(t * 0.12) * 0.7;
+          camera.position.set(Math.sin(a) * 30, 8.5, Math.cos(a) * 30);
+          camera.lookAt(0, 2.2, 0);
+          B.cars.forEach((m, i) => {
+            if (!m) return;
+            m.position.x = i ? 4.2 : -4.2;
+            m.rotation.y = i ? -Math.PI / 2 : Math.PI / 2;
+          });
+        }
         camera.aspect = aspect;
         camera.updateProjectionMatrix();
         r.render(scene, camera);
         B.raf = requestAnimationFrame(loop);
       };
       B.raf = requestAnimationFrame(loop);
+    },
+
+    /* Show these two fighters ([p1Id, p2Id]) on the menu backdrop.
+       select = true switches to the character-select close-up. */
+    preview(ids, select) {
+      if (!B) return;
+      if (select !== undefined) B.select = !!select;
+      for (let i = 0; i < 2; i++) {
+        if (B.ids[i] === ids[i] && B.cars[i]) continue;
+        if (B.cars[i]) { B.scene.remove(B.cars[i]); TP.disposeScene(B.cars[i]); }
+        const built = TP.FightBodies.build(ids[i], TP.PLAYER_COLORS[i]);
+        const g = new THREE.Group();
+        g.add(built.body);
+        g.position.set(i ? 4.2 : -4.2, 0, 0);
+        g.rotation.y = i ? -Math.PI / 2 : Math.PI / 2;
+        B.scene.add(g);
+        B.cars[i] = g;
+        B.ids[i] = ids[i];
+        B.spin[i] = 0;
+      }
     },
 
     stopBackdrop() {
@@ -581,27 +757,31 @@
       const camera = makeCamera();
       const stage = buildStage(scene, halfWidth);
       const fx = new TP.FightFX(scene, camera, colors);
-      const cars = (fight.cars || []).map(prepareCar);
+      const ids = (fight.state.cars || []).map((c) => c.fighter);
+      const cars = (fight.cars || []).map((car, i) => prepareCar(car, ids[i], colors[i]));
+      fx.sparkColors = cars.map((P) => P.build.info.spark);
 
       M = {
-        scene, fight, camera, stage, fx, cars, colors,
+        scene, fight, camera, stage, fx, cars, colors, ids,
         cam: null,              // smoothed camera goal
         last: performance.now(),
         koT: 0, koVictim: -1,   // KO camera swing
-        lastHit: null,
+        combo: [0, 0],          // hits in each attacker's current combo (for the hit sound's pitch)
+        sig: null,              // the signature flash in progress: { who, t }
       };
+      if (TP.FightSfx) TP.FightSfx.music(true);
 
       // Effects, sounds and camera kicks come from fight events.
       if (typeof fight.onEvent === "function") {
         fight.onEvent((ev) => {
           if (!M || M.fight !== fight) return;
           M.fx.onEvent(ev);
-          playEventSound(ev);
+          playEventSound(ev, fight.state);
           if (ev.type === "ko") { M.koT = 0; M.koVictim = ev.victim != null ? ev.victim : ev.attacker === 0 ? 1 : 0; }
         });
       }
 
-      TP.FightUI.startMatch();
+      TP.FightUI.startMatch(fight);
       FightView.frame(fight.state);
     },
 
@@ -621,7 +801,11 @@
         const s = cs[i] || {};
         const victimShake = frozen && (s.state === "hitstun" || s.state === "blockstun" || s.state === "juggle");
         poseCar(P, s, dt, frozen, victimShake);
+        updateDamage(P, s, dt, frozen, state.round || 1);
+        watchMoves(P, s, i);
       });
+      updateSignature(dt);
+      updateMusic(state);
 
       M.stage.update(dt);
       M.stage.setWins(state.roundWins || [0, 0], M.colors);
@@ -642,6 +826,7 @@
       // Only what the view added: the stage set and the effects. The cars
       // and the scene itself belong to the fight / match.js.
       M.fx.dispose();
+      M.cars.forEach((P) => P.debris.forEach((d) => M.scene.remove(d.mesh)));
       M.scene.remove(M.stage.root);
       TP.disposeScene(M.stage.root);
       M = null;
@@ -674,7 +859,8 @@
       M.koT += dt;
       ang = Math.sin(Math.min(M.koT, 3) * 0.5) * 0.5;
       dist = Math.max(dist, 18);      // a wider shot so the whole wreck is in frame
-    } else {
+    } else if (state.phase !== "hitstop") {
+      // (A KO lands with hit-stop first, so keep the victim through it.)
       M.koVictim = -1;
     }
     const cx = M.cam.mx, cz = M.cam.mz;
@@ -686,23 +872,94 @@
     M.camera.position.add(sh);
   }
 
-  /* Placeholder sounds from the shared synth (proper fight sounds come in
-     sfx-fight.js, M2). Pitch rises with combo length on hits. */
+  /* =====================================================================
+     SOUNDS from fight events (sfx-fight.js). Each hit in a combo is pitched
+     higher: we count the attacker's hits until its combo_end event.
+     ===================================================================== */
   function playEventSound(ev) {
-    if (!TP.sfx) return;
+    const S = TP.FightSfx;
+    if (!S) return;
+    const a = ev.attacker === 1 ? 1 : 0;
     if (ev.type === "hit" || ev.type === "throw") {
-      const tier = TP.FightFX.hitTier(ev);
-      if (tier === 0) TP.sfx.play("hit", 0.15 + Math.min(0.5, (ev.combo || 0) * 0.08));
-      else TP.sfx.play("bump");
-      if (tier === 2) TP.sfx.play("ko");
+      const tier = ev.type === "throw" ? 1 : TP.FightFX.hitTier(ev);
+      M.combo[a] += 1;
+      S.hit(tier, M.combo[a]);
+      if (tier >= 1) S.thump();            // the low "freeze" under hit-stop
+      if (ev.type === "throw") S.screech();
     } else if (ev.type === "block") {
-      TP.sfx.play("tick");
-      TP.sfx.play("swing");
+      S.clang();
     } else if (ev.type === "whiff") {
-      TP.sfx.play("swing");
+      S.whoosh();
+    } else if (ev.type === "combo_end") {
+      M.combo[a] = 0;
+    } else if (ev.type === "round_start") {
+      M.combo = [0, 0];
     } else if (ev.type === "ko") {
-      TP.sfx.play("ko");
+      S.koSting();
     }
+  }
+
+  /* Sounds and flashes that come from what a car is DOING rather than from
+     an event: tyre screech on a sidestep or a dash strike, and the
+     signature flash when a signature move starts. */
+  function watchMoves(P, s, i) {
+    const st = s.state || "", move = st === "attack" ? String(s.move || "") : "";
+    if (st === "sidestep" && P.lastSound !== "sidestep" && TP.FightSfx) TP.FightSfx.screech();
+    if (move === "dash_strike" && P.lastMove !== "dash_strike" && TP.FightSfx) TP.FightSfx.screech();
+    if (move === "signature" && !P.sigOn) {
+      P.sigOn = true;
+      startSignature(i);
+    }
+    if (move !== "signature") P.sigOn = false;
+    P.lastSound = st;
+    P.lastMove = move;
+  }
+
+  /* =====================================================================
+     SIGNATURE FLASH (Grinder, Quake Drop, Slipstream)
+     The floodlights cut to 15%, a hard spotlight drops onto the attacker
+     in its seat colour, the camera pushes in, and the move's name slams
+     onto the screen. About a second, then the lights come back up.
+     ===================================================================== */
+  function signatureName(i) {
+    const id = M.ids[i];
+    const def = TP.FIGHTERS && TP.FIGHTERS[id];
+    return (def && def.signature && def.signature.name) || TP.FightBodies.info(id).signature;
+  }
+
+  function startSignature(i) {
+    M.sig = { who: i, t: 0 };
+    M.fx.kick = Math.max(M.fx.kick, 0.9);
+    if (TP.FightSfx) TP.FightSfx.sigSting();
+    if (TP.FightUI.signature) TP.FightUI.signature(i, signatureName(i));
+  }
+
+  function updateSignature(dt) {
+    if (!M.sig) return;
+    const S = M.sig;
+    S.t += dt;
+    const t = S.t;
+    // Lights: down fast (0.12 s), hold, back up over 0.35 s.
+    const k = t < 0.12 ? 1 - (t / 0.12) * 0.85 : t < 0.8 ? 0.15 : Math.min(1, 0.15 + ((t - 0.8) / 0.35) * 0.85);
+    M.stage.dim(k);
+    const car = M.cars[S.who].car;
+    M.stage.spot(car.pos.x, car.pos.z, M.colors[S.who], (1 - k) * 7);
+    if (t > 1.15) {
+      M.stage.dim(1);
+      M.stage.spot(0, 0, 0xffffff, 0);
+      M.sig = null;
+    }
+  }
+
+  /* Music speeds up in the last 10 seconds of a round, and again when
+     someone is one round from winning. */
+  function updateMusic(state) {
+    if (!TP.FightSfx) return;
+    const need = TP.FightUI.winsNeeded || 2;
+    const wins = state.roundWins || [0, 0];
+    const matchPoint = wins.some((w) => w >= need - 1);
+    const hurry = state.phase !== "intro" && state.phase !== "countdown" && (Number(state.timer) || 99) <= 10;
+    TP.FightSfx.intensity(hurry ? (matchPoint ? 2 : 1) : matchPoint ? 1 : 0);
   }
 
   TP.FightView = FightView;
