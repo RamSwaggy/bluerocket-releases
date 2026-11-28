@@ -117,8 +117,8 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - KO slow-mo
   - round-intro pan, SUPER READY, victory spotlight
   - a reduce-flashing option
-  Boss check: smoke PASS, victory screenshot OK, no errors. Small note for later: the loser's
-  "SUPER READY" tag still shows on the results screen.
+  Boss check: smoke PASS, victory screenshot OK, no errors. The loser's SUPER READY tag on the
+  results screen is fixed (`db3d3f5`).
 - QC JOB 4: update `car-fighter-human.js` for the M2 menu (character select), then do a full
   re-run. Art JOB 4: the polish pass.
 - QC JOB 2 is merged (`a2b5ecf`): `tools/car-fighter-human.js`. 10 of 11 PASS.
