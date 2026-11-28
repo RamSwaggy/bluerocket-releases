@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- Test page for shared/js/assets.js: loads one of each asset type, warms up, reports. -->
+<html><head><meta charset="utf-8"><title>Asset test</title></head>
+<body style="margin:0;background:#070b1a">
+<canvas id="c" style="width:100vw;height:100vh;display:block"></canvas>
+<script src="../../shared/vendor/three.min.js"></script>
+<script src="../../shared/vendor/three-addons.min.js"></script>
+<script src="../../shared/js/util.js"></script>
+<script src="../../shared/js/sfx.js"></script>
+<script src="../../shared/js/assets.js"></script>
+<script>
+(async () => {
+  window.result = { stage: "start" };
+  try {
+    await TP.Assets.loadAll({
+      tri: { type: "gltf", url: "test-triangle.gltf" },
+      tex: { type: "texture", url: "test-texture.png" },
+      data: { type: "json", url: "test-data.json" },
+      beep: { type: "audio", url: "test-beep.wav" },
+    }, { title: "Asset test" });
+    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c") });
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 50); camera.position.set(0.5, 0.5, 3);
+    const a = TP.Assets.cloneModel("tri"), b = TP.Assets.cloneModel("tri");
+    b.position.x = -1.2; scene.add(a, b);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshBasicMaterial({ map: TP.Assets.get("tex") }));
+    quad.position.x = 1.4; quad.visible = false; scene.add(quad); // hidden on purpose: warmUp must restore it
+    await TP.Assets.warmUp(renderer, scene, camera);
+    TP.Loading.hide();
+    TP.sfx.unlock();
+    const buf = await TP.sfx.decode(TP.Assets.get("beep"));
+    window.result = {
+      stage: "done",
+      triangleClones: [a, b].map(m => m.getObjectByName("TestTriangle") ? "ok" : "missing"),
+      clonesIndependent: a !== b && a.children[0] !== b.children[0],
+      textureSize: [TP.Assets.get("tex").image.width, TP.Assets.get("tex").image.height],
+      json: TP.Assets.get("data").values,
+      audioSeconds: buf ? Math.round(buf.duration * 100) / 100 : null,
+      hiddenRestored: quad.visible === false,
+      programs: renderer.info.programs.length,
+    };
+  } catch (e) { window.result = { stage: "error", message: String(e && e.message || e) }; }
+})();
+</script></body></html>
