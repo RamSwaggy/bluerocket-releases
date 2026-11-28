@@ -115,6 +115,32 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 - 2026-11-28 (Director): **Bonus-trophy ties** are broken on coins; if still tied, nobody gets it.
 - 2026-11-28 (Director): use the shared `TP.MenuNav.attach(card)` for gamepad/arrow menus.
 
+## ⏸ Paused 2026-11-28: resume notes
+
+Turbo Party was paused to save usage (Reece's call, via the Director). All three roles have stopped.
+
+**Merged in `team/turbo-party` (5b0c3d7 and after), all passing:** jobs 1 (trophy moves 10+ spaces
+along the track, one buy per turn), 2 (tie payouts, randomised Sumo, Sumo edge rule), 3 (QC: human-path
+test, 14-rule referee, seeded minigame runner, balance tool), 4a/4b (readable spaces and HUD, greyed-out
+menu options), 5a/5b/7/9 (Sumo retune, about 28 s rounds; KotH bot roles + seat-0 fix; Goal Frenzy goal
+nets; bonus-trophy ties broken on coins), 8/8b (controller/arrow menus via shared MenuNav), and the
+Director's shared changes (speed-cap fix, MenuNav, Rocket Rumble hub).
+
+**Unfinished, not merged:**
+- `team/turbo-party-gameplay` @ **790ee78**, job 10: bots plan shop and item use around trophy distance
+  (Warp / Turbo / Double / Pickpocket, with a per-bot temperament), and Goal Frenzy has up to 15 s of
+  golden-goal overtime (ties for 1st went from 10/20 to 5/20). The boss checked it on a merge with
+  5b0c3d7: smoke PASS and human 48/48 PASS. **Not yet done:** the balance check.
+- The Art and QC branches have nothing unmerged.
+
+**Next steps on resume:**
+1. Gameplay: run `node tools/turbo-party-balance.js 10 6` on job 10. Item buys should be spread across all
+   4 items, with fewer "40+ coins & 0 board 🏆". Then the boss merges it, and QC does its merge check plus
+   a full 20×6 for the balance table.
+2. If rich players still can't reach the trophy, take a rules change to the Director (e.g. a cheaper
+   Warp, or a second trophy).
+3. Then: Reece's gamepad and sound checklist (job 6), then the art backlog in the Director's order.
+
 ## Current jobs (round 1)
 
 | # | Job | Who | Status |
@@ -131,7 +157,7 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 7 | Re-measure Sumo + KotH at the new car speeds, retune if needed; bonus-tie tiebreak; KotH seat-0 bias fix | Gameplay | **merged** (38b4faf) |
 | 8 | Controller/arrow navigation on the menu and cards with TP.MenuNav | Art and UI | **merged** (963d366, 82c90aa: shared MenuNav fixes, workaround removed) |
 | 9 | Sumo round length ≈ 28 s at the new speeds | Gameplay | **merged** (4c687dc) |
-| 10 | Bot item strategy (bots only ever bought Double Dice) + Goal Frenzy tie-breaker | Gameplay | sent |
+| 10 | Bot item strategy (bots only ever bought Double Dice) + Goal Frenzy tie-breaker | Gameplay | **unmerged**, partly done (790ee78), see Paused |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
 
 ## Balance results (20 bot matches × 6 turns)
