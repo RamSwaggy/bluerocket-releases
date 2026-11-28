@@ -90,22 +90,27 @@ TP.M5 = TP.M5 || {};
       decks: [
         // (They run right to the side walls: a thin lane between a deck and
         // the wall would just be a place to get stuck.)
-        { x: -32, z: 0, w: 32, d: 60, h: 3 },  // west deck: x -48..-16, z -30..30
-        { x: 32, z: 0, w: 32, d: 60, h: 3 },   // east deck: x 16..48
+        // Narrower decks leave a wider street (x -20..20): the old 32-wide
+        // street was so cramped by its ramps that loops there kept getting
+        // cut and a lot of floor never got painted.
+        { x: -34, z: 0, w: 28, d: 60, h: 3 },  // west deck: x -48..-20, z -30..30
+        { x: 34, z: 0, w: 28, d: 60, h: 3 },   // east deck: x 20..48
       ],
       ramps: [
         // From the street up onto the west deck (climbing toward -X)...
-        { x: -10, z: -16, fx: -1, fz: 0, L: 12, W: 8, h: 3 },
-        { x: -10, z: 16, fx: -1, fz: 0, L: 12, W: 8, h: 3 },
+        // (Each ramp's top edge meets its deck's inner edge, x = ±20; that
+        // leaves a 16-wide free lane down the middle of the street.)
+        { x: -14, z: -18, fx: -1, fz: 0, L: 12, W: 8, h: 3 },
+        { x: -14, z: 18, fx: -1, fz: 0, L: 12, W: 8, h: 3 },
         // ...and onto the east deck (climbing toward +X).
-        { x: 10, z: -16, fx: 1, fz: 0, L: 12, W: 8, h: 3 },
-        { x: 10, z: 16, fx: 1, fz: 0, L: 12, W: 8, h: 3 },
+        { x: 14, z: -18, fx: 1, fz: 0, L: 12, W: 8, h: 3 },
+        { x: 14, z: 18, fx: 1, fz: 0, L: 12, W: 8, h: 3 },
       ],
       spawns: [
-        { x: -30, z: -18, heading: 0 },          // west deck, south end, facing north
-        { x: 30, z: -18, heading: 0 },           // east deck
-        { x: -30, z: 18, heading: Math.PI },     // west deck, north end, facing south
-        { x: 30, z: 18, heading: Math.PI },      // east deck
+        { x: -34, z: -18, heading: 0 },          // west deck, south end, facing north
+        { x: 34, z: -18, heading: 0 },           // east deck
+        { x: -34, z: 18, heading: Math.PI },     // west deck, north end, facing south
+        { x: 34, z: 18, heading: Math.PI },      // east deck
       ],
     },
 
