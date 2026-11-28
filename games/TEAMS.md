@@ -1,5 +1,10 @@
 # Rocket Rumble teams: how they work
 
+> **Operating mode since 2026-11-28: efficiency first (Reece).** Only Deflect Duel and the
+> Surprise mode are active, each run by its boss alone (one builder). Turbo Party, Boost
+> Runner and Car Fighter are paused. Core is idle. Message the Director only at milestones or
+> when blocked. The handover is in `DIRECTOR.md`.
+
 **Rocket Rumble** is one game with several **modes**. Every mode uses the same rocket car,
 controls and feel; what changes is the objective. The hub (`games/index.html`) is the title
 screen: set up players once, pick a mode.
