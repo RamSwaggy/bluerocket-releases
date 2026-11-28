@@ -216,6 +216,11 @@
       const right = new THREE.Vector3(-f.z, 0, f.x);          // car's right-hand side (f × up)
       let vF = this.vel.x * f.x + this.vel.z * f.z;           // forward speed (signed)
       let vS = this.vel.x * right.x + this.vel.z * right.z;   // sideways speed
+      // Forward speed at the START of this step, before our own throttle or
+      // boost. The speed caps below use it to tell "speed you already had"
+      // (from a boost or a bump, allowed to bleed off) apart from speed
+      // you're adding right now with the gas (hard-capped).
+      const vF0 = vF;
 
       /* ---------- Boost meter ---------- */
       this.boosting = !!ctrl.boost && this.boost > 0;
@@ -255,12 +260,21 @@
 
       if (this.boosting) vF += T.boostAccel * dt;
 
-      // Speed caps (boost raises the cap).
+      /* ---------- Speed caps ----------
+         Gas alone tops out at maxSpeed; boost raises that to boostMax.
+         Speed you ALREADY had (vF0, from a boost that just ended or from
+         being hit) may be above the cap: it's kept, then bled off
+         smoothly, instead of snapping down. Throttle can't add to it.
+         The same rule backwards: reversing yourself tops out at
+         reverseMax, but a head-on ram can knock you back faster for a
+         moment. (Measuring from vF instead of vF0 let held gas creep up
+         to almost boost speed. Fixed 2026-11-27.) */
       const cap = this.boosting ? T.boostMax : T.maxSpeed;
-      vF = clamp(vF, -T.reverseMax, Math.max(cap, Math.min(vF, T.boostMax)));
-      // ^ the max() keeps speed you already had from a boost or a bump
-      //   instead of snapping it down the moment boost ends; drag bleeds it off.
+      const hi = Math.max(cap, Math.min(vF0, T.boostMax));
+      const lo = Math.min(-T.reverseMax, Math.max(vF0, -T.boostMax));
+      vF = clamp(vF, lo, hi);
       if (!this.boosting && vF > T.maxSpeed) vF = TP.util.damp(vF, T.maxSpeed, 1.5, dt);
+      if (vF < -T.reverseMax) vF = TP.util.damp(vF, -T.reverseMax, 1.5, dt);
 
       // Rebuild horizontal velocity using the (possibly new) heading.
       const f2 = this.forward();
