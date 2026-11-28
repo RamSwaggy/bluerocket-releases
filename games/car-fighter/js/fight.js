@@ -329,6 +329,8 @@ window.TP = window.TP || {};
       f.moveFrame = 0;
       f.moveSerial++;
       f.slamLanded = false;
+      f.landedAt = null;        // "active until it lands" moves: move frame it landed
+      f.endAt = null;           // ...and the move frame it now ends on
       f.hitsDone = [];          // multi-hit moves: which hits have landed
       f.shockLeft = 0;          // landing shockwave: frames it's still out
       f.shockDone = false;
@@ -601,6 +603,8 @@ window.TP = window.TP || {};
       f.stateFramesLeft = RULES.knockdownFrames;
       f.fallInvuln = false;
       f.car.vel.x *= 0.3;
+      const p = f.car.pos;
+      emit("knockdown", { victim: f.index, attacker: 1 - f.index, move: null, damage: 0, stun: RULES.knockdownFrames, x: p.x, y: p.y, z: p.z });
     }
 
     // Back under the player's control: any combo on this car is over.
@@ -651,12 +655,17 @@ window.TP = window.TP || {};
       f.moveFrame++;
       if (f.shockLeft > 0) f.shockLeft--;
       if (f.slamLanded) {
-        // An "active until it lands" move has landed: jump to its recovery.
+        // An "active until it lands" move has landed: its hit box is done,
+        // and its recovery starts now. moveFrame keeps counting normally
+        // (so the view and tests see the real frame number); the move just
+        // ends sooner than its full table length.
         f.slamLanded = false;
-        if (f.moveFrame < m.startup + m.active) f.moveFrame = m.startup + m.active;
+        f.landedAt = f.moveFrame - 1;
+        f.endAt = f.moveFrame + m.recovery;
       }
-      f.stateFramesLeft = Math.max(0, TP.moveFrames(m) - f.moveFrame);
-      if (f.moveFrame >= TP.moveFrames(m)) {
+      const total = f.endAt !== null ? f.endAt : TP.moveFrames(m);
+      f.stateFramesLeft = Math.max(0, total - f.moveFrame);
+      if (f.moveFrame >= total) {
         // An air move that times out in the air (rare) falls as "air".
         endMove(f);
         f.state = f.car.onGround ? "idle" : "air";
@@ -704,6 +713,8 @@ window.TP = window.TP || {};
         car.onGround = false;
         f.state = "juggle";
         f.wallBounced = true;
+        emit("wall_bounce", { victim: f.index, attacker: 1 - f.index, move: null, damage: 0, stun: 0,
+          x: car.pos.x, y: car.pos.y, z: car.pos.z });
       } else {
         car.vel.x = 0;
       }
@@ -749,6 +760,7 @@ window.TP = window.TP || {};
         return a.shockLeft > 0 ? Object.assign({}, row, { box: row.shock.box, hitIdx: 0 }) : null;
       }
       if (t < row.startup || t >= row.startup + row.active) return null;
+      if (a.landedAt !== null && t > a.landedAt) return null;   // a landed slam's box is gone
       if (row.crossup && (a.passedAt === null || t < a.passedAt + row.crossup.delay)) return null;
       return Object.assign({}, row, { hitIdx: 0 });
     }

@@ -38,7 +38,7 @@ window.TP = window.TP || {};
       role: "All-rounder",
       blurb: "A compact coupe that does a bit of everything. Learn the game here.",
       stats: { power: 3, speed: 3, weight: 3, reach: 3 },
-      health: 1000,
+      health: 1050,                     // tuned from 1000 (QC sims: Rivet won 41-44%)
       tuning: {},                       // shared car defaults
       knockbackMul: 1,
       moveOverrides: {},
@@ -56,7 +56,7 @@ window.TP = window.TP || {};
       role: "Heavy",
       blurb: "A box truck that's slow to start but hits like a crane. Its Ram and Corkscrew shrug off a hit.",
       stats: { power: 5, speed: 1, weight: 5, reach: 3 },
-      health: 1150,                     // tuned from 1200 (QC sims: Haulback ~60%)
+      health: 1120,                     // tuned from 1200 (QC sims: Haulback ~60%)
       tuning: { maxSpeed: 14, boostMax: 24, bumpScale: 1.3 },
       knockbackMul: 0.9,                // takes 10% less knockback
       sidestep: { frames: 26 },         // slower to dodge
@@ -96,7 +96,7 @@ window.TP = window.TP || {};
       role: "Speedster",
       blurb: "A low wedge that slides everywhere. Weak hits, fast hands, and it's gone before you swing.",
       stats: { power: 2, speed: 5, weight: 1, reach: 2 },
-      health: 950,                      // tuned from 850 (QC sims: rounds too short, Skitter too weak)
+      health: 975,                      // tuned from 850 (QC sims: rounds too short, Skitter too weak)
       tuning: { maxSpeed: 20, boostMax: 31, grip: 7 },
       knockbackMul: 1.05,               // takes 5% more knockback (tuned from 1.1)
       sidestep: { frames: 18 },         // quick dodge, same invulnerability

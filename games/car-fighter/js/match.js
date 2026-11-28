@@ -26,6 +26,9 @@
      TP.Match.stop()            stop the loop
      TP.Match.runFrames(n)      advance n frames immediately (tests)
      TP.Match.runToEnd(max)     run until the match ends (headless sims)
+     TP.Match.setTimeScale(s)   visual slow-motion: 0.25 = quarter speed,
+                                1 = normal (resets on start; headless and
+                                runFrames ignore it)
      TP.Match.options           the options in use
    A page whose menu starts the fight itself sets
    `TP.MATCH_MANUAL_START = true` before this script; otherwise the fight
@@ -97,6 +100,7 @@ window.TP = window.TP || {};
   function clearLatch() { latched[0] = {}; latched[1] = {}; }
 
   let current = null; // { fight, scene, options, controllers, timer, running }
+  let timeScale = 1;  // see setTimeScale
 
   function start(overrides = {}) {
     stop();
@@ -112,6 +116,7 @@ window.TP = window.TP || {};
       scene,
     });
     current = { fight, scene, options: o, controllers, running: true, acc: 0, last: performance.now(), handle: null };
+    timeScale = 1;   // slow-motion always resets with a new fight
     TP.fight = fight;
     TP.Match.options = o;
     TP.Match.fight = fight;
@@ -137,7 +142,10 @@ window.TP = window.TP || {};
     if (!run.running || run !== current) return;
     const realDt = Math.min(0.1, Math.max(0, (now - run.last) / 1000));
     run.last = now;
-    run.acc += realDt * run.options.speed;
+    // timeScale (slow-motion) only changes how fast real time feeds the
+    // fixed steps, so the fight itself stays exactly the same. Headless
+    // runs ignore it.
+    run.acc += realDt * run.options.speed * (run.options.headless ? 1 : timeScale);
 
     if (TP.Input) TP.Input.poll();
     const humans = readHumans(run.controllers);
@@ -176,7 +184,14 @@ window.TP = window.TP || {};
     return runFrames(maxFrames);
   }
 
-  TP.Match = { start, stop, runFrames, runToEnd, readOptions, options: null, fight: null };
+  // Visual slow-motion (e.g. 0.25 on a KO). 1 = normal. Clamped to 0..4.
+  function setTimeScale(s) {
+    const v = Number(s);
+    timeScale = Number.isFinite(v) ? Math.max(0, Math.min(4, v)) : 1;
+    return timeScale;
+  }
+
+  TP.Match = { start, stop, runFrames, runToEnd, readOptions, setTimeScale, getTimeScale: () => timeScale, options: null, fight: null };
 
   window.addEventListener("load", () => {
     if (!TP.MATCH_MANUAL_START) start();
