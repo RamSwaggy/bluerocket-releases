@@ -98,7 +98,7 @@
     return m;
   }
 
-  function build(scene, cfg) {
+  function build(scene, cfg, duel) {
     cfg = cfg || {};
     // Fall back to the agreed design numbers if a field is missing, so a
     // half-filled config still draws something sensible.
@@ -345,11 +345,15 @@
 
     /* ---------- Per-frame animation ---------- */
     let t = 0;
+    let serveFlash = 0;   // set to 1 by flashServe()
     function update(dt) {
       t += dt;
       // Serve circle breathes slowly.
-      serveRing.material.opacity = 0.55 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2));
-      serveGlow.material.opacity = 0.04 + 0.04 * (0.5 + 0.5 * Math.sin(t * 2.2));
+      // A fresh serve makes it flare up and settle (serveFlash 1 → 0).
+      serveFlash = Math.max(0, serveFlash - dt * 1.6);
+      serveRing.material.opacity = Math.min(1, 0.55 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2)) + serveFlash);
+      serveGlow.material.opacity = 0.04 + 0.04 * (0.5 + 0.5 * Math.sin(t * 2.2)) + serveFlash * 0.25;
+      serveRing.scale.setScalar(1 + serveFlash * 0.25);
 
       // Pillars: idle shimmer, plus a flare (in the ball's colour) that fades.
       for (const p of pillarFx) {
@@ -379,10 +383,526 @@
         if (o.material && !disposables.includes(o.material)) o.material.dispose();
       });
       disposables.forEach((d) => d.dispose && d.dispose());
+      if (effects) effects.dispose();
     }
 
     scene.add(group);
-    return { group, update, flashWall, dispose };
+
+    /* The match's moment-to-moment effects (ball glow, swings, hits,
+       KOs, camera shake) live in buildEffects() below. They only exist
+       when a duel is passed in (the scratch preview has none). */
+    const effects = duel ? buildEffects(scene, group, cfg, duel, { flashServe: () => { serveFlash = 1; } }) : null;
+
+    return {
+      group,
+      update(dt) { update(dt); if (effects) effects.update(dt); },
+      flashWall,
+      dispose,
+      // duel.js copies these onto duel.hooks.
+      hooks: effects ? effects.hooks : undefined,
+    };
+  }
+
+  /* =====================================================================
+     MATCH EFFECTS — everything that makes a hit feel like a hit.
+
+     Built once per match by build() when it's given the duel. Nothing in
+     here changes the rules: it only READS TP.duel (ball, players, cars,
+     freezeLeft) and draws. The rules call our hooks at the right moments:
+
+       onHit(car, ball, speedFrac, smash)  flash, shockwave, sparks, shake
+       onSwing(car)                        (the swipe itself is drawn per frame)
+       onKO(victim, owner)                 explosion, screen flash, slow-mo
+       onWallBounce(pos, normal)           small sparks, a little shake
+       onServe()                           serve circle flares, trail resets
+       onRespawn(car)                      a light beam where the car appears
+       onMatchEnd(result)                  confetti over the winner
+
+     "Speed fraction" (frac) below always means 0 at the base hit speed
+     and 1 at the top speed, so every effect scales the same way.
+     ===================================================================== */
+
+  // One soft round glow texture (white centre fading to clear), painted
+  // in code and shared by every glow sprite.
+  let glowTex = null;
+  function getGlowTexture() {
+    if (glowTex) return glowTex;
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const g = c.getContext("2d");
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.25, "rgba(255,255,255,0.55)");
+    grad.addColorStop(0.6, "rgba(255,255,255,0.12)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    glowTex = new THREE.CanvasTexture(c);
+    return glowTex;
+  }
+
+  // Glowing materials add light on top of what's behind them (additive
+  // blending), so they never look like flat stickers.
+  const glowMat = (color, opacity, extra) => new THREE.MeshBasicMaterial(Object.assign({
+    color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending,
+  }, extra || {}));
+
+  function buildEffects(scene, group, cfg, duel, arenaApi) {
+    const C = cfg;
+    const disposables = [];
+    const keep = (o) => { disposables.push(o); return o; };
+    const fx = new TP.FX(scene);                 // shared particle system (sparks, explosions, confetti)
+    const tmpColor = new THREE.Color();
+    const WHITE = new THREE.Color(0xffffff);
+
+    // Colour helpers: a car's colour comes from its seat (car.index).
+    const carColor = (car) => TP.PLAYER_COLORS[car.index] ?? 0xffffff;
+    const carCss = (car) => TP.PLAYER_CSS[car.index] ?? "#ffffff";
+    const playerOf = (car) => duel.players[duel.cars.indexOf(car)];
+    // 0 at base speed, 1 at max speed (0 for a neutral ball).
+    const speedFrac = () => {
+      const b = duel.ball;
+      if (!b || b.neutral) return 0;
+      return Math.max(0, Math.min(1, (b.speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed)));
+    };
+
+    /* ---------- Effect clock ----------
+       During a hit-freeze the RULES stand still. The effects keep moving,
+       but slowly, so a hit "hangs" for a moment and then bursts. After a
+       KO the slow-down is stronger: a short slow-motion beat, entirely
+       inside the KO pause the rules already have (no extra game time). */
+    let koSlow = false;
+    const fxTimeScale = () => {
+      if (duel.freezeLeft > 0) return koSlow ? 0.22 : 0.35;
+      koSlow = false;
+      return 1;
+    };
+
+    /* =================== The ball =================== */
+    const R = C.ballR ?? 0.9;
+    const ballY = C.ballY ?? 1.1;
+    // A glowing shell around the ball (child of the rules' ball mesh, so
+    // it follows the ball and blinks with it while a serve waits).
+    const shell = new THREE.Mesh(keep(new THREE.SphereGeometry(R * 1.32, 24, 16)), keep(glowMat(0xffffff, 0.3)));
+    // A soft halo sprite that always faces the camera.
+    const halo = new THREE.Sprite(keep(new THREE.SpriteMaterial({
+      map: getGlowTexture(), color: 0xffffff, transparent: true, opacity: 0.6,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    })));
+    let ballAttached = false;
+    function attachToBall() {
+      if (ballAttached || !duel.ballMesh) return;
+      duel.ballMesh.add(shell);
+      duel.ballMesh.add(halo);
+      ballAttached = true;
+    }
+
+    // A ring and a soft glow on the floor under the ball: shows exactly
+    // where the ball is, even when it's fast or a car is in front of it.
+    const floorRingB = new THREE.Mesh(keep(new THREE.RingGeometry(R * 0.95, R * 1.25, 40)), keep(glowMat(0xffffff, 0.7, { side: THREE.DoubleSide })));
+    floorRingB.rotation.x = -Math.PI / 2;
+    floorRingB.position.y = 0.035;
+    group.add(floorRingB);
+    const floorGlow = new THREE.Mesh(keep(new THREE.PlaneGeometry(1, 1)), keep(glowMat(0xffffff, 0.35, { map: getGlowTexture() })));
+    floorGlow.rotation.x = -Math.PI / 2;
+    floorGlow.position.y = 0.03;
+    group.add(floorGlow);
+
+    /* The trail: a flat ribbon through the ball's recent positions,
+       brightest at the ball and fading to nothing. Points older than the
+       trail's lifetime drop off, so a faster ball leaves a LONGER trail. */
+    const TRAIL_N = 48;
+    const trail = [];   // newest first: { x, z, age }
+    const trailGeo = keep(new THREE.BufferGeometry());
+    const tPos = new Float32Array(TRAIL_N * 2 * 3);
+    const tCol = new Float32Array(TRAIL_N * 2 * 3);
+    trailGeo.setAttribute("position", new THREE.BufferAttribute(tPos, 3).setUsage(THREE.DynamicDrawUsage));
+    trailGeo.setAttribute("color", new THREE.BufferAttribute(tCol, 3).setUsage(THREE.DynamicDrawUsage));
+    const tIdx = [];
+    for (let i = 0; i < TRAIL_N - 1; i++) {
+      const a = i * 2, b2 = a + 1, c = a + 2, d = a + 3;
+      tIdx.push(a, b2, c, b2, d, c);
+    }
+    trailGeo.setIndex(tIdx);
+    const trailMesh = new THREE.Mesh(trailGeo, keep(new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    })));
+    trailMesh.frustumCulled = false; // its bounds change every frame
+    group.add(trailMesh);
+
+    function updateTrail(dt, frozen, color, frac) {
+      const b = duel.ball;
+      const life = 0.12 + 0.28 * frac;                 // seconds a point lives
+      // The ball jumped further than it could ever move in a frame (a
+      // serve, or a test placing it): start a fresh trail, no streak.
+      if (trail.length && Math.hypot(trail[0].x - b.pos.x, trail[0].z - b.pos.z) > 5) trail.length = 0;
+      if (!frozen) {
+        for (const p of trail) p.age += dt;
+        while (trail.length && trail[trail.length - 1].age > life) trail.pop();
+        const head = trail[0];
+        if (!head || Math.hypot(head.x - b.pos.x, head.z - b.pos.z) > 0.08) {
+          trail.unshift({ x: b.pos.x, z: b.pos.z, age: 0 });
+          if (trail.length > TRAIL_N) trail.pop();
+        }
+      }
+      const n = trail.length;
+      const show = !b.neutral && b.speed > 1 && n > 1;
+      trailMesh.visible = show;
+      if (!show) return;
+      // Width: almost the ball's size at the head, tapering to a point.
+      const w0 = R * (0.75 + 0.45 * frac);
+      const bright = 0.8 + 0.6 * frac;
+      for (let i = 0; i < n; i++) {
+        // Direction of the ribbon here (from the next older point).
+        const p = trail[i];
+        const q = trail[Math.min(n - 1, i + 1)], o = trail[Math.max(0, i - 1)];
+        let dx = o.x - q.x, dz = o.z - q.z;
+        const len = Math.hypot(dx, dz) || 1;
+        dx /= len; dz /= len;
+        const k = i / (n - 1);                        // 0 at the ball → 1 at the tail
+        const w = w0 * (1 - k);
+        const px = -dz * w, pz = dx * w;              // sideways from the travel direction
+        const j = i * 6;
+        tPos[j] = p.x + px; tPos[j + 1] = ballY; tPos[j + 2] = p.z + pz;
+        tPos[j + 3] = p.x - px; tPos[j + 4] = ballY; tPos[j + 5] = p.z - pz;
+        const f = Math.pow(1 - k, 1.6) * bright;      // fade (additive: darker = more see-through)
+        for (const off of [j, j + 3]) {
+          tCol[off] = color.r * f; tCol[off + 1] = color.g * f; tCol[off + 2] = color.b * f;
+        }
+      }
+      trailGeo.setDrawRange(0, (n - 1) * 6);
+      trailGeo.attributes.position.needsUpdate = true;
+      trailGeo.attributes.color.needsUpdate = true;
+    }
+
+    let ballFlash = 0;   // 1 right after a hit, fading to 0
+
+    function updateBall(dt, rawDt, frozen) {
+      attachToBall();
+      const b = duel.ball;
+      if (!b || !duel.ballMesh) return;
+      const frac = speedFrac();
+      const neutral = b.neutral;
+      // Owner colour, or white for a neutral ball.
+      if (neutral || b.owner === null) tmpColor.copy(WHITE);
+      else tmpColor.setHex(TP.PLAYER_COLORS[duel.players[b.owner].seat]);
+      // Neutral ball pulses gently so it reads as "anyone's".
+      const pulse = neutral ? 0.6 + 0.4 * Math.sin(t * 6) : 1;
+
+      ballFlash = Math.max(0, ballFlash - rawDt * 4);
+      // The rules' ball mesh: brighter with speed, white-hot right after a hit.
+      const m = duel.ballMesh.material;
+      m.emissiveIntensity = (0.45 + 0.7 * frac) * pulse + ballFlash * 2.5;
+      if (ballFlash > 0) m.color.lerp(WHITE, ballFlash * 0.8);
+      duel.ballMesh.scale.setScalar(1 + ballFlash * 0.35);
+
+      shell.material.color.copy(tmpColor);
+      shell.material.opacity = (0.22 + 0.33 * frac) * pulse + ballFlash * 0.4;
+      shell.scale.setScalar(1 + 0.15 * frac);
+      halo.material.color.copy(tmpColor);
+      halo.material.opacity = (0.45 + 0.4 * frac) * pulse + ballFlash * 0.5;
+      halo.scale.setScalar(R * (3.4 + 3 * frac + ballFlash * 3));
+
+      floorRingB.position.x = floorGlow.position.x = b.pos.x;
+      floorRingB.position.z = floorGlow.position.z = b.pos.z;
+      floorRingB.material.color.copy(tmpColor);
+      floorRingB.material.opacity = 0.55 * pulse + 0.25 * frac;
+      floorGlow.material.color.copy(tmpColor);
+      floorGlow.material.opacity = 0.3 + 0.35 * frac;
+      floorGlow.scale.setScalar(R * (4 + 3 * frac));
+
+      updateTrail(dt, frozen, tmpColor, frac);
+    }
+
+    /* =================== Pooled one-shot effects =================== */
+    // Flat expanding rings (shockwaves), pooled.
+    const waveGeo = keep(new THREE.RingGeometry(0.82, 1, 56));
+    const waves = [];   // { mesh, t, dur, r0, r1, op }
+    function shockwave(pos, color, r0, r1, dur, op, y) {
+      let w = waves.find((q) => q.t >= q.dur);
+      if (!w) {
+        const mesh = new THREE.Mesh(waveGeo, glowMat(0xffffff, 0, { side: THREE.DoubleSide }));
+        disposables.push(mesh.material);
+        mesh.rotation.x = -Math.PI / 2;
+        group.add(mesh);
+        w = { mesh, t: 0, dur: 1 };
+        waves.push(w);
+      }
+      Object.assign(w, { t: 0, dur, r0, r1, op });
+      w.mesh.material.color.set(color);
+      w.mesh.position.set(pos.x, y ?? ballY, pos.z);
+      w.mesh.scale.setScalar(r0);
+      w.mesh.visible = true;
+    }
+
+    // Bright flash sprites (the "pop" at the moment of impact), pooled.
+    const pops = [];    // { sprite, t, dur, s0, s1 }
+    function pop(pos, color, s0, s1, dur) {
+      let p = pops.find((q) => q.t >= q.dur);
+      if (!p) {
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: getGlowTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        disposables.push(sprite.material);
+        group.add(sprite);
+        p = { sprite, t: 0, dur: 1 };
+        pops.push(p);
+      }
+      Object.assign(p, { t: 0, dur, s0, s1 });
+      p.sprite.material.color.set(color);
+      p.sprite.position.set(pos.x, ballY, pos.z);
+      p.sprite.visible = true;
+    }
+
+    // Vertical light beams (respawn, winner), pooled.
+    const beamGeo = keep(new THREE.CylinderGeometry(1, 1, 1, 32, 1, true));
+    const beams = [];   // { mesh, t, dur, follow }
+    function beam(car, color, dur, radius, height) {
+      let bm = beams.find((q) => q.t >= q.dur);
+      if (!bm) {
+        const mesh = new THREE.Mesh(beamGeo, glowMat(0xffffff, 0, { side: THREE.DoubleSide }));
+        disposables.push(mesh.material);
+        group.add(mesh);
+        bm = { mesh, t: 0, dur: 1 };
+        beams.push(bm);
+      }
+      Object.assign(bm, { t: 0, dur, car, radius, height });
+      bm.mesh.material.color.set(color);
+      bm.mesh.visible = true;
+    }
+
+    function updatePools(fdt) {
+      for (const w of waves) {
+        if (w.t >= w.dur) continue;
+        w.t += fdt;
+        const k = Math.min(1, w.t / w.dur);
+        const ease = 1 - Math.pow(1 - k, 3);          // fast out, slow settle
+        w.mesh.scale.setScalar(w.r0 + (w.r1 - w.r0) * ease);
+        w.mesh.material.opacity = w.op * (1 - k);
+        if (k >= 1) w.mesh.visible = false;
+      }
+      for (const p of pops) {
+        if (p.t >= p.dur) continue;
+        p.t += fdt;
+        const k = Math.min(1, p.t / p.dur);
+        p.sprite.scale.setScalar(p.s0 + (p.s1 - p.s0) * k);
+        p.sprite.material.opacity = (1 - k) * (1 - k);
+        if (k >= 1) p.sprite.visible = false;
+      }
+      for (const bm of beams) {
+        if (bm.t >= bm.dur) continue;
+        bm.t += fdt;
+        const k = Math.min(1, bm.t / bm.dur);
+        const pos = bm.car.pos;
+        // Tall and thin at first, then it narrows and fades out.
+        const r = bm.radius * (1 - 0.6 * k);
+        bm.mesh.scale.set(r, bm.height, r);
+        bm.mesh.position.set(pos.x, bm.height / 2, pos.z);
+        bm.mesh.material.opacity = 0.55 * (1 - k);
+        if (k >= 1) bm.mesh.visible = false;
+      }
+    }
+
+    /* =================== Per-car extras: swing swipe, shield =================== */
+    const carFx = new Map();   // car → { pivot, arcA, arcB, reach, shield }
+    const arcGeoA = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 1.1, (C.hitRange ?? 3.6) + 0.1, 28, 1, 0, Math.PI * 0.55));
+    const arcGeoB = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.7, (C.hitRange ?? 3.6), 28, 1, 0, Math.PI * 0.9));
+    const reachGeo = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.08, (C.hitRange ?? 3.6), 64));
+    const shieldGeo = keep(new THREE.RingGeometry(1.95, 2.2, 48));
+    function getCarFx(car) {
+      let f = carFx.get(car);
+      if (f) return f;
+      const color = carColor(car);
+      const flat = (geo, op) => {
+        const m = new THREE.Mesh(geo, glowMat(color, op, { side: THREE.DoubleSide }));
+        disposables.push(m.material);
+        m.rotation.x = -Math.PI / 2;
+        return m;
+      };
+      // The swipe spins on a pivot just above the floor, under the car.
+      const pivot = new THREE.Group();
+      pivot.position.y = 0.12;
+      const arcA = flat(arcGeoA, 0);   // bright leading blade
+      const arcB = flat(arcGeoB, 0);   // dimmer smear behind it
+      const reach = flat(reachGeo, 0); // faint circle: how far a swing reaches
+      pivot.add(arcA, arcB, reach);
+      pivot.visible = false;
+      car.mesh.add(pivot);
+      const shield = flat(shieldGeo, 0);
+      shield.position.y = 0.1;
+      shield.visible = false;
+      car.mesh.add(shield);
+      f = { pivot, arcA, arcB, reach, shield };
+      carFx.set(car, f);
+      return f;
+    }
+
+    function updateCars() {
+      duel.players.forEach((p, i) => {
+        const car = duel.cars[i];
+        const f = getCarFx(car);
+        // Hide the rules' placeholder ring: we draw the swipe instead.
+        const placeholder = car.mesh.userData.swingRing;
+        if (placeholder) placeholder.visible = false;
+
+        const swinging = p.swingT > 0 && !p.out && p.dead <= 0;
+        f.pivot.visible = swinging;
+        if (swinging) {
+          // One full spin over the swing: k goes 0 → 1.
+          const k = 1 - p.swingT / (C.swingTime || 0.28);
+          const fade = Math.min(1, (1 - k) * 2.2);
+          f.arcA.rotation.z = -k * Math.PI * 2;
+          f.arcB.rotation.z = -k * Math.PI * 2 + 0.55;
+          f.arcA.material.opacity = 0.95 * fade;
+          f.arcB.material.opacity = 0.35 * fade;
+          f.reach.material.opacity = 0.35 * fade;
+        }
+        // Invulnerable after a respawn: a pulsing ring around the car.
+        const safe = p.invuln > 0 && !p.out && p.dead <= 0;
+        f.shield.visible = safe;
+        if (safe) {
+          f.shield.material.opacity = 0.35 + 0.35 * Math.sin(t * 14);
+          f.shield.scale.setScalar(1 + 0.06 * Math.sin(t * 7));
+        }
+      });
+    }
+
+    /* =================== Camera: shake and zoom ===================
+       "Trauma" goes up on big moments and drains away; the shake is
+       trauma squared, so small bumps barely move and big ones really
+       rattle. The camera is nudged sideways (not turned), so the arena
+       never tilts. Zoom narrows the field of view for a smash or KO. */
+    let trauma = 0, zoom = 0, base = null;
+    const addShake = (amount) => { trauma = Math.min(1.2, trauma + amount); };
+    function updateCamera(rawDt) {
+      const cam = duel.camera;
+      if (!cam) return;
+      if (!base) base = { pos: cam.position.clone(), fov: cam.fov };
+      trauma = Math.max(0, trauma - rawDt * 1.6);
+      zoom = Math.max(0, zoom - rawDt * 2.2);
+      const s = trauma * trauma * 1.1;
+      cam.position.set(
+        base.pos.x + s * (Math.sin(t * 61) + 0.5 * Math.sin(t * 97)) * 0.6,
+        base.pos.y + s * Math.sin(t * 73) * 0.3,
+        base.pos.z + s * (Math.sin(t * 53 + 1.3) + 0.5 * Math.sin(t * 89)) * 0.6
+      );
+      // Ease in/out so the zoom feels like a punch, not a jump.
+      const z = zoom * zoom * (3 - 2 * zoom);
+      cam.fov = base.fov - 6 * z;
+      cam.updateProjectionMatrix();
+    }
+
+    /* =================== Hooks (called by the rules) =================== */
+    const hooks = {
+      onHit(car, ball, frac, smash) {
+        const color = carColor(car);
+        const pos = ball.pos;
+        ballFlash = 1;
+        // Impact pop and a shockwave on the floor plane at ball height.
+        pop(pos, 0xffffff, R * 2, R * (6 + 5 * frac), 0.22);
+        shockwave(pos, color, R, R * (4 + 5 * frac), 0.45, 0.9);
+        // Sparks in the hitter's colour, more and faster with speed.
+        fx.burst(pos, [color, 0xffffff], {
+          count: Math.round(12 + 20 * frac), speed: 9 + 12 * frac, up: 1.5, gravity: 16, life: 0.5, size: 0.22,
+        });
+        addShake(0.25 + 0.55 * frac);
+        if (smash) {
+          // A Smash: a second, much bigger white ring, more sparks, a punch-in zoom.
+          shockwave(pos, 0xffffff, R * 1.5, R * (10 + 6 * frac), 0.6, 1);
+          shockwave(pos, color, R, R * 14, 0.8, 0.6, 0.05);
+          pop(pos, color, R * 4, R * 14, 0.35);
+          fx.burst(pos, [color, 0xffe14d, 0xffffff], { count: 30, speed: 20, up: 3, gravity: 14, life: 0.7, size: 0.3 });
+          addShake(0.5);
+          zoom = 1;
+          if (TP.HUD.flash) TP.HUD.flash(carCss(car), 0.18);
+        }
+      },
+
+      onSwing() { /* the swipe is drawn every frame from swingT (updateCars) */ },
+
+      onKO(victim, owner) {
+        const vColor = carColor(victim);
+        const oColor = owner ? carColor(owner) : 0xffffff;
+        const pos = victim.pos.clone();
+        pos.y = 0.8;
+        // The car blows apart in its own colour, with the owner's colour mixed in.
+        fx.explosion(pos, vColor);
+        fx.burst(pos, [oColor, 0xffffff], { count: 22, speed: 15, up: 5, life: 0.9, size: 0.34 });
+        shockwave(pos, oColor, 1, 13, 0.9, 0.9, 0.06);
+        shockwave(pos, vColor, 0.5, 7, 0.6, 1, 0.08);
+        pop(pos, 0xffffff, 3, 16, 0.4);
+        addShake(1.0);
+        zoom = Math.max(zoom, 0.7);
+        koSlow = true;           // the KO pause plays as slow motion
+        if (TP.HUD.flash) TP.HUD.flash(owner ? carCss(owner) : "#ffffff", 0.32);
+      },
+
+      onWallBounce(pos, normal) {
+        const b = duel.ball;
+        const frac = speedFrac();
+        const color = b.owner === null ? 0xffffff : TP.PLAYER_COLORS[duel.players[b.owner].seat];
+        const at = new THREE.Vector3(pos.x, ballY, pos.z);
+        fx.burst(at, [color, 0xffffff], { count: Math.round(5 + 10 * frac), speed: 5 + 8 * frac, up: 1, gravity: 18, life: 0.4, size: 0.18 });
+        if (frac > 0.25) addShake(0.08 + 0.25 * frac);
+      },
+
+      onServe() {
+        trail.length = 0;        // the ball teleported: don't streak across the arena
+        ballFlash = 0;
+        arenaApi.flashServe();
+        shockwave({ x: 0, z: 0 }, 0xffe14d, 1, 5, 0.6, 0.7, 0.05);
+      },
+
+      onRespawn(car) {
+        beam(car, carColor(car), 0.7, 1.6, 9);
+        shockwave(car.pos, carColor(car), 0.5, 4, 0.5, 0.9, 0.06);
+      },
+
+      onMatchEnd(result) {
+        const car = result && duel.cars[result.winner];
+        if (!car) return;
+        const pos = car.pos.clone();
+        pos.y = 1;
+        fx.confetti(pos);
+        fx.confetti(pos, { count: 40 });
+        beam(car, carColor(car), 2.5, 2.2, 14);
+      },
+    };
+
+    /* =================== Shader warm-up ===================
+       The first time a new kind of glowing material is drawn, the GPU
+       compiles it, which can hitch the very first hit. So for the first
+       couple of frames every pooled effect is drawn once, invisibly
+       (opacity 0), to get that out of the way during the countdown. */
+    shockwave({ x: 0, z: 0 }, 0xffffff, 1, 1, 0.05, 0);
+    pop({ x: 0, z: 0 }, 0xffffff, 0.01, 0.01, 0.05);
+    let warmFrames = 2;
+
+    /* =================== Every frame =================== */
+    let t = 0;
+    function update(rawDt) {
+      t += rawDt;
+      const frozen = duel.freezeLeft > 0 || duel.countdown > 0;
+      const fdt = rawDt * fxTimeScale();
+      if (warmFrames > 0) {
+        warmFrames--;
+        // Keep the warm-up meshes on screen (invisible) for these frames.
+        for (const w of waves) w.mesh.material.opacity = 0;
+        for (const p of pops) p.sprite.material.opacity = 0;
+      }
+      updateBall(fdt, rawDt, frozen);
+      updateCars();
+      updatePools(fdt);
+      fx.update(fdt);
+      updateCamera(rawDt);
+    }
+
+    function dispose() {
+      fx.dispose();
+      disposables.forEach((d) => d && d.dispose && d.dispose());
+    }
+
+    return { hooks, update, dispose };
   }
 
   TP.DuelArena = { build };

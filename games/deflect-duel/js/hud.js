@@ -57,6 +57,18 @@
       toastTimer = setTimeout(() => el.classList.remove("show"), seconds * 1000);
     },
 
+    /* A quick full-screen flash of colour (a KO, a smash). strength is
+       the peak opacity (0..1); it fades out on its own. */
+    flash(css, strength = 0.3) {
+      const el = $("flash");
+      el.classList.add("now");                 // jump straight to the peak...
+      el.style.background = css || "#ffffff";
+      el.style.opacity = String(strength);
+      void el.offsetWidth;                     // (make the browser apply it now)
+      el.classList.remove("now");              // ...then let the CSS fade take over
+      el.style.opacity = "0";
+    },
+
     hint(html) { $("hint").innerHTML = html || ""; },
 
     card(html) {
@@ -224,7 +236,6 @@
       card.querySelector("#menu").addEventListener("click", () => { TP.HUD.hideCard(); if (onMenu) onMenu(); });
       // B / Escape on the results card goes back to the menu.
       attachNav(card, { onBack: () => { TP.HUD.hideCard(); if (onMenu) onMenu(); } });
-      if (TP.sfx) TP.sfx.play("trophy");
       return card;
     },
   };
