@@ -37,15 +37,20 @@
                    to defaults, "← All modes" goes to the hub, rematch
                    resets everything
 
-   Test interface used (agreed with Gameplay; only needed with ?test):
-     TP.duel.update(dt), .paused, .newMatch({players, lives, pillars}),
+   Test interface used (the real game's names; only needed with ?test):
+     TP.duelTest.newMatch({players, lives, pillars})  (makes a NEW TP.duel)
+     TP.duel.update(dt), .paused, .cfg (this match's DUEL_CFG copy),
      .setInput(i, ctrl), .setBot(i, on), .placeCar(i, {x,z}, heading),
      .setBall({pos, vel, owner}), .tuning (or players[i].tuning / .car.tuning)
      TP.duel.players[i] { lives, out, invuln, pos, airborne, kos, car }
      TP.duel.ball { pos, vel, speed, owner, neutral }, .freezeLeft,
      .state, .winner, .koLog[{ t, victim, owner, speed }]
-     TP.DUEL_CFG numbers (missing ones fall back to the agreed design
-     values and the report says so)
+     TP.DUEL_CFG numbers: baseSpeed, speedStep, maxSpeed, hitRange,
+     swingTime, missCooldown, aimBendDeg, freezeMin/Max, stalemateTime,
+     respawnDelay, respawnInvuln, jumpClear, ballR, pillarList (missing
+     ones fall back to the design values and the report says so)
+     Heading: 0 = nose along +Z, steer +1 lowers the heading (turns right),
+     as in shared/js/car.js and duel.js _hit().
 
    Exit code 0 = every test passed (or was skipped with a reason),
    1 = something failed. Every failure line says what was expected and
@@ -76,21 +81,32 @@ window.QC = (function () {
   const DT = 1 / 60;
   const d = () => TP.duel;
   // Agreed design values, used only when DUEL_CFG doesn't expose one.
-  const DESIGN = { maxSpeed: null, baseSpeed: null, hitReach: 3.6, hitWindow: 0.28, hitCooldown: 0.5,
-                   aimBendDeg: 25, stalemateTime: 12, invulnTime: 2, freezeMax: 0.3 };
+  const DESIGN = { maxSpeed: null, baseSpeed: null, hitRange: 3.6, swingTime: 0.28, missCooldown: 0.5,
+                   aimBendDeg: 25, stalemateTime: 12, respawnInvuln: 2, freezeMax: 0.3, jumpClear: 1.0, ballR: 0.8 };
   const notes = [];      // "used a fallback value" notes for the report
 
+  // The real game's names come first; the names from QC's first plan
+  // (and the QC mock) are accepted too.
+  const ALIASES = { hitRange: ["hitReach"], swingTime: ["hitWindow"], missCooldown: ["hitCooldown"],
+                    respawnInvuln: ["invulnTime"], ballR: ["ballRadius"], jumpClear: [] };
   function cfg(key) {
-    const v = TP.DUEL_CFG && TP.DUEL_CFG[key];
-    if (typeof v === "number") return v;
+    const C = (d() && d().cfg) || TP.DUEL_CFG || {};   // the match's own copy if it has one
+    for (const k of [key].concat(ALIASES[key] || [])) if (typeof C[k] === "number") return C[k];
     if (DESIGN[key] === null || DESIGN[key] === undefined) return undefined;
     const msg = "DUEL_CFG." + key + " not exposed, used design value " + DESIGN[key];
     if (!notes.includes(msg)) notes.push(msg);
     return DESIGN[key];
   }
 
-  const HOOKS = ["update", "newMatch", "setInput", "setBot", "placeCar", "setBall"];
-  function missingHooks() { return HOOKS.filter((h) => typeof (d() && d()[h]) !== "function"); }
+  const HOOKS = ["update", "setInput", "setBot", "placeCar", "setBall"];
+  // newMatch is TP.duelTest.newMatch in the real game (only in ?demo/?test).
+  const newMatchFn = () => (window.TP.duelTest && typeof TP.duelTest.newMatch === "function" ? (o) => TP.duelTest.newMatch(o)
+    : d() && typeof d().newMatch === "function" ? (o) => d().newMatch(o) : null);
+  function missingHooks() {
+    const m = HOOKS.filter((h) => typeof (d() && d()[h]) !== "function");
+    if (!newMatchFn()) m.push("newMatch (TP.duelTest.newMatch)");
+    return m;
+  }
 
   const xz = (p) => (Array.isArray(p) ? { x: p[0], y: p[1] || 0, z: p[2] } : { x: p.x, y: p.y || 0, z: p.z });
   const dist2 = (a, b) => { a = xz(a); b = xz(b); return Math.hypot(a.x - b.x, a.z - b.z); };
@@ -126,10 +142,11 @@ window.QC = (function () {
   const PARK = [{ x: -18, z: -11 }, { x: 18, z: 11 }, { x: -18, z: 11 }, { x: 18, z: -11 }];
   function fresh(opts) {
     const o = Object.assign({ players: 2, lives: 3, pillars: false }, opts || {});
+    if (d()) d().paused = true;
+    newMatchFn()(o);                // the real game makes a brand-new TP.duel here
     d().paused = true;
-    d().newMatch(o);
     d().players.forEach((p, i) => { d().setBot(i, false); d().setInput(i, {}); park(i); });
-    stepUntil(() => d().state === "play", 5);
+    stepUntil(() => d().state === "play", 10);   // 3-2-1 countdown, then the serve
     return d();
   }
   function park(i) { d().placeCar(i, PARK[i], 0); }
@@ -170,7 +187,7 @@ window.QC = (function () {
       if (owner() === i && towardsNose) hitSeen = true;
       return hitSeen;
     };
-    stepUntil(check, cfg("hitWindow") + 0.1);
+    stepUntil(check, cfg("swingTime") + 0.1);
     stepUntil(() => !(d().freezeLeft > 0), 1);
     d().setInput(i, {});
     const v = xz(d().ball.vel);
@@ -193,7 +210,11 @@ window.QC = (function () {
     return r;
   }
 
-  return { DT, d, cfg, missingHooks, xz, dist2, fwd, vlen, wrap, deg, idx, P, heading, owner, ballSpeed, boostOf,
+  // Real game: a KO'd car is off the field (dead > 0) for a moment, then respawns.
+  const onField = (i) => !P(i).out && !(P(i).dead > 0);
+  function waitRespawn(i, maxSec) { return stepUntil(() => onField(i), maxSec || 3); }
+
+  return { DT, d, cfg, onField, waitRespawn, missingHooks, xz, dist2, fwd, vlen, wrap, deg, idx, P, heading, owner, ballSpeed, boostOf,
            step, stepUntil, fresh, park, place, ballInFront, press, hit, shoot, result };
 })();
 `;
@@ -234,12 +255,15 @@ const TESTS = {
     r.ok(Q.idx(e.victim) === 1 && Q.idx(e.owner) === 0, `koLog entry is {victim: B, owner: A} (got ${JSON.stringify({ victim: e.victim, owner: e.owner })})`);
     r.ok(typeof e.speed === "number" && Number.isFinite(e.speed) && typeof e.t === "number", `koLog entry has numeric t and speed (got t=${e.t}, speed=${e.speed})`);
 
-    // Straight away: no second KO while B is invulnerable.
-    r.ok(Q.P(1).invuln > 0, `B is invulnerable right after the KO (invuln=${Q.P(1).invuln})`);
-    const l2 = Q.P(1).lives;
+    // Straight away B can't be hit again: off the field waiting to respawn
+    // (real game) or invulnerable (either way, no second KO).
+    r.ok(Q.P(1).invuln > 0 || Q.P(1).dead > 0, `B can't be hit right after the KO (invuln=${Q.P(1).invuln}, dead=${Q.P(1).dead})`);
+    Q.waitRespawn(1);
+    r.ok(Q.P(1).invuln > 0, `B respawns invulnerable (invuln=${Q.P(1).invuln})`);
+    const l2 = Q.P(1).lives, n2 = d.koLog.length;
     Q.shoot(0, 1, 15, 4);
     Q.step(0.4);
-    r.ok(Q.P(1).lives === l2, `no second KO while invulnerable (lives ${l2}→${Q.P(1).lives})`);
+    r.ok(Q.P(1).lives === l2 && d.koLog.length === n2, `a ball through B while invulnerable is no KO (lives ${l2}→${Q.P(1).lives})`);
 
     // After a KO the ball goes back to a neutral serve in the middle.
     d = Q.fresh({ players: 2, lives: 3 });
@@ -316,18 +340,18 @@ const TESTS = {
     // A swing that misses starts a cooldown; after it, hitting works again.
     d = Q.fresh(); Q.place(0, -15, -6, Math.PI / 2);
     Q.ballInFront(0, 10);                              // well out of reach
-    Q.press(0); Q.step(Q.cfg("hitWindow") + 0.05);
+    Q.press(0); Q.step(Q.cfg("swingTime") + 0.05);
     r.ok(d.ball.neutral, "a swing with the ball 10 units away doesn't hit it");
     Q.ballInFront(0, 2.0);                             // now in reach, but cooling down
     Q.press(0); Q.step(0.1);
     r.ok(d.ball.neutral, `pressing again during the miss cooldown does nothing (owner=${JSON.stringify(d.ball.owner)})`);
-    Q.step(Q.cfg("hitCooldown") + 0.1);
+    Q.step(Q.cfg("missCooldown") + 0.1);
     Q.ballInFront(0, 2.0);
     h = Q.hit(0);
-    r.ok(h.hit, `after the cooldown (${Q.cfg("hitCooldown")} s) hitting works again`);
+    r.ok(h.hit, `after the cooldown (${Q.cfg("missCooldown")} s) hitting works again`);
 
     // Reach: just inside hits, clearly outside doesn't.
-    const reach = Q.cfg("hitReach");
+    const reach = Q.cfg("hitRange");
     Q.fresh(); Q.place(0, -15, -6, Math.PI / 2); Q.ballInFront(0, reach - 0.3);
     r.ok(Q.hit(0, { distance: reach - 0.3 }).hit, `a ball ${(reach - 0.3).toFixed(1)} away (inside reach ${reach}) can be hit`);
     Q.fresh(); Q.place(0, -15, -6, Math.PI / 2);
@@ -394,9 +418,10 @@ const TESTS = {
       Q.place(0, -15, -10, Math.PI / 2);
       if (jump) {
         d.setInput(1, { jump: true });
-        const up = Q.stepUntil(() => Q.P(1).airborne && Q.xz(Q.P(1).pos).y > 1.5, 1);
+        const clear = Q.cfg("jumpClear") + 0.3;
+        const up = Q.stepUntil(() => Q.P(1).airborne && Q.xz(Q.P(1).pos).y > clear, 1);
         d.setInput(1, {});
-        if (up === null) return { error: `B never got airborne above 1.5 (y=${Q.xz(Q.P(1).pos).y.toFixed(2)}, airborne=${Q.P(1).airborne})` };
+        if (up === null) return { error: `B never got airborne above ${clear.toFixed(1)} (y=${Q.xz(Q.P(1).pos).y.toFixed(2)}, airborne=${Q.P(1).airborne})` };
       }
       const lives = Q.P(1).lives, n = d.koLog.length;
       Q.shoot(0, 1, 25, 3);
@@ -413,7 +438,7 @@ const TESTS = {
   /* ---------- KO, respawn, out, double KO ---------- */
   "ko-respawn": function () {
     const Q = window.QC, r = Q.result();
-    const inv = Q.cfg("invulnTime");
+    const inv = Q.cfg("respawnInvuln");
     const koB = (d) => {
       Q.place(0, -15, -10, Math.PI / 2); Q.place(1, 8, 0, -Math.PI / 2);
       Q.ballInFront(0, 2.0); Q.hit(0);
@@ -423,6 +448,9 @@ const TESTS = {
     };
     let d = Q.fresh({ players: 2, lives: 3 });
     r.ok(koB(d) !== null, "set-up: B is KO'd");
+    const delay = (d.cfg && d.cfg.respawnDelay) || 0;
+    const tBack = Q.waitRespawn(1, delay + 2);
+    r.ok(tBack !== null, `B comes back after the respawn delay (${delay} s + KO pause; took ${tBack === null ? "forever" : tBack.toFixed(2) + " s"})`);
     const i0 = Q.P(1).invuln;
     r.ok(Math.abs(i0 - inv) <= 0.25, `B respawns with about ${inv} s of invulnerability (invuln=${Number(i0).toFixed(2)})`);
     r.ok(!Q.P(1).out && Q.P(1).lives > 0, "B is still in the match with lives left");
@@ -487,13 +515,13 @@ const TESTS = {
     const b = Q.xz(d.ball.pos), v = Q.xz(d.ball.vel), sp = Q.vlen(v), u = { x: v.x / sp, z: v.z / sp };
     // Put A in the ball's path, facing the same way, and swing.
     Q.place(0, b.x + u.x * 1.5, b.z + u.z * 1.5, Math.atan2(u.x, u.z));
-    d.setBall({ pos: b, vel: v, owner: 0 });   // unchanged; keeps it owned
+    // (No setBall here: moving the ball by hand restarts the clock too.)
     Q.press(0);
     const hitAt = Q.stepUntil(() => d.freezeLeft > 0 || d.ball.speed > sp + 0.01, 0.4);
     r.ok(hitAt !== null, "set-up: A hits the ball at 11 s");
     Q.park(0);
     const t2 = Q.stepUntil(() => d.ball.neutral, T + 3);
-    r.ok(t2 !== null && t2 >= T - 0.4, `after a hit at 11 s, the reset waits a fresh ${T} s (came ${t2 === null ? "never" : t2.toFixed(2) + " s"} after the hit)`);
+    r.ok(t2 !== null && Math.abs(t2 - T) <= 0.4, `after a hit at 11 s, the reset waits a fresh ${T} s (came ${t2 === null ? "never" : t2.toFixed(2) + " s"} after the hit)`);
     return r.done();
   },
 
@@ -502,7 +530,7 @@ const TESTS = {
     const Q = window.QC, r = Q.result();
     const list = TP.DUEL_CFG && TP.DUEL_CFG.pillarList;
     if (!Array.isArray(list) || !list.length) { r.skip("DUEL_CFG.pillarList [{x, z, r}] isn't exposed, so the pillar positions are unknown"); return r.done(); }
-    const radius = Q.cfg("ballRadius") || 0.5;
+    const radius = Q.cfg("ballR") || 0.5;
     for (const [k, pl] of list.entries()) {
       // Pillars on: fire the ball straight at it.
       let d = Q.fresh({ pillars: true });
@@ -537,12 +565,12 @@ const TESTS = {
     }
     const carMax = TP.CAR_TUNING.maxSpeed, boostMax = TP.CAR_TUNING.boostMax;
     const drive = (boost) => {
-      Q.fresh({ players: 2 });
+      const m = Q.fresh({ players: 2 });     // a NEW TP.duel: use it, not the old 'd'
       Q.place(0, 0, -3, Math.PI / 2);
-      d.setInput(0, { throttle: 1, steer: 1, boost });
+      m.setInput(0, { throttle: 1, steer: 1, boost });
       let top = 0;
       Q.step(boost ? 2.2 : 3, () => { top = Math.max(top, Q.vlen(Q.P(0).car ? Q.P(0).car.vel : { x: 0, z: 0 })); });
-      d.setInput(0, {});
+      m.setInput(0, {});
       return top;
     };
     if (!Q.P(0).car || !Q.P(0).car.vel) r.ok(false, "players[i].car.vel not exposed, can't measure car speed");
@@ -647,7 +675,8 @@ async function rocketRumble(browser) {
   const over = await page.waitForFunction(() => window.TP && TP.duel && TP.duel.state === "over", null, { timeout: 90000 }).then(() => true, () => false);
   if (!over) ok(false, "set-up: a 2-car, 1-life demo match didn't finish within 90 s");
   else {
-    await page.waitForTimeout(800);
+    // The results card follows the "WINS!" moment after a short delay.
+    await page.waitForFunction(() => [...document.querySelectorAll("button, .btn")].some((el) => /rematch|play again/i.test(el.innerText) && el.offsetParent !== null), null, { timeout: 8000 }).catch(() => {});
     const href2 = await hubLinkPath(page);
     ok(href2 && path.resolve(fileURLToPath(href2)) === hubPath, `the results screen has "← All modes" pointing at the hub (${href2})`);
     const re = await findButton(page, /rematch|play again/);

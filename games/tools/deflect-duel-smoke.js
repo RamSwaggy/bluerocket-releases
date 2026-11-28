@@ -47,7 +47,8 @@
    (cars top out at 17, 27 boosting: a ball faster than 27 can't be
    outrun, only hit back or jumped). FAILS on rule breaks, page errors or
    a match still going after 5 game-minutes; balance oddities are FLAGGED
-   for the boss, not failed. Needs TP.duel.update / newMatch / paused.
+   for the boss, not failed. Needs TP.duel.update / .paused and
+   TP.duelTest.newMatch (the game's ?demo&test hooks).
    Exit code 0 = PASS, 1 = FAIL (including "the game isn't built yet").
 
    Test hooks (used to test this script itself):
@@ -136,7 +137,7 @@ function installMonitor({ ballSlack, carSlack, stepped }) {
     qc.violationCount++;
     // Keep the first 20 so one runaway bug doesn't flood the report.
     if (qc.violations.length < 20) {
-      const gt = window.TP.duel.t;
+      const gt = typeof window.TP.duel.time === "number" ? window.TP.duel.time : window.TP.duel.t;
       const t = (typeof gt === "number" ? gt : performance.now() / 1000).toFixed(2);
       qc.violations.push(`[${t}s, state=${window.TP.duel.state}] ${msg}`);
     }
@@ -219,19 +220,25 @@ function installMonitor({ ballSlack, carSlack, stepped }) {
    over (or maxSec of game time passes), running the rule monitor after
    every step and gathering balance numbers. Returns plain numbers. */
 function playSteppedMatch({ players, lives, maxSec, carMax, boostMax }) {
-  const d = window.TP.duel, qc = window.__ddQC, DT = 1 / 60;
+  const qc = window.__ddQC, DT = 1 / 60;
   const xz = (p) => (Array.isArray(p) ? { x: p[0], y: p[1] || 0, z: p[2] } : { x: p.x, y: p.y || 0, z: p.z });
   const idx = (who) => (who === null || who === undefined ? null : typeof who === "number" ? who
     : typeof who === "string" ? d.players.findIndex((p) => p.name === who) : who.index !== undefined ? who.index : d.players.findIndex((p) => p.name === who.name));
+  // The real game's newMatch is TP.duelTest.newMatch and builds a brand-new
+  // TP.duel; the QC mock has it on TP.duel. Numeric players = all bots.
+  if (window.TP.duel) window.TP.duel.paused = true;
+  if (window.TP.duelTest && window.TP.duelTest.newMatch) window.TP.duelTest.newMatch({ players, lives });
+  else window.TP.duel.newMatch({ players, lives });
+  const d = window.TP.duel;
   d.paused = true;
-  d.newMatch({ players, lives });
-  if (typeof d.setBot === "function") d.players.forEach((p, i) => d.setBot(i, true));
   qc.reset();
   const vBefore = qc.violationCount;
-  const st = { t: 0, playT: 0, over17: 0, over27: 0, resets: 0, serveSpeeds: [], returns: 0, jumpDodges: 0, carTop: 0, carFastLong: 0 };
+  const st = { t: 0, playT: 0, over17: 0, over27: 0, resets: 0, resetsNeutral: 0, endT: 0, longestNoKO: 0, lastKOt: 0, serveSpeeds: [], returns: 0, jumpDodges: 0, carTop: 0, carFastLong: 0 };
+  let wasState = d.state;
   let wasNeutral = d.ball.neutral, lastOwner = d.ball.neutral ? null : idx(d.ball.owner), kos = d.koLog.length;
   const near = d.players.map(() => false), fastFor = d.players.map(() => 0);
-  const rad = (window.TP.DUEL_CFG.ballRadius || 0.8) + 1.35;
+  const C = d.cfg || window.TP.DUEL_CFG;
+  const rad = (C.ballR || C.ballRadius || 0.8) + (C.koReach || 1.35);
   while (d.state !== "over" && st.t < maxSec) {
     d.update(DT); st.t += DT; qc.check();
     const b = d.ball, own = b.neutral ? null : idx(b.owner), koNow = d.koLog.length;
@@ -241,7 +248,10 @@ function playSteppedMatch({ players, lives, maxSec, carMax, boostMax }) {
       if (b.speed > boostMax) st.over27 += DT;
     }
     if (wasNeutral && !b.neutral) st.serveSpeeds.push(b.speed);               // first hit off a serve
-    if (!wasNeutral && b.neutral && koNow === kos) st.resets++;                // back to neutral with no KO = stalemate reset
+    // A re-serve with no KO = a stalemate reset. Count the ones where the
+    // serve itself was never touched separately (bots ignoring a neutral ball).
+    if (wasState === "play" && d.state === "serve" && koNow === kos) { st.resets++; if (wasNeutral) st.resetsNeutral++; }
+    if (koNow > kos) { st.longestNoKO = Math.max(st.longestNoKO, st.t - st.lastKOt); st.lastKOt = st.t; }
     if (own !== null && lastOwner !== null && own !== lastOwner) st.returns++; // an enemy ball hit back
     // A jump dodge: an enemy ball passes within touching distance of a car that is in the air.
     d.players.forEach((p, i) => {
@@ -250,17 +260,22 @@ function playSteppedMatch({ players, lives, maxSec, carMax, boostMax }) {
       const close = own !== null && own !== i && Math.hypot(c.x - bp.x, c.z - bp.z) < rad;
       if (close && !near[i] && p.airborne) st.jumpDodges++;
       near[i] = close;
-      const v = p.car && p.car.vel ? Math.hypot(p.car.vel.x, p.car.vel.z) : 0;
+      // Cars waiting to respawn (dead > 0 / car.out) keep their last velocity
+      // while off the field, so they don't count for car speed.
+      const offField = p.dead > 0 || (p.car && p.car.out);
+      const v = !offField && p.car && p.car.vel ? Math.hypot(p.car.vel.x, p.car.vel.z) : 0;
       st.carTop = Math.max(st.carTop, v);
       fastFor[i] = v > boostMax * 1.1 ? fastFor[i] + DT : 0;
       if (fastFor[i] > 0.5) st.carFastLong++;
     });
-    wasNeutral = b.neutral; lastOwner = own; kos = koNow;
+    wasNeutral = b.neutral; lastOwner = own; kos = koNow; wasState = d.state;
   }
+  st.longestNoKO = Math.max(st.longestNoKO, st.t - st.lastKOt);
   return {
     over: d.state === "over", length: st.t, winner: idx(d.winner),
     kos: d.koLog.length, koSpeeds: d.koLog.map((e) => e.speed),
-    resets: st.resets, playT: st.playT, over17: st.over17, over27: st.over27,
+    resets: st.resets, resetsNeutral: st.resetsNeutral, longestNoKO: st.longestNoKO,
+    alive: d.players.filter((p) => !p.out).map((p) => p.lives), playT: st.playT, over17: st.over17, over27: st.over27,
     serveSpeeds: st.serveSpeeds, returns: st.returns, jumpDodges: st.jumpDodges,
     carTop: st.carTop, carFastLong: st.carFastLong,
     violations: qc.violationCount - vBefore,
@@ -305,9 +320,9 @@ async function runStepped(page, errors) {
   const url = "file:///" + indexFile.replace(/\\/g, "/") + `?demo&test&players=${players}&lives=${lives}` + (process.env.DEFLECT_DUEL_QUERY ? "&" + process.env.DEFLECT_DUEL_QUERY : "");
   console.log(`Deflect Duel stepped run: ${matches} matches, ${players} bots, ${lives} lives (5 game-minute limit each)`);
   await page.goto(url);
-  const ready = await page.waitForFunction(() => window.TP && TP.duel && TP.DUEL_CFG && typeof TP.duel.update === "function" && typeof TP.duel.newMatch === "function", null, { timeout: 20000 }).then(() => true, () => false);
+  const ready = await page.waitForFunction(() => window.TP && TP.duel && TP.DUEL_CFG && typeof TP.duel.update === "function" && ((TP.duelTest && typeof TP.duelTest.newMatch === "function") || typeof TP.duel.newMatch === "function"), null, { timeout: 20000 }).then(() => true, () => false);
   if (!ready) {
-    console.log("\nTP.duel.update / TP.duel.newMatch never appeared within 20 s (test hooks not wired up?).");
+    console.log("\nTP.duel.update / TP.duelTest.newMatch never appeared within 20 s (test hooks not wired up?).");
     if (errors.length) console.log("\nERRORS:\n" + errors.join("\n"));
     console.log("RESULT: FAIL (test interface not found)");
     return 1;
@@ -321,7 +336,7 @@ async function runStepped(page, errors) {
     const r = await page.evaluate(playSteppedMatch, { players, lives, maxSec: MAX_MATCH_GAME_SEC, carMax: car.carMax, boostMax: car.boostMax });
     results.push(r);
     const mmss = `${Math.floor(r.length / 60)}:${String(Math.floor(r.length % 60)).padStart(2, "0")}`;
-    console.log(`  #${String(m + 1).padStart(3)}  ${r.over ? "over " : "STUCK"} ${mmss}  winner seat ${r.winner === null ? "-" : r.winner + 1}  KOs ${r.kos}  resets ${r.resets}${r.violations ? `  ⚠ ${r.violations} rule breaks` : ""}`);
+    console.log(`  #${String(m + 1).padStart(3)}  ${r.over ? "over " : "STUCK"} ${mmss}  winner seat ${r.winner === null ? "-" : r.winner + 1}  KOs ${r.kos}  resets ${r.resets}${r.over ? "" : `  (still in: lives ${r.alive.join("/")}, ${r.resetsNeutral} untouched serves, longest gap between KOs ${Math.round(r.longestNoKO)} s)`}${r.violations ? `  ⚠ ${r.violations} rule breaks` : ""}`);
   }
   const s = await page.evaluate(() => window.__ddQC);
 
@@ -339,8 +354,9 @@ async function runStepped(page, errors) {
 
   console.log(`\nRan ${matches} matches in ${((Date.now() - started) / 1000).toFixed(1)} s real time.`);
   console.log(`Wins by seat:        ${wins.map((w, i) => `seat ${i + 1}: ${w}`).join("  ")}`);
-  console.log(`Match length:        avg ${f1(avg(results.map((r) => r.length)))} s, longest ${f1(Math.max(...results.map((r) => r.length)))} s, stuck ${stuck}`);
-  console.log(`Per match:           ${f1(avg(results.map((r) => r.kos)))} KOs, ${f1(avg(results.map((r) => r.resets)))} stalemate resets, ${f1(avg(results.map((r) => r.returns)))} balls hit back, ${f1(avg(results.map((r) => r.jumpDodges)))} jump dodges`);
+  const lens = results.map((r) => r.length).sort((a, b) => a - b);
+  console.log(`Match length:        avg ${f1(avg(lens))} s, median ${f1(median(lens))} s, 90th pct ${f1(lens[Math.floor(lens.length * 0.9)])} s, longest ${f1(lens[lens.length - 1])} s, stuck ${stuck}`);
+  console.log(`Per match:           ${f1(avg(results.map((r) => r.kos)))} KOs, ${f1(avg(results.map((r) => r.resets)))} stalemate resets (${f1(avg(results.map((r) => r.resetsNeutral)))} of them an untouched serve), ${f1(avg(results.map((r) => r.returns)))} balls hit back, ${f1(avg(results.map((r) => r.jumpDodges)))} jump dodges`);
   console.log(`Ball vs car speed:   ball faster than a car (${car.carMax}) ${pct(sum(results.map((r) => r.over17)))} of play, faster than a boosting car (${car.boostMax}) ${pct(sum(results.map((r) => r.over27)))}`);
   console.log(`Ball speed at KOs:   median ${f1(median(koSpeeds))}, min ${f1(Math.min(...koSpeeds))}, max ${f1(Math.max(...koSpeeds))}  (${koSpeeds.length} KOs with a speed logged)`);
   console.log(`Serve speed:         first hit off a serve ${f1(Math.min(...serves))}–${f1(Math.max(...serves))}`);
