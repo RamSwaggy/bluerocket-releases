@@ -36,6 +36,10 @@
                    seat), Start saves it back, broken storage falls back
                    to defaults, "← All modes" goes to the hub, rematch
                    resets everything
+     v2-*          PLANNED v2 checks (box, owned flight, bump, strike
+                   angles, flip reset, clash, 3D dodge, tunnelling,
+                   freeze vs stalemate): report SKIP with their plan
+                   until v2 Stage A lands
 
    Test interface used (the real game's names; only needed with ?test):
      TP.duelTest.newMatch({players, lives, pillars})  (makes a NEW TP.duel)
@@ -583,6 +587,27 @@ const TESTS = {
     return r.done();
   },
 };
+
+/* =====================================================================
+   v2 (DESIGN.md) checks: PLANNED, NOT BUILT YET. Each reports SKIP with
+   the plan until Gameplay's v2 Stage A lands and its real field names can
+   be read from duel.js (QC was stopped before Stage A arrived). They are
+   listed here so they show up in every run and can't be forgotten.
+   ===================================================================== */
+const V2_PLANNED = {
+  "v2-box": "ball stays inside the 3D box (0 <= y <= arenaH, allowing ballR) every step",
+  "v2-owned-flight": "owned ball: no gravity, constant speed (±1%) between strikes until ownedHold, then fades over ownedFade to neutral",
+  "v2-bump": "driving into an owned ball changes neither tier nor owner; bumping a neutral ball gives ownership at baseSpeed",
+  "v2-strike-angles": "strike up ≈ +angleUpDeg, none ≈ 0°, down ≈ -angleDownDeg (floor bounce), sideways ≈ aimBendDeg",
+  "v2-flip-reset": "underside contact pops the ball up at ≈ buntKeep×v, keeps/takes ownership, no hit-freeze, resets air moves; nose/side = plain bump; airborne Hit with no direction = normal straight strike",
+  "v2-clash": "two strikes inside clashWindow: ball stays put, owner unchanged, nobody's tier rises, both cars pushed apart; just outside the window = normal tier-up",
+  "v2-dodge-3d": "jumping over a ground ball and a high ball over a grounded car are both no-KO; meeting the ball at its height in the air IS a KO",
+  "v2-tunnelling": "(FAIL-level) at maxSpeed (~210) fire at every wall, ceiling, floor (90°/45°/10°), each pillar (head-on/off-centre) and a parked car (grounded/mid-jump, 8 directions): never ends up past or inside anything; the car is KO'd or strikes",
+  "v2-freeze-vs-stalemate": "hit-freeze time (up to ~1.2 s) doesn't count toward stalemateTime: reset after stalemateTime ± 0.1 s of unfrozen time, also with several freezes",
+};
+for (const [name, plan] of Object.entries(V2_PLANNED)) {
+  TESTS[name] = new Function(`return { checks: [], skipped: ${JSON.stringify("v2 test not built yet (waiting for Stage A field names). Plan: " + plan)}, notes: [] };`);
+}
 
 /* =====================================================================
    rocket-rumble: menu ↔ hub setup, hub link, rematch. Driven from Node
