@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#04050d" />
+  <title>Neon Turf · Rocket Rumble</title>
+  <!-- =================================================================
+       Page shell (Art & UI). The 3D canvas fills the window; the HUD,
+       menu and pause screens build their own elements and styles
+       (js/hud.js, js/menu.js), so this page stays tiny.
+       ================================================================= -->
+  <style>
+    html, body {
+      margin: 0; height: 100%; overflow: hidden; background: #04050d; color: #f2f5ff;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    /* Inputs in the menu still need to be selectable/typeable. */
+    input, select { user-select: text; -webkit-user-select: text; }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    /* Shown only if WebGL can't start. */
+    #nogl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px;
+      text-align: center; font-size: 18px; color: #9aa6c8; }
+    #nogl a { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="nogl">This game needs WebGL, which this browser didn't allow.<br><a href="../index.html">← All modes</a></div>
+
+  <!-- Plain scripts (not ES modules) so the page runs from file://. -->
+  <script src="../shared/vendor/three.min.js"></script>
+  <script src="../shared/js/util.js"></script>
+  <script src="../shared/js/sfx.js"></script>
+  <script src="../shared/js/input.js"></script>
+  <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
+  <script src="../shared/js/menunav.js"></script>
+
+  <!-- Mode rules (Gameplay) -->
+  <script src="js/events.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/arenas.js"></script>
+  <script src="js/paint.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/match.js"></script>
+
+  <!-- Look and sound (Art & UI). Must load before main.js: it checks for
+       TP.M5.World / HUD / Menu when it starts. -->
+  <script src="js/world.js"></script>
+  <script src="js/vfx.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/hud.js"></script>
+  <script src="js/menu.js"></script>
+
+  <!-- Boot (Gameplay) -->
+  <script>
+    // If WebGL is unavailable, say so plainly instead of a blank page.
+    (function () {
+      try {
+        const c = document.createElement("canvas");
+        if (c.getContext("webgl2") || c.getContext("webgl")) return;
+      } catch (e) { /* fall through */ }
+      document.getElementById("nogl").style.display = "flex";
+    })();
+  </script>
+  <script src="js/main.js"></script>
+  <script>
+    /* Page glue (Art & UI): open the title menu unless this is a ?demo run,
+       and the shared M key to mute, like the other modes. */
+    (function () {
+      "use strict";
+      if (!new URLSearchParams(location.search).has("demo") && TP.M5.Menu) TP.M5.Menu.open();
+      addEventListener("keydown", (e) => {
+        const tag = (e.target && e.target.tagName) || "";
+        if (e.code !== "KeyM" || tag === "INPUT" || tag === "SELECT") return;
+        const muted = TP.sfx.toggleMute();
+        if (TP.M5.hud) TP.M5.hud.hint(muted ? "Sound off (M)" : "Sound on (M)", 1.4);
+      });
+    })();
+  </script>
+</body>
+</html>

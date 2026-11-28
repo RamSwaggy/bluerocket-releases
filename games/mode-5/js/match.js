@@ -1,0 +1,753 @@
+/* =====================================================================
+   match.js — TP.M5.Match: one match from the first countdown to the
+   final results. Cars, painting rules, trails, pops, bumps, pickups,
+   overdrive, teams, the round clock and the scores all live here.
+
+   It runs as a simple state machine, one fixed physics step at a time
+   (main.js calls step(1/60) as often as needed):
+
+     "countdown"  cars sit on their painted spawn pads, 3-2-1-GO
+     "play"       the round clock runs
+     "roundEnd"   cars brake to a stop on the final floor for a few seconds
+     → next round's "countdown", or
+     "matchEnd"   final standings are in; nothing more happens
+
+   Read-only state for the HUD and for QC's tests (TP.M5.match):
+     phase, round, rounds, timeLeft, overdrive, scores (% per player, in
+     players order), roundWins (per player; in teams both teammates get
+     the win), players (each has .car = the shared TP.Car and
+     .controller), winner (match winner index, null until the end, -1 for
+     a draw; in teams it's the winning TEAM 0/1), roundWinner, standings,
+     stats, pickups, grid, arena, cars.
+     Teams only: teams ([team of each player], else null), teamScores,
+     teamWins.
+     Debugging: TP.M5.asserts = list of failed self-checks (should stay
+     empty; each one is also a console warning).
+
+   Events emitted (see DESIGN.md; player numbers are indices 0..3, and in
+   teams every event about a player also carries `team`):
+     roundCountdown {round, arena, arenaName}   roundStart {round}
+     overdrive {round}
+     roundEnd {round, scores, winner, roundWins, teams?, teamScores?, teamWins?}
+     matchEnd {standings, stats, winner, roundWins, teams?, teamWins?}
+     paint {player, x, z, cells}               trailStart {player}
+     fill {player, cells, pct, cx, cz, cellsList, small}  (small = under CFG.minFill cells: keep quiet)
+     pop {victim, by, x, z, cells, minor}  (minor = tiny trail: no stun)             splat {player, x, z, r}
+     land {player, airtime, x, z}              bump {a, b, attacker, victim, impact, x, z, hard}
+     pickupSpawn {id, kind, x, z}              pickup {id, player, kind, x, z}
+     hint {text, player?, id}
+   suddenDeath {players, teams?, round} — at that round's countdown, right
+     after roundCountdown: the listed players are tied for the lead after
+     the last round and play it off; only their scores can win it.
+   Extras: dry {player, cells, closed?} (a trail dried: by itself, or
+           closed: true when a loop closed),
+           countdown {n} (3, 2, 1 each second, then 0 = GO).
+   `r` in splat is in world units; `cells` is a cell count; cellsList is
+   the filled cell indices (for the fill-sweep effect).
+   ===================================================================== */
+window.TP = window.TP || {};
+TP.M5 = TP.M5 || {};
+
+(function () {
+  "use strict";
+  const CFG = TP.M5.CFG;
+  const { clamp, lerp, dist2D } = TP.util;
+
+  TP.M5.PICKUP_KINDS = ["bomb", "mega", "boost"];
+  TP.M5.PICKUP_NAMES = { bomb: "Paint Bomb", mega: "Mega Roller", boost: "Boost Can" };
+
+  /* ---------- Self-checks ----------
+     Cheap sanity checks that run during play. A failure is logged once
+     (as a warning, not an error) and kept in TP.M5.asserts so QC's tests
+     can read it. They should never fire. */
+  TP.M5.asserts = [];
+  const seenAsserts = new Set();
+  function check(ok, msg) {
+    if (ok || seenAsserts.has(msg)) return;
+    seenAsserts.add(msg);
+    TP.M5.asserts.push(msg);
+    console.warn("[mode-5 assert] " + msg);
+  }
+
+  /* ---------- Tutorial hints (shown once per match, to humans) ---------- */
+  const HINTS = {
+    start: "Drive out of your colour and back in to FILL the loop!",
+    trail: "Your trail is WET — get back to your colour to FILL!",
+    fill: "FILL! Bigger loops = more turf",
+    popped: "Popped! Rivals that cross your wet trail steal it",
+    popper: "You popped a trail! Their wet paint is yours now",
+    drying: "Hurry home: a trail dries after 6 seconds with no fill",
+    land: "Big jumps splat a big blob of paint when you land",
+    boost: "Boost paints a wider stripe",
+    bomb: "Paint Bomb! A big splat of your colour",
+    mega: "Mega Roller! Huge stripe, and your trail can't be popped",
+    boostCan: "Boost Can! Full boost",
+    overdrive: "OVERDRIVE! Bigger paint, more pickups. Go for a huge loop!",
+    team: "Teams: your teammate's colour counts as home",
+  };
+  TP.M5.HINTS = HINTS;
+
+  class Match {
+    /* opts:
+         players   [{ name, controller, level? }] × 4 (controller "bot" for CPU)
+         rounds    best-of N (default CFG.rounds)
+         roundTime seconds per round (default CFG.roundTime)
+         arena     index of the first arena (default 0)
+         botLevel  default bot difficulty
+         teams     true = 2v2: seats 1+3 vs seats 2+4 */
+    constructor(opts = {}) {
+      this.rounds = opts.rounds || CFG.rounds;
+      this.roundTime = opts.roundTime || CFG.roundTime;
+      this.firstArena = opts.arena || 0;
+      this.tuning = TP.modeTuning(CFG.tuning);
+      this.teams = opts.teams ? [0, 1, 0, 1] : null;
+
+      // Everything 3D this match owns (the cars) hangs off this group, so
+      // whichever scene draws the match just adds `root` to itself.
+      this.root = new THREE.Group();
+
+      const seat = (s, i) => ({
+        index: i,
+        name: (s && s.name) || TP.DEFAULT_NAMES[i],
+        controller: s && s.controller && s.controller !== "off" ? s.controller : "bot",
+        level: (s && s.level) || opts.botLevel || CFG.botLevel,
+        color: TP.PLAYER_COLORS[i],
+        css: TP.PLAYER_CSS[i],
+        team: this.teams ? this.teams[i] : null,
+      });
+      this.players = [0, 1, 2, 3].map((i) => seat((opts.players || [])[i], i));
+      this.isBot = this.players.map((p) => p.controller === "bot");
+
+      this.cars = this.players.map((p) => {
+        const car = new TP.Car(this.root, p);
+        car.stun = 0;       // seconds of spin-out left
+        car.mega = 0;       // seconds of Mega Roller left
+        car.grace = 0;      // seconds until this car's trail can be popped again
+        car.airT = 0;       // time spent in the air this jump
+        car._surfVy = 0;    // how fast the floor under the car rises (ramps)
+        p.car = car;
+        return car;
+      });
+      this.bots = this.players.map((p, i) => (this.isBot[i] ? new TP.M5.Bot(this, this.cars[i], p.level) : null));
+
+      // Whole-match stats, per player.
+      this.stats = this.players.map(() => ({
+        painted: 0,      // cells gained (stripes, splats, fills, pops)
+        fills: 0,        // loops closed that filled something
+        bestFill: 0,     // biggest single fill, in % of the floor
+        pops: 0,         // rival trails you popped
+        popped: 0,       // times your trail was popped
+        pickups: 0,
+        distance: 0,     // units driven
+        roundPct: [],    // final % in each round
+      }));
+      this.roundWins = [0, 0, 0, 0];
+      this.teamWins = [0, 0];
+      this.winner = null;
+      this.roundWinner = null;
+      this.standings = null;
+      this.round = 0;
+      this.suddenDeath = null;   // { sides, players } during a sudden-death round
+      this._hintsShown = new Set();
+
+      /* Which spawn spot each seat gets is rotated by a random amount once
+         per match. The spots aren't all equally good on every arena (on
+         Split Level the south deck ends start a little worse), so fixed
+         spots would quietly favour some seats forever. A rotation keeps
+         teammates (seats 1+3, 2+4) together on the same side. */
+      this.spawnShift = Math.floor(Math.random() * 4);
+      this.arena = this._arenaFor(this.firstArena);
+      this.grid = new TP.M5.PaintGrid(this.arena);
+      this.grid.setTeams(this.teams);
+      this.startRound();
+    }
+
+    /* ------------------------------------------------------------------
+       Small helpers
+       ------------------------------------------------------------------ */
+    // Are players a and b on the same side (the same player, or teammates)?
+    sameSide(a, b) { return a === b || (!!this.teams && this.teams[a] === this.teams[b]); }
+
+    /* Emit an event. In teams, add `team` for whoever the event is about
+       (player / victim), and `byTeam` for a popper. */
+    _emit(name, data) {
+      if (this.teams) {
+        const who = data.player ?? data.victim;
+        if (who !== undefined && who >= 0) data.team = this.teams[who];
+        if (data.by !== undefined) data.byTeam = this.teams[data.by];
+      }
+      TP.M5.emit(name, data);
+    }
+
+    _pct(p) { return Math.round(this.grid.pct(p) * 10) / 10; }
+    _updateScores() {
+      this.scores = this.players.map((pl, i) => this._pct(i));
+      if (this.teams) this.teamScores = [0, 1].map((t) => Math.round(this.scores.reduce((s, v, i) => s + (this.teams[i] === t ? v : 0), 0) * 10) / 10);
+    }
+
+    /* ------------------------------------------------------------------
+       Round setup
+       ------------------------------------------------------------------ */
+    // The arena for arena number n, with this match's spawn rotation applied.
+    _arenaFor(n) {
+      const a = TP.M5.arenaFor(n), sp = a.spawns, k = this.spawnShift || 0;
+      a.spawns = sp.map((_, i) => sp[(i + k) % sp.length]);
+      a.pads = a.spawns;
+      return a;
+    }
+
+    startRound() {
+      this.round++;
+      this.arena = this._arenaFor(this.firstArena + this.round - 1);
+      this.grid.reset(this.arena);
+
+      this.phase = "countdown";
+      this.clock = CFG.countdown;
+      this._lastCount = -1;
+      this.timeLeft = this.roundTime;
+      this.elapsed = 0;
+      this.overdrive = false;
+      this.pickups = [];
+      this.pickupTimer = CFG.pickupEvery * 0.6; // first pickup a bit sooner
+      this._pickupId = 0;
+      this.trailAge = [0, 0, 0, 0];  // seconds each player's current trail has existed
+      this.out = [false, false, false, false]; // has each car left home since its last close?
+      this.outT = [0, 0, 0, 0];                // and for how long
+      this._bumpCd = {};             // "a-b" → seconds until that pair can hard-bump again
+      this.roundWinner = null;
+      this._frozenT = 0;             // self-check: time with no paint change during play
+      this._lastVersion = -1;
+
+      // Cars onto their spawn spots (on a deck, if that's where it is),
+      // each on a painted pad so a first loop has somewhere to close.
+      this.cars.forEach((car, i) => {
+        const s = this.arena.spawns[i];
+        car.placeAt(s.x, s.z, s.heading, s.y);
+        car.boost = 100;
+        car.stun = car.mega = car.grace = car.airT = car._surfVy = 0;
+        car.poppedBy = -1; car.poppedAt = -99;
+        this.grid.paintCircle(s.x, s.z, CFG.padR, i, false);
+      });
+      this._updateScores();
+      this.bots.forEach((b) => b && b.reset());
+
+      this._emit("roundCountdown", { round: this.round, arena: this.arena.id, arenaName: this.arena.name });
+    }
+
+    /* ------------------------------------------------------------------
+       One physics step
+       ------------------------------------------------------------------ */
+    step(dt) {
+      if (this.phase === "countdown") this._stepCountdown(dt);
+      else if (this.phase === "play") this._stepPlay(dt);
+      else this._stepEnded(dt);
+    }
+
+    _stepCountdown(dt) {
+      this.clock -= dt;
+      const n = Math.ceil(this.clock - 0.5); // 3, 2, 1 … then GO at 0.5 s left
+      if (n !== this._lastCount && n >= 0) {
+        this._lastCount = n;
+        this._emit("countdown", { n: Math.max(0, n) });
+      }
+      for (const car of this.cars) car.syncMesh(dt);
+      if (this.clock <= 0.5) {
+        this.phase = "play";
+        this._emit("roundStart", { round: this.round });
+        if (this.round === 1) {
+          this._hintAll("start");
+          if (this.teams) this._hintAll("team");
+        }
+      }
+    }
+
+    _stepPlay(dt) {
+      this.elapsed += dt;
+      this.timeLeft = Math.max(0, this.timeLeft - dt);
+
+      // Overdrive: the last stretch of the round.
+      if (!this.overdrive && this.timeLeft <= CFG.overdriveTime) {
+        this.overdrive = true;
+        this.pickupTimer = Math.min(this.pickupTimer, 1);
+        this._emit("overdrive", { round: this.round });
+        this._hintAll("overdrive");
+      }
+
+      // 1) Drive every car (humans and bots give the same control shape).
+      //    The order rotates every step: whoever goes first wins a "we
+      //    both crossed each other's trail this step" tie, so no seat may
+      //    always be first.
+      this._turn = ((this._turn || 0) + 1) % 4;
+      for (let k = 0; k < 4; k++) this._driveCar(this.cars[(this._turn + k) % 4], dt);
+
+      // 2) Car-vs-car bumps.
+      this._bumps(dt);
+
+      // 3) Pickups.
+      this._pickups(dt);
+
+      // 4) Trails dry by themselves after a while.
+      for (let p = 0; p < 4; p++) {
+        if (!this.grid.hasTrail(p)) { this.trailAge[p] = 0; continue; }
+        const before = this.trailAge[p];
+        this.trailAge[p] += dt;
+        if (before < CFG.trailDry - 1.5 && this.trailAge[p] >= CFG.trailDry - 1.5) this._hint("drying", p);
+        if (this.trailAge[p] >= CFG.trailDry) {
+          const cells = this.grid.dryTrail(p);
+          this.trailAge[p] = 0;
+          // A trail that dries by itself just becomes turf: no fill, and
+          // the next close needs a fresh trip out.
+          this.out[p] = false;
+          this._emit("dry", { player: p, cells });
+        }
+      }
+
+      this._updateScores();
+      this._selfCheck(dt);
+      if (this.timeLeft <= 0) this._endRound();
+    }
+
+    /* Run one car for one step: controls → physics → arena → paint. */
+    _driveCar(car, dt) {
+      const p = car.index;
+      let ctrl;
+      if (car.stun > 0) {
+        // Popped: no control while spinning out.
+        car.stun = Math.max(0, car.stun - dt);
+        ctrl = TP.Input.NEUTRAL;
+      } else if (this.isBot[p]) {
+        ctrl = this.bots[p].controls(dt);
+      } else {
+        ctrl = TP.Input.get(car.player.controller);
+      }
+      if (car.mega > 0) car.mega = Math.max(0, car.mega - dt);
+      if (this.out[p]) this.outT[p] += dt;
+      if (car.grace > 0) car.grace = Math.max(0, car.grace - dt);
+
+      const prev = { x: car.pos.x, y: car.pos.y, z: car.pos.z, onGround: car.onGround, surfVy: car._surfVy };
+      car.update(dt, ctrl, this.arena, this.tuning);
+      this.arena.resolveCar(car, prev);
+      this._sanity(car, prev);
+
+      // Spin-out: the body whirls (slowing down as the stun ends) while
+      // the car keeps sliding. The tyres then scrub the slide away.
+      if (car.stun > 0) {
+        car.heading += 14 * (car.stun / CFG.stunTime) * dt;
+        car.mesh.rotation.y = car.heading;
+      }
+
+      this.stats[p].distance += Math.hypot(car.pos.x - prev.x, car.pos.z - prev.z);
+
+      // A spinning car lays no paint (so it can't start a new trail and
+      // get popped again straight away).
+      if (car.stun > 0) { if (car.onGround) car.airT = 0; return; }
+
+      // Airtime and landing splats.
+      if (!car.onGround) {
+        car.airT += dt;
+        return; // no paint while airborne
+      }
+      if (!prev.onGround) {
+        const air = car.airT;
+        car.airT = 0;
+        if (air >= CFG.landMinAir) {
+          const k = clamp((air - CFG.landAir[0]) / (CFG.landAir[1] - CFG.landAir[0]), 0, 1);
+          const r = lerp(CFG.landR[0], CFG.landR[1], k) * this._mul();
+          this._emit("land", { player: p, airtime: air, x: car.pos.x, z: car.pos.z });
+          this._paintCar(car, r, true, prev);
+          this._emit("splat", { player: p, x: car.pos.x, z: car.pos.z, r: r * this.grid.cs });
+          if (air > 0.6) this._hint("land", p);
+        }
+      }
+
+      // The stripe under the car: wider with boost, widest with Mega Roller.
+      if (car.boosting) this._hint("boost", p);
+      const r = (car.mega > 0 ? CFG.megaR : car.boosting ? CFG.boostR : CFG.paintR) * this._mul();
+      this._paintCar(car, r, false, prev);
+    }
+
+    _mul() { return this.overdrive ? CFG.overdriveMul : 1; }
+
+    /* Safety net: if a car's state ever becomes invalid (not a number) or
+       it somehow ends up under the floor, put it back where it was on the
+       ground, stopped. A bad number would otherwise spread to every car
+       it bumps. This should never trigger; it's a seatbelt. */
+    _sanity(car, prev) {
+      const ok = [car.pos.x, car.pos.y, car.pos.z, car.vel.x, car.vel.y, car.vel.z, car.heading].every(Number.isFinite);
+      if (ok && car.pos.y > -1) return;
+      check(false, `car ${car.index} had a bad position (${ok ? "under the floor" : "not a number"}); reset`);
+      const safe = Number.isFinite(prev.x + prev.z) ? prev : this.arena.spawns[car.index];
+      car.pos.set(safe.x, this.arena.groundHeightAt(safe.x, safe.z), safe.z);
+      car.vel.set(0, 0, 0);
+      if (!Number.isFinite(car.heading)) car.heading = 0;
+      car.onGround = true;
+      car.mesh.position.copy(car.pos);
+    }
+
+    /* Self-checks during play (cheap): scores add up, and paint keeps
+       changing. With four cars driving, a whole 4 s with no change at all
+       means something is stuck. */
+    _selfCheck(dt) {
+      const total = this.scores.reduce((a, b) => a + b, 0);
+      check(total <= 100.5 && this.scores.every((s) => s >= 0), `scores out of range: ${this.scores.join(", ")}`);
+      // (Only in all-bot matches: people can legitimately sit still.)
+      if (!this.isBot.every(Boolean)) return;
+      if (this.grid.version !== this._lastVersion) { this._lastVersion = this.grid.version; this._frozenT = 0; }
+      else if ((this._frozenT += dt) > 4) check(false, `no paint changed for 4 s in round ${this.round} (score freeze)`);
+    }
+
+    /* Paint a circle under a car, applying the trail rules.
+
+       • Every newly painted cell that isn't already our side's dry turf
+         is WET (part of our trail), always, home or not.
+       • out[p] = "this car has left home": set whenever the car's centre
+         is on a cell that isn't home (own or teammate dry turf).
+       • A loop closes ONLY on the way back in: the car was out, and its
+         centre is now on home turf. Then the trail dries and the flood
+         fill runs. Plain steps at home dry nothing, so paint you lay just
+         ahead of you as you drive off your turf stays wet: the moment you
+         leave, your trail is exposed.
+       (The stripe reaches a little ahead of the car, which is why we
+       can't just "close whenever the centre is home": that dried the
+       fresh paint in front of the car every step, so it never left home.)
+
+       Finally, anyone whose wet trail the paint touched gets popped. */
+    _paintCar(car, r, isSplat, prev) {
+      const p = car.index, g = this.grid;
+      const hadTrail = g.hasTrail(p);
+      const res = g.paintCircle(car.pos.x, car.pos.z, r, p, true);
+      this.stats[p].painted += res.gained;
+      if (res.gained && !isSplat) this._emit("paint", { player: p, x: car.pos.x, z: car.pos.z, cells: res.gained });
+
+      const home = g.isHome(g.cellAt(car.pos.x, car.pos.z), p);
+      if (!home) {
+        if (!this.out[p]) this.outT[p] = 0;
+        this.out[p] = true;
+      }
+      // (The clip window only opens once we've been out a moment, so the
+      // jagged edge of our turf can't "close" us on the way out.)
+      if (this.out[p] && (home || (this.outT[p] > 0.2 && this._clipsHome(car, prev)))) {
+        // Back in from outside: close the loop (if the trail survived).
+        this.out[p] = false;
+        if (g.hasTrail(p)) this._closeLoop(p);
+      }
+      if (!hadTrail && g.hasTrail(p)) {
+        this.trailAge[p] = 0;
+        this._emit("trailStart", { player: p });
+        this._hint("trail", p);
+      }
+      if (res.hitWet) this._popMask(res.hitWet, p);
+    }
+
+    /* Clip window: a fill should count when you clip your turf at speed,
+       not only when the car's exact centre lands on it. So coming back in,
+       the loop also closes if either FRONT corner of the car is on home
+       turf, or if the centre passed over a home cell between the last
+       step and this one. (Only the front: on the way OUT, the back of the
+       car is still on your turf, and that mustn't close anything.) */
+    _clipsHome(car, prev) {
+      const g = this.grid, p = car.index;
+      const f = car.forward(), reach = CFG.clipReach;
+      for (const side of [-0.7, 0.7]) {
+        const x = car.pos.x + f.x * reach - f.z * side, z = car.pos.z + f.z * reach + f.x * side;
+        if (g.isHome(g.cellAt(x, z), p)) return true;
+      }
+      // (Swept check only when we were outside last step; leaving home,
+      // the path behind us is home and must not count.)
+      if (prev && !g.isHome(g.cellAt(prev.x, prev.z), p)) {
+        const d = Math.hypot(car.pos.x - prev.x, car.pos.z - prev.z), n = Math.ceil(d / (g.cs * 0.5));
+        for (let k = 1; k < n; k++) {
+          const t = k / n;
+          if (g.isHome(g.cellAt(prev.x + (car.pos.x - prev.x) * t, prev.z + (car.pos.z - prev.z) * t), p)) return true;
+        }
+      }
+      return false;
+    }
+
+    /* Close p's loop: the trail dries, the flood fill runs. Fills under
+       CFG.minFill cells still count but are "small" (effects and HUD
+       stay quiet for them, and they don't count as a fill in stats). */
+    _closeLoop(p) {
+      const dried = this.grid.wetCount[p];
+      const f = this.grid.closeLoop(p);
+      this.trailAge[p] = 0;
+      if (dried) this._emit("dry", { player: p, cells: dried, closed: true });
+      if (!f.cells) return;
+      const pct = Math.round((f.cells / this.grid.paintable) * 1000) / 10;
+      const st = this.stats[p];
+      st.painted += f.cells;
+      const small = f.cells < CFG.minFill;
+      if (!small) {
+        st.fills++;
+        st.bestFill = Math.max(st.bestFill, pct);
+        this._hint("fill", p);
+      }
+      this._emit("fill", { player: p, cells: f.cells, pct, cx: f.cx, cz: f.cz, cellsList: f.list, small });
+    }
+
+    // Pop every rival whose bit is set in `mask`, credited to `by`.
+    _popMask(mask, by) {
+      for (let q = 0; q < 4; q++) if (mask & (1 << q) && !this.sameSide(q, by)) this._pop(q, by);
+    }
+
+    /* Player q's trail is popped by player `by`: the trail becomes the
+       popper's paint, and q spins out and loses their boost. A Mega
+       Roller makes your trail un-poppable while it lasts, and there's a
+       short grace after each pop. Teammates can't pop each other. */
+    _pop(q, by) {
+      const victim = this.cars[q];
+      if (this.sameSide(q, by)) return;
+      if (victim.mega > 0 || victim.grace > 0 || !this.grid.hasTrail(q)) return;
+      // A tiny trail (a few cells just off your turf) is a "minor" pop:
+      // the popper still takes the cells, but no spin-out, no boost loss.
+      const minor = this.grid.wetCount[q] < CFG.minPop;
+      const res = this.grid.popTrail(q, by);
+      this.trailAge[q] = 0;
+      this.stats[by].painted += res.cells;
+      this._emit("pop", { victim: q, by, x: victim.pos.x, z: victim.pos.z, cells: res.cells, minor });
+      if (minor) return;
+      victim.stun = CFG.stunTime;
+      victim.grace = CFG.stunTime + CFG.popGrace;
+      victim.boost = 0;
+      // Remember who popped us, so that bot leaves us alone for a few
+      // seconds instead of popping the fresh trail we leave while
+      // recovering right next to it (felt like a stun-lock in playtests).
+      victim.poppedBy = by;
+      victim.poppedAt = this.elapsed;
+      this.stats[by].pops++;
+      this.stats[q].popped++;
+      this._hint("popped", q);
+      this._hint("popper", by);
+    }
+
+    /* ------------------------------------------------------------------
+       Bumps
+       ------------------------------------------------------------------ */
+    _bumps(dt) {
+      for (const k in this._bumpCd) this._bumpCd[k] -= dt;
+      // Car-vs-car pushes ignore the arena, so a car shoved against a deck
+      // or ramp side could end up a little inside it. Remember where each
+      // car was and undo any push that lands it inside something taller
+      // than it can step onto (the bounce velocity is kept).
+      const before = this.cars.map((c) => ({ x: c.pos.x, z: c.pos.z }));
+      const hits = TP.Car.collideAll(this.cars, this.tuning);
+      this.cars.forEach((c, i) => {
+        if (c.out) return;
+        const g = this.arena.groundHeightAt(c.pos.x, c.pos.z);
+        if (g > c.pos.y + 0.6) { c.pos.x = before[i].x; c.pos.z = before[i].z; }
+      });
+      for (const h of hits) {
+        const a = h.attacker.index, v = h.victim.index;
+        const key = Math.min(a, v) + "-" + Math.max(a, v);
+        // Teammates bounce off each other but never splat or pop.
+        const hard = h.impact > CFG.hardBump && !(this._bumpCd[key] > 0) && !this.sameSide(a, v);
+        const x = (h.a.pos.x + h.b.pos.x) / 2, z = (h.a.pos.z + h.b.pos.z) / 2;
+        TP.M5.emit("bump", { a: h.a.index, b: h.b.index, attacker: a, victim: v, impact: h.impact, x, z, hard });
+        if (!hard) continue;
+        this._bumpCd[key] = CFG.bumpCooldown;
+
+        // A hard hit knocks the victim's paint off: a splat in the
+        // attacker's colour where the victim was, and the victim's trail
+        // pops (the splat itself also pops any other trail it lands on).
+        const vx = h.victim.pos.x, vz = h.victim.pos.z;
+        const r = CFG.bumpSplatR * this._mul();
+        const res = this.grid.paintCircle(vx, vz, r, a, false);
+        this.stats[a].painted += res.gained;
+        this._emit("splat", { player: a, x: vx, z: vz, r: r * this.grid.cs });
+        this._pop(v, a);
+        this._popMask(res.hitWet, a);
+      }
+    }
+
+    /* ------------------------------------------------------------------
+       Pickups
+       ------------------------------------------------------------------ */
+    _pickups(dt) {
+      this.pickupTimer -= dt;
+      if (this.pickupTimer <= 0) {
+        this.pickupTimer = this.overdrive ? CFG.overdrivePickupEvery : CFG.pickupEvery;
+        if (this.pickups.length < CFG.pickupMax + (this.overdrive ? 1 : 0)) this._spawnPickup();
+      }
+
+      for (let k = this.pickups.length - 1; k >= 0; k--) {
+        const pk = this.pickups[k];
+        for (const car of this.cars) {
+          if (car.pos.y > pk.y + 3 || dist2D(car.pos.x, car.pos.z, pk.x, pk.z) > CFG.pickupGrabR) continue;
+          this.pickups.splice(k, 1);
+          this._grab(car, pk);
+          break;
+        }
+      }
+    }
+
+    /* Where a pickup appears: open floor away from obstacles, ramps, cars
+       and other pickups, and never deep inside someone's turf (that would
+       just be a free gift to the owner). Among 30 random spots we prefer
+       CONTESTED floor: unpainted, or where several colours meet. */
+    _spawnPickup() {
+      const A = this.arena, g = this.grid, U = TP.util;
+      let best = null, bestScore = -Infinity;
+      for (let tries = 0; tries < 30; tries++) {
+        const x = U.rand(-A.half + 8, A.half - 8), z = U.rand(-A.half + 8, A.half - 8);
+        if (A.solidAt(x, z, 4) || A.rampAt(x, z)) continue;
+        if (this.cars.some((c) => dist2D(c.pos.x, c.pos.z, x, z) < 10)) continue;
+        if (this.pickups.some((o) => dist2D(o.x, o.z, x, z) < 14)) continue;
+        // Look at the 7×7 cells around the spot.
+        const owners = new Set();
+        let empty = 0, n = 0;
+        for (let dj = -3; dj <= 3; dj++) for (let di = -3; di <= 3; di++) {
+          const c = g.cellAt(x + di * g.cs, z + dj * g.cs);
+          if (c < 0 || g.blocked[c]) continue;
+          n++;
+          if (g.owner[c]) owners.add(g.owner[c]); else empty++;
+        }
+        if (!n || (owners.size === 1 && empty === 0)) continue; // someone's turf interior
+        const score = empty / n + (owners.size - 1) * 0.5 + U.rand(0, 0.3);
+        if (score > bestScore) { bestScore = score; best = { x, z }; }
+      }
+      if (!best) return;
+      const y = A.groundHeightAt(best.x, best.z);
+      const pk = { id: ++this._pickupId, kind: U.pick(TP.M5.PICKUP_KINDS), x: best.x, z: best.z, y };
+      this.pickups.push(pk);
+      TP.M5.emit("pickupSpawn", { id: pk.id, kind: pk.kind, x: pk.x, z: pk.z, y });
+    }
+
+    _grab(car, pk) {
+      const p = car.index;
+      this.stats[p].pickups++;
+      this._emit("pickup", { id: pk.id, player: p, kind: pk.kind, x: pk.x, z: pk.z });
+      this._hint(pk.kind === "boost" ? "boostCan" : pk.kind, p);
+      if (pk.kind === "boost") {
+        car.boost = 100;
+      } else if (pk.kind === "mega") {
+        car.mega = CFG.megaTime;
+      } else if (pk.kind === "bomb") {
+        // A big splat right here. Like any paint you lay, it's part of
+        // your trail if you're out of your own colour.
+        const r = CFG.bombR * this._mul();
+        this._paintCar(car, r, true);
+        this._emit("splat", { player: p, x: car.pos.x, z: car.pos.z, r: r * this.grid.cs });
+      }
+    }
+
+    /* ------------------------------------------------------------------
+       End of round / match
+       ------------------------------------------------------------------ */
+    _endRound() {
+      // Loops still open at the whistle just dry: no last-frame fills.
+      for (let p = 0; p < 4; p++) if (this.grid.hasTrail(p)) this.grid.dryTrail(p);
+      this._updateScores();
+      this.scores.forEach((s, i) => this.stats[i].roundPct.push(s));
+
+      // Winner: the best score (a team's total, in teams). A tie = draw (-1).
+      // In a sudden-death round only the contenders' scores count (the
+      // others still play, and can pop, but can't win it).
+      const sides = (this.teams ? this.teamScores : this.scores)
+        .map((v, i) => (!this.suddenDeath || this.suddenDeath.sides.includes(i) ? v : -1));
+      const best = Math.max(...sides);
+      const top = sides.map((s, i) => (s === best ? i : -1)).filter((i) => i >= 0);
+      this.roundWinner = top.length === 1 ? top[0] : -1;
+      if (this.roundWinner >= 0) {
+        if (this.teams) {
+          this.teamWins[this.roundWinner]++;
+          this.players.forEach((pl, i) => { if (this.teams[i] === this.roundWinner) this.roundWins[i]++; });
+        } else {
+          this.roundWins[this.roundWinner]++;
+        }
+      }
+
+      this.phase = "roundEnd";
+      this.clock = CFG.roundEndTime;
+      this.pickups = [];
+      const ev = { round: this.round, scores: this.scores.slice(), winner: this.roundWinner, roundWins: this.roundWins.slice() };
+      if (this.teams) Object.assign(ev, { teams: this.teams.slice(), teamScores: this.teamScores.slice(), teamWins: this.teamWins.slice() });
+      TP.M5.emit("roundEnd", ev);
+    }
+
+    /* Is the match decided? Someone has a majority of the rounds, or all
+       rounds are played and one player (team) leads on round wins. If all
+       rounds are played and the lead is TIED, the tied players get one
+       SUDDEN-DEATH round (returns false and sets this.suddenDeath). If
+       sudden death itself ends level, total paint decides (_endMatch). */
+    _matchOver() {
+      const need = Math.floor(this.rounds / 2) + 1;
+      const wins = this.teams ? this.teamWins : this.roundWins;
+      const top = Math.max(...wins);
+      if (top >= need) return true;
+      if (this.round < this.rounds) return false;
+      const leaders = wins.map((w, i) => (w === top ? i : -1)).filter((i) => i >= 0);
+      if (leaders.length === 1 || this.suddenDeath) return true;
+      this._pendingSudden = leaders;
+      return false;
+    }
+
+    _endMatch() {
+      // Rank by rounds won, then by total paint across all rounds.
+      const total = this.stats.map((s) => s.roundPct.reduce((a, b) => a + b, 0));
+      const order = [0, 1, 2, 3].sort((a, b) => this.roundWins[b] - this.roundWins[a] || total[b] - total[a]);
+      this.standings = order.map((i) => ({ player: i, roundWins: this.roundWins[i], totalPct: Math.round(total[i] * 10) / 10, team: this.teams ? this.teams[i] : undefined }));
+      if (this.teams) {
+        const tTotal = [0, 1].map((t) => total.reduce((s, v, i) => s + (this.teams[i] === t ? v : 0), 0));
+        const [w0, w1] = this.teamWins;
+        this.winner = w0 !== w1 ? (w0 > w1 ? 0 : 1) : tTotal[0] !== tTotal[1] ? (tTotal[0] > tTotal[1] ? 0 : 1) : -1;
+      } else {
+        const [first, second] = this.standings;
+        const tied = first.roundWins === second.roundWins && first.totalPct === second.totalPct;
+        this.winner = tied ? -1 : first.player;
+      }
+      this.phase = "matchEnd";
+      const ev = { standings: this.standings, stats: this.stats, winner: this.winner, roundWins: this.roundWins.slice() };
+      if (this.teams) Object.assign(ev, { teams: this.teams.slice(), teamWins: this.teamWins.slice() });
+      TP.M5.emit("matchEnd", ev);
+    }
+
+    // roundEnd / matchEnd: brake every car to a stop on the final floor.
+    _stepEnded(dt) {
+      for (const car of this.cars) {
+        const k = Math.exp(-5 * dt);
+        car.vel.x *= k;
+        car.vel.z *= k;
+        car.stun = 0;
+        const prev = { x: car.pos.x, y: car.pos.y, z: car.pos.z, onGround: car.onGround, surfVy: car._surfVy };
+        car.update(dt, TP.Input.NEUTRAL, this.arena, this.tuning);
+        this.arena.resolveCar(car, prev);
+      }
+      if (this.phase !== "roundEnd") return;
+      this.clock -= dt;
+      if (this.clock > 0) return;
+      if (this._matchOver()) { this.suddenDeath = null; this._endMatch(); return; }
+      if (this._pendingSudden) {
+        // sides = player indices, or team indices in teams mode;
+        // players = the player indices taking part in either case.
+        const sides = this._pendingSudden;
+        this._pendingSudden = null;
+        const players = this.teams ? [0, 1, 2, 3].filter((i) => sides.includes(this.teams[i])) : sides.slice();
+        this.suddenDeath = { sides, players };
+      }
+      this.startRound();
+      if (this.suddenDeath) TP.M5.emit("suddenDeath", { players: this.suddenDeath.players, teams: this.teams ? this.suddenDeath.sides : undefined, round: this.round });
+    }
+
+    /* Tutorial hints: each one is shown once per match per human player
+       (bots don't need teaching). `id` is a key of HINTS. */
+    _hint(id, player) {
+      if (this.isBot[player]) return;
+      const key = id + ":" + player;
+      if (this._hintsShown.has(key)) return;
+      this._hintsShown.add(key);
+      TP.M5.emit("hint", { id, text: HINTS[id], player });
+    }
+    // A hint for everyone (shown once), if any human is playing.
+    _hintAll(id) {
+      if (this.isBot.every(Boolean) || this._hintsShown.has(id)) return;
+      this._hintsShown.add(id);
+      TP.M5.emit("hint", { id, text: HINTS[id] });
+    }
+
+    dispose() {
+      TP.disposeScene(this.root);
+    }
+  }
+
+  TP.M5.Match = Match;
+})();
