@@ -33,7 +33,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 
 ## Current jobs
 - Gameplay: M2 smarter bots, score-freeze guard, 2 more arenas, 2v2 teams, tutorial hints.
-- Art and UI: M1.5 integrate world/vfx/hud/audio into the real page via main.js hand-off; then M2a menu + pause.
+- Art and UI: M2b framing fixes (phones), fill-text scale, round/match-end reveal, how-to visibility, short labels, wet-trail read, sudden-death + teams HUD, MenuNav.
 - QC: full run of smoke/probe/shots on merged M1 core; file bugs.
 
 ## Decisions log
@@ -42,6 +42,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
+- Art 412ac47: real index.html, World on main.js hand-off, menu + pause overlay, perf pass. Boss screenshot review → M2b list.
 - Gameplay b70850a: core rules, Plaza, bots, match, main + bare index.html. Director shared 5f17ab7 merged. Smoke on merge: 3 rounds @16×, PASS 6/6, 214 fills, 13 pops.
 - QC 10a0e5e: tools/mode-5-{lib,smoke,shots,probe}.js (test-hook contract forwarded to Gameplay).
 - Art 1f58907: world/vfx/hud/audio + art-preview.html (reviewed screenshots 1280×720, 390×844, match card; no errors).
