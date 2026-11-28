@@ -693,15 +693,78 @@
       return value;
     }
 
-    // Bots: warp if they can afford the trophy, otherwise use whatever they have.
-    botItemChoice(player) {
-      const i = player.items.indexOf("warp");
-      if (i >= 0 && player.coins >= TROPHY_COST) return i + 1;
-      const other = player.items.findIndex((id) => id !== "warp");
-      return other >= 0 ? other + 1 : 0;
+    /* ---------- Bot item strategy ----------
+       Shared by the shop and the "use an item?" choice. The question is
+       always the same: how far is the trophy, and can I afford it when I
+       get there? Rolls are 1–10 (average 5.5), Turbo Dice 6–10, Double
+       Dice 2–20 (average 11), and Trophy Warp puts you on the space just
+       before the trophy, so your first step reaches it. */
+
+    // Spaces from `fromIndex` to the trophy by the shortest forward route.
+    trophyDistance(fromIndex) {
+      return this.spacesAhead(fromIndex)[this.trophyIndex];
     }
 
-    // Apply an item. Returns a roll mode for the dice ("normal"/"double"/"turbo").
+    // The richest rival, and by how many coins they lead `player`.
+    richestRival(player) {
+      const rich = this.players.filter((p) => p !== player).sort((a, b) => b.coins - a.coins)[0];
+      return { rich, lead: rich.coins - player.coins };
+    }
+
+    /* Which items would a bot standing on `fromIndex` with `coins` want
+       to use next, most useful first? Each bot has a little random
+       "temperament" (see botMood) so they don't all play identically.
+         warp   — can afford the trophy but it's out of a normal roll's
+                  reach (more than ~10 spaces): jump straight to it
+         turbo  — can afford it and it's 6–10 ahead: a roll of 6–10
+                  gives a good chance of getting there this turn
+         double — can afford it and it's 11–20 ahead: two dice average 11
+         steal  — a rival is clearly richer: take 8 off them (helps the
+                  trailing bots catch up, and slows the leader) */
+    botItemWants(player, fromIndex, coins) {
+      const mood = this.botMood(player);
+      const d = this.trophyDistance(fromIndex);
+      const canBuy = coins >= TROPHY_COST;
+      const wants = [];
+      if (canBuy && d > 10 + mood.reach) wants.push("warp");
+      if (canBuy && d >= 6 && d <= 10) wants.push("turbo");
+      if (canBuy && d > 10 && d <= 20) wants.push("double");
+      if (this.richestRival(player).lead >= mood.envy) wants.push("steal");
+      return wants;
+    }
+
+    /* Per-bot temperament, rolled once per match:
+         reach — how far past 10 spaces before Warp feels worth it (0–3)
+         envy  — how big a rival's lead must be before Pickpocket (8–14)
+         thrift — extra coins kept in hand on top of the trophy price
+                  before spending on an item (0–4)
+         whim  — chance of an off-plan pick at the shop (10–25%) */
+    botMood(player) {
+      if (!player.mood) {
+        player.mood = { reach: randInt(0, 3), envy: randInt(8, 14), thrift: randInt(0, 4), whim: rand(0.1, 0.25) };
+      }
+      return player.mood;
+    }
+
+    /* Start of turn: which held item (if any) should a bot use? Returns a
+       menu index (0 = "Just roll", 1+ = player.items[index-1]). Never
+       picks an item the menu greys out (see itemUnusable). */
+    botItemChoice(player) {
+      const usable = (id) => !this.itemUnusable(player, id);
+      // Use the most useful held item that fits the situation right now.
+      for (const id of this.botItemWants(player, player.space, player.coins)) {
+        const i = player.items.indexOf(id);
+        if (i >= 0 && usable(id)) return i + 1;
+      }
+      // Both slots full and nothing fits: use a movement item anyway so
+      // the slot frees up for something better (never waste a Warp).
+      if (player.items.length >= MAX_ITEMS) {
+        const i = player.items.findIndex((id) => id !== "warp" && usable(id));
+        if (i >= 0) return i + 1;
+      }
+      return 0;
+    }
+
     /* Why an item can't usefully be used right now, or "" if it can.
        Shown as the greyed-out reason in the "Use an item?" menu. */
     itemUnusable(player, id) {
@@ -718,6 +781,7 @@
       return "";
     }
 
+    // Apply an item. Returns a roll mode for the dice ("normal"/"double"/"turbo").
     async useItem(player, id) {
       const ui = TP.UI;
       const item = ITEMS[id];
@@ -889,17 +953,40 @@
       ui.setPlayers(this.players, player.index);
     }
 
-    /* Bots save up for the trophy first, then shop sensibly. */
+    /* Shop: which item (if any) should a bot buy? Returns a menu index
+       (0 = "Leave", 1+ = stock[index-1]).
+       The bot is standing where its NEXT turn starts, so the trophy
+       distance from here is exactly what that item will face.
+       Rules of thumb:
+         • Movement items only matter once you can afford the trophy, so
+           a bot buys one only if it can pay for it AND still have the
+           trophy price left over (plus its own "thrift" margin). Warp is
+           the exception: a bot within 4 coins of that is allowed to buy
+           it, since the next minigame usually tops it up.
+         • Pickpocket is bought when a rival is clearly richer.
+         • Never buy a second copy of an item already held.
+         • Now and then (the bot's "whim") pick any sensible item at random
+           instead of the best one, so bots don't all behave the same. */
     botShopChoice(player, stock) {
-      const spare = player.coins - TROPHY_COST;
-      const want = ["warp", "double", "steal", "turbo"];
-      for (const id of want) {
-        const i = stock.findIndex((it) => it.id === id);
-        const price = stock[i].price;
-        // Warp is worth spending trophy money on only if you can do both.
-        if (id === "warp" ? player.coins >= price + TROPHY_COST : (spare >= price || player.coins >= price + 12)) return i + 1;
-      }
-      return 0;
+      const mood = this.botMood(player);
+      const coins = player.coins;
+      const price = (id) => ITEMS[id].price;
+      const affordable = (id) => {
+        if (player.items.includes(id) || coins < price(id)) return false;
+        if (id === "steal") return true; // it pays for itself (up to +8)
+        const margin = id === "warp" ? -4 : mood.thrift;
+        return coins - price(id) >= TROPHY_COST + margin;
+      };
+      // What would we want next turn if we had the coins left over after
+      // buying? (Judge movement items as if we can afford the trophy.)
+      const wants = this.botItemWants(player, player.space, Math.max(coins, TROPHY_COST))
+        .filter(affordable);
+      let id = wants[0];
+      if (wants.length > 1 && Math.random() < mood.whim) id = pick(wants);
+      // Nothing fits but we're comfortably rich: a Double Dice is never
+      // a bad thing to hold (it gets used when the trophy's 11–20 away).
+      if (!id && affordable("double") && coins >= TROPHY_COST + 10) id = "double";
+      return id ? stock.findIndex((it) => it.id === id) + 1 : 0;
     }
 
     /* ---------- Trophy purchase ---------- */
