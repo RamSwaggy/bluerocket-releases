@@ -45,9 +45,20 @@ player's colour means owned.
   ball again. That stops it ricocheting forever. The **12 s stalemate reset** still applies on
   top of this.
 
-**Speed tiers:** the first strike on a neutral ball sends it at `baseSpeed`. Each strike after
-that adds `speedStep`, up to `maxSpeed`. A **Smash** (striking while boosting) adds `smashBonus`
-and costs boost.
+**Speed escalation** (Reece, 2026-11-28: "late rallies get absurd but stay readable"):
+- The first strike off a serve sends the ball at about `baseSpeed` (16), slow enough to chase.
+- Each strike after that **multiplies** the speed (`speedMult`, about ×1.12) **and** adds a small
+  step (`speedStep`). Early rallies stay chaseable, and late rallies explode.
+- The top speed (`maxSpeed`) is around **200+**, about 4× a car's top speed, so the ball crosses
+  the arena in about 0.2 s.
+- A **Smash** (strike while boosting) adds a bonus that scales with the current speed, and costs
+  boost.
+- **Hit-freeze grows hard with speed**, up to about **1–1.5 s** at the top. During a long
+  freeze the camera punches in on the striker and the speed readout climbs. These standoffs are
+  what make extreme speeds readable and dramatic, and they give humans time to react. Freeze
+  time **doesn't count** toward the stalemate timer.
+- **No tunnelling:** the ball's movement is swept or sub-stepped against cars, walls, ceiling,
+  floor and pillars, so even a 200+ ball can't pass through anything.
 
 ## 3. Touching the ball
 
@@ -117,6 +128,8 @@ faint line to the floor when it's high. Hit-freeze, shake and Smash zoom still w
 Bots must use the whole moveset, scaled by a per-bot skill:
 - **Neutral ball:** read where it'll land or bounce, drive there, jump or aerial to meet it, and
   strike with a sensible angle.
+- **At extreme speed:** a reaction window based on the hit-freeze plus distance, and a success
+  curve that falls with speed, so they're beatable at high speed but not hopeless.
 - **Their own ball:** keep clear of its line, and get ready for the return.
 - **An enemy's ball coming at them:** strike it back (choosing up, straight or down) if it's
   slow enough for their skill. Otherwise **dodge**: jump over it, flip sideways out of its line,
@@ -126,6 +139,12 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 
 ## 8. What "done" looks like for v2
 
+Reece's bar: **"just get them to a good playable level"**. v2 replaces v1 on the hub only when
+it's genuinely good to play. The Director verifies it, then swaps it in.
+
+
+- The rocket moveset is in. Aerials and flip-strikes work, and the bots use them.
+- The speed escalation feels right, and nothing stalls.
 - A full all-bot match ends with a winner, with no errors and every rule check holding.
 - Bots aerial, flip and bunt, and rallies last a decent number of strikes.
 - A keyboard or gamepad player can do every move and read the ball's height on screen.
@@ -139,7 +158,12 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 - **Bot strike rate:** strikes attempted vs. connected (not near 0%, not near 100%).
 - **Clash, bunt and flip-reset counts** per match: they should happen sometimes, not never and not
   constantly.
+- **Escalation:** the median KO speed (well above base), the top speed in long rallies, and how
+  often a rally reaches the top tier (sometimes, but most rallies shouldn't end at the first big
+  jump).
 - **Ball speed vs. car speed:** how often the ball is faster than a boosting car (27).
+- **Tunnelling:** a ball at max speed never passes through a car, wall, ceiling, floor or pillar
+  (this one fails, not just flags).
 - Stalemate resets per match (fewer than 1).
 
 ## Tuning starting points (all in `TP.DUEL_CFG`; the team tunes them)
@@ -149,7 +173,8 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 | `arenaH` | 14 | Ceiling height |
 | `gravity` | about the shared car's | For a neutral ball |
 | `bounce` | 0.7 | How much speed a neutral ball keeps per bounce |
-| `baseSpeed` / `speedStep` / `maxSpeed` | 16 / 2.5 / 56 | As in v1 |
+| `baseSpeed` / `speedMult` / `speedStep` / `maxSpeed` | 16 / 1.12 / 1.5 / 210 | Escalating strike speed |
+| `freezeMax` | 1.2 s | Hit-freeze at top speed (grows steeply with speed) |
 | `ownedHold` / `ownedFade` | 3 s / 1.5 s | Owned straight-line flight, then the cool-down |
 | `angleUpDeg` / `angleDownDeg` / `aimBendDeg` | 35 / 35 / 25 | Strike aim |
 | `flipBonus` | +4 | Extra speed for a flip strike |
