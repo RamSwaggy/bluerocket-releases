@@ -65,8 +65,20 @@ node tools/credits-check.js          # free-assets rule; run before every merge 
 MISSING (an asset file with no `../CREDITS.md` row) or BAD-LICENCE. STALE and FLAGGED are
 warnings for the boss to look at.
 
-The full-match smoke test (`tools/boost-runner-smoke.js`) is coming once the logic runs. Any
-change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
+```
+node tools/boost-runner-smoke.js 3 8 240 1     # every merge: full 4-bot match in sim.html -> PASS/FAIL
+node tools/boost-runner-balance.js 500 1       # ~40 s, run in the background: seats, round length, KOs
+```
+
+Smoke extra args: `[seed] [page]`, e.g. `... 3 8 240 42 index.html` once the full game page exists.
+It prints the KO order per round, and the same seed gives the same match at any speed. It also checks
+that the mode's car tuning (`game.tuning`) differs from `TP.CAR_TUNING` only in `TP.MODE_TUNABLE` keys.
+The balance tool reports wins per seat, round length, KOs by cause and chunk, and stuck cars.
+
+In the browser: `sim.html?demo&seed=N` (logic only, no rendering). URL flags: `demo`, `rounds`, `speed`,
+`bots`, `seed`, `chunk`, `sync`.
+
+Any change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
 ## Current state (as of 2026-11-27)
 
