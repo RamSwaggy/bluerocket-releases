@@ -142,6 +142,63 @@ Art and UI's list, most value first (S ≈ 1 h, M ≈ a few hours, L ≈ half a 
 5. Car model refresh (M–L): **shared/, so the Director decides**
 6. Particles and sound pass (M): **shared/, so the Director decides; needs Reece's ears**
 
+## Round 2 roadmap: "it works but feels bare" (Reece, 2026-11-28)
+
+Reece: "rocket party is good, just feels bare. Compare with Mario Party, Pummel Party, Lego
+Party and identify gaps: animations, more minigames, better-looking maps, more going on."
+This is the Director's gap list, approved for Reece. **Genre conventions only. Never copy any
+game's names, characters, boards, minigames, art or music.**
+
+### Gaps compared with the genre
+
+| Area | Turbo Party now | Genre standard | Gap |
+|---|---|---|---|
+| Minigames | 6, all free-for-all driving | 50–100+; formats 4-player, 1 vs 3, 2 vs 2, duel; skill, reaction, luck, memory | **Big** |
+| Minigame framing | Starts straight away | Title card, a rules line, a controls line, a "practice / ready" check, then results with reactions | Big |
+| Board look | One loop on a flat ground | Themed set pieces, moving parts, background life (crowd, lights, vehicles), sky and day/night | **Big** |
+| Board gimmicks | Shortcut fork; spaces are static | Interactive landmarks (gates, ramps, a hazard that fires on a timer), traps players place, a twist at a turn threshold | Big |
+| Player interaction | Pickpocket only | Duel spaces, steal-a-trophy events, attack items, traps, swapping places | Big |
+| Items | 4 | 10–20, with a few aimed at rivals | Medium |
+| Animation and juice | Cars slide between spaces | Hop or drive per space; coin pop-ups and counters; win and lose reactions; camera punch-ins; banners ("Player 2's turn", "Last 3 turns!") | **Big** |
+| Turn flow | Roll, move, minigame | Turn banner, rank panel, live standings, an event every round, a final-turns twist | Medium |
+| Ending | Bonus trophies, then results | A ceremony: reveal bonuses one at a time with a drumroll, then podium cars with confetti | Medium |
+| Modes | Board only | Minigame-only mode (free play or "first to N wins"), length presets, team (2 vs 2) board | Medium |
+| Boards | 1 | 3–6, each with its own gimmick | Later |
+| Audio | Procedural loop | A theme per board and per minigame, stingers for events and wins | Medium (Reece's ears needed) |
+
+### Plan (one builder, in this order; each phase ends merged and verified)
+
+- **Phase 0: bugs first.** Finish job 10 (bot item strategy + Goal Frenzy tie-break, branch
+  `team/turbo-party-gameplay` 790ee78), check trophy reachability, and only then start features.
+- **Phase 1: juice and presentation** (biggest feel gain for the cost):
+  - cars drive and hop space to space;
+  - floating "+3" and "−3" coin pop-ups with an animated HUD counter;
+  - turn banner and live rank panel;
+  - camera punch-ins on events, shop and trophy buys;
+  - winner and loser car reactions after minigames (spin and boost-flare for a win, a deflated
+    slump for a loss);
+  - minigame intro card (title, one-line rule, controls, a 3-2-1 "ready" check) and a results
+    card with placings;
+  - an end ceremony: bonuses revealed one at a time, then a podium with confetti.
+- **Phase 2: board life.** Dress the board: stands with a waving crowd, floodlights,
+  billboards, props, sky and a day-to-dusk shift as turns pass. Add moving set pieces (a
+  rotating gate that changes the fork, a jump ramp over the middle), one **board hazard** that
+  fires on a timer (it sweeps nearby players back), and a **"Final 3 turns"** twist (coins on
+  blue/red spaces doubled, a catch-up bonus for last place).
+- **Phase 3: minigames 6 → 14+, with new formats.** At least 2 × **1 vs 3**, 2 × **2 vs 2**,
+  2 × **duel** (triggered by a new Duel space), and 2+ non-race types (reaction or timing,
+  luck, push or survival variety). Every minigame gets bots, an intro card and smoke coverage.
+  Teams are picked by blue/red space colour, genre-style but with our own rule.
+- **Phase 4: interaction.** 6+ new items, including aimed ones: a trap placed on a space, a
+  swap with a rival, a coin magnet, a shield, a "rocket" that knocks a rival back 3 spaces.
+  Add a steal-a-trophy event space with high stakes and a short roulette. Add Duel spaces.
+- **Phase 5: modes and a second board.** Minigame-only mode (first to N wins), length presets,
+  then a second themed board with its own gimmick.
+
+Each phase: smoke + minigame + human tests pass, `credits-check` passes, screenshots, then
+message the Director "Turbo Party phase N: ready to merge". Shared changes (car feel, input,
+sfx) still go through the Director.
+
 ## Reece's checklist: gamepad and sound (job 6)
 
 Only you can check these: the cloud sessions have no speakers or gamepads. Open
