@@ -594,7 +594,23 @@
       // Every attack leans into it; some moves add their own spin.
       pitch = 0.16 * Math.sin(k * Math.PI);
       if (move.includes("tailwhip") || move.includes("spinout")) spinY = ease(k) * Math.PI * 2;
-      else if (move.includes("grinder") || move.includes("signature")) spinY = ease(k) * Math.PI * 4;
+      else if (move.includes("signature")) {
+        // Each car's signature move has its own body language.
+        const car = P.build ? P.build.id : "rivet";
+        if (car === "haulback") {
+          // Quake Drop: rise level with the nose a touch up, then slam
+          // down and squash on landing.
+          if (k < 0.55) pitch = -0.18 * Math.sin((k / 0.55) * Math.PI);
+          else if (k < 0.75) { pitch = 0.08; squash = 0.82; }
+        } else if (car === "skitter") {
+          // Slipstream: low and flat out, weaving as it threads past.
+          pitch = 0.14;
+          roll = 0.28 * Math.sin(k * Math.PI * 3);
+          squash = 0.92;
+        } else {
+          spinY = ease(k) * Math.PI * 4;   // Grinder: two full spins
+        }
+      }
       else if (move.includes("corkscrew")) roll = ease(k) * Math.PI * 2;
       else if (move.includes("flip")) pitch = -ease(k) * Math.PI * 2;
       else if (move.includes("slam") || move.includes("drop")) pitch = 0.6 * Math.sin(k * Math.PI * 0.5);
