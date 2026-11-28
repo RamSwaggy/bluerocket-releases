@@ -606,6 +606,46 @@ const TESTS = {
     return r.done();
   },
 
+  /* ---------- Arenas (round 3, phase 3) ----------
+     Every arena: a max-speed ball never leaves its box (including Low
+     Deck's low ceiling) or ends up inside a pillar, even a MOVING one.
+     Moving pillars really move; a bounce pad really launches a car. */
+  arenas: function () {
+    const Q = window.QC, r = Q.result();
+    for (const id of Object.keys(TP.DUEL_ARENAS)) {
+      const d = Q.fresh({ players: 2, lives: 3, arena: id, pillars: undefined }); // the arena's own pillars
+      const C = d.cfg, V = C.maxSpeed, R = C.ballR, W = C.arenaW / 2, D = C.arenaD / 2, H = C.arenaH;
+      d.players.forEach((_, i) => Q.place(i, -W + 3 + i * 2, D - 2.5, 0));
+      let bad = null, steps = 0, moved = 0;
+      const start = d.pillars.map((p) => [p.x, p.z]);
+      const far = d.pillars.map(() => 0); // furthest each pillar got from its start
+      // 24 shots in a fan of directions (up, down, sideways), 0.6 s each.
+      for (let k = 0; k < 24 && !bad; k++) {
+        const a = k * 2 * Math.PI / 24, e = ((k % 5) - 2) * 0.5;
+        const dir = { x: Math.cos(a) * Math.cos(e), y: Math.sin(e), z: Math.sin(a) * Math.cos(e) };
+        // From a spot clear of every pillar (the middle can hold one).
+        d.setBall({ pos: { x: 0, y: Math.min(3, H - 1.5), z: -D + 2 }, vel: { x: dir.x * V, y: dir.y * V, z: dir.z * V }, owner: 0 });
+        for (let j = 0; j < 72 && !bad; j++) {
+          d.update(1 / 120); steps++;
+          const b = d.ball.pos;
+          if (b.x < -W + R - 1e-3 || b.x > W - R + 1e-3 || b.z < -D + R - 1e-3 || b.z > D - R + 1e-3 || b.y < R - 1e-3 || b.y > H - R + 1e-3) bad = `${id}: left the box at (${b.x.toFixed(2)}, ${b.y.toFixed(2)}, ${b.z.toFixed(2)})`;
+          d.pillars.forEach((pl, k) => { far[k] = Math.max(far[k], Math.hypot(pl.x - start[k][0], pl.z - start[k][1])); });
+          for (const pl of d.pillars) if (Math.hypot(b.x - pl.x, b.z - pl.z) < pl.r + R - 0.05) bad = `${id}: inside a pillar at (${b.x.toFixed(2)}, ${b.z.toFixed(2)})`;
+        }
+      }
+      far.forEach((f) => { if (f > 2) moved++; });
+      r.ok(!bad, bad || `${id} (ceiling ${H}): 24 max-speed shots, ${steps} steps, the ball never left the box or entered a pillar`);
+      if (C.movers) r.ok(moved >= 2, `${id}: the pillars move (${moved} of ${d.pillars.length} moved)`);
+      if (C.pads) {
+        const pd = C.pads[0];
+        Q.place(0, pd.x, pd.z, 0);
+        Q.stepUntil(() => d.cars[0].pos.y > 2, 1.5);
+        r.ok(d.cars[0].pos.y > 2, `${id}: a bounce pad launches a car (height ${d.cars[0].pos.y.toFixed(1)})`);
+      }
+    }
+    return r.done();
+  },
+
   /* ---------- v2: hit-freeze doesn't count toward the stalemate clock ---------- */
   "v2-freeze-vs-stalemate": function () {
     const Q = window.QC, r = Q.result();

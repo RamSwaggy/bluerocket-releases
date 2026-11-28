@@ -263,6 +263,10 @@
       if (v.y < 0) {
         const hitSpeed = -v.y;
         v.y = hitSpeed * rest;
+        // A bounce pad under the ball kicks it up (Low Deck).
+        if (C.pads) for (const pd of C.pads) {
+          if (Math.hypot(p.x - pd.x, p.z - pd.z) < pd.r) { v.y = Math.max(v.y, C.padBallKick || 15); if (onBounce) onBounce({ x: 0, y: 1, z: 0 }, "pad", v.y); break; }
+        }
         // Too slow to bounce again: it's rolling.
         if (g > 0 && v.y < C.restSpeed) v.y = 0;
         if (onBounce && hitSpeed > 1) onBounce({ x: 0, y: 1, z: 0 }, "floor", hitSpeed);
@@ -292,8 +296,11 @@
     for (const pl of pillars) {
       const dx = p.x - pl.x, dz = p.z - pl.z;
       const d = Math.hypot(dx, dz), minD = pl.r + R;
-      if (d >= minD || d < 1e-4) continue;
-      const nx = dx / d, nz = dz / d;
+      if (d >= minD) continue;
+      // Dead centre (a moving pillar slid right over a resting ball): push
+      // it out along the ball's motion, or +x if it's still.
+      const vl = Math.hypot(v.x, v.z);
+      const nx = d > 1e-4 ? dx / d : vl > 1e-4 ? -v.x / vl : 1, nz = d > 1e-4 ? dz / d : vl > 1e-4 ? -v.z / vl : 0;
       p.x = pl.x + nx * minD;
       p.z = pl.z + nz * minD;
       const vn = v.x * nx + v.z * nz;
@@ -304,6 +311,46 @@
       }
     }
   }
+
+  /* =====================================================================
+     Arenas. Each one starts from DUEL_CFG and changes a few things:
+     its shape (ceiling height, pillars) and one hazard. Everything here
+     is rules; arena.js draws whatever the config says.
+       movers   pillars that slide back and forth: { i (pillar index),
+                axis "x"|"z", amp (units), period (seconds), phase }
+       pads     floor bounce pads { x, z, r }: a car driving over one is
+                launched into the air; a ball landing on one is kicked up
+     ===================================================================== */
+  TP.DUEL_ARENAS = {
+    classic: { name: "Neon Box", blurb: "The original: two pillars for bank shots." },
+    shifting: {
+      name: "Shifting Pillars",
+      blurb: "Three pillars slide back and forth. Bank shots move!",
+      cfg: {
+        pillars: true,
+        pillarList: [{ x: -11, z: 0, r: 1.6 }, { x: 0, z: 0, r: 1.6 }, { x: 11, z: 0, r: 1.6 }],
+        movers: [
+          { i: 0, axis: "z", amp: 8, period: 7, phase: 0 },
+          { i: 1, axis: "x", amp: 6, period: 9, phase: 1.6 },
+          { i: 2, axis: "z", amp: 8, period: 7, phase: Math.PI },
+        ],
+      },
+    },
+    lowdeck: {
+      name: "Low Deck",
+      blurb: "A low ceiling and bounce pads that throw cars and balls into the air.",
+      cfg: {
+        arenaH: 8,
+        pillars: false,
+        pads: [
+          { x: -12, z: -6, r: 2.2 }, { x: 12, z: 6, r: 2.2 },
+          { x: -12, z: 6, r: 2.2 }, { x: 12, z: -6, r: 2.2 },
+        ],
+        padCarLaunch: 15,  // upward speed a pad gives a car
+        padBallKick: 15,   // upward speed a pad gives a ball that lands on it
+      },
+    },
+  };
 
   /* =====================================================================
      TP.Duel — one match.
@@ -326,6 +373,11 @@
       // This match's copy of the config (so a per-match pillars choice
       // doesn't change the shared defaults).
       const C = (this.cfg = Object.assign({}, TP.DUEL_CFG));
+      // The arena changes some of the numbers (deep-copied, since moving
+      // pillars change their own positions during the match).
+      this.arenaId = TP.DUEL_ARENAS[opts.arena] ? opts.arena : "classic";
+      const A = TP.DUEL_ARENAS[this.arenaId].cfg || {};
+      Object.assign(C, JSON.parse(JSON.stringify(A)));
       if (typeof opts.pillars === "boolean") C.pillars = opts.pillars;
       this.onEvent = opts.onEvent || NO_HOOK;
       this.lives = opts.lives || 3;
@@ -338,7 +390,10 @@
       // Practice: how fast the launcher fires (0 = launcher off).
       this.practiceSpeed = opts.practiceSpeed ?? 30;
       this.practiceWait = 1.2;
-      this.pillars = C.pillars ? C.pillarList : [];
+      // Each pillar's live position (moving pillars update x/z every step;
+      // bx/bz is where it rests).
+      this.pillars = C.pillars ? C.pillarList.map((p) => ({ x: p.x, z: p.z, r: p.r, bx: p.x, bz: p.z })) : [];
+      this.padCooldown = [];
 
       // Same car as every Rocket Rumble mode; Deflect Duel only lets you
       // turn more while nearly stopped, so you can aim.
@@ -569,11 +624,45 @@
       }
 
       this.time += dt;
+      this._movePillars();
       this._stepCars(dt);
       this._stepBall(dt);
       if (this.state === "over") return;
       if (this.mode === "time") this._stepClock(dt);
       if (this.mode === "practice") this._stepLauncher(dt);
+    }
+
+    /* ---------- Arena hazards ---------- */
+
+    // Shifting Pillars: slide each moving pillar along its axis (a smooth
+    // back-and-forth on a sine wave, driven by match time).
+    _movePillars() {
+      const M = this.cfg.movers;
+      if (!M || !this.pillars.length) return;
+      for (const m of M) {
+        const pl = this.pillars[m.i];
+        if (!pl) continue;
+        const off = m.amp * Math.sin((2 * Math.PI * this.time) / m.period + (m.phase || 0));
+        if (m.axis === "x") pl.x = pl.bx + off; else pl.z = pl.bz + off;
+      }
+    }
+
+    // Low Deck: a car rolling over a pad gets launched (once, then a short
+    // cooldown so it can't chain-bounce on the same pad).
+    _padLaunch(i, car) {
+      const C = this.cfg;
+      if (!C.pads || !car.onGround || (this.padCooldown[i] || 0) > this.time) return;
+      for (const pd of C.pads) {
+        if (Math.hypot(car.pos.x - pd.x, car.pos.z - pd.z) < pd.r) {
+          car.vel.y = C.padCarLaunch || 15;
+          car.onGround = false;
+          this.padCooldown[i] = this.time + 0.6;
+          this._log("pad", i, {});
+          this.onEvent("pad", { player: this.players[i] });
+          if (this.arenaLook && this.arenaLook.padPulse) this.arenaLook.padPulse(pd);
+          return;
+        }
+      }
     }
 
     /* ---------- Modes ---------- */
@@ -673,6 +762,7 @@
         const ctrl = this.inputOverride[i] || (this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller));
         car.update(dt, ctrl, this, this.tuning);
         this._keepCarInArena(car);
+        this._padLaunch(i, car);
         // A new dodge-flip has started: it can strike the ball once.
         if (car.flipStarted) p.flipUsed = false;
 
@@ -851,6 +941,10 @@
       const b = this.ball;
       const pos = b.pos.clone();
       this.hooks.onBounce(pos, normal, surface);
+      if (surface === "pad" && this.arenaLook && this.arenaLook.padPulse) {
+        const pd = (this.cfg.pads || []).find((q) => Math.hypot(pos.x - q.x, pos.z - q.z) < q.r);
+        if (pd) this.arenaLook.padPulse(pd);
+      }
       if (surface === "wall" || surface === "pillar") {
         const n2 = { x: normal.x, z: normal.z };
         this.hooks.onWallBounce(pos, n2);
@@ -1869,6 +1963,7 @@
       return {
         state: this.state,
         mode: this.mode,
+        arena: this.arenaId,
         difficulty: this.difficulty,
         clockLeft: +this.clockLeft.toFixed(2),
         overtime: this.overtime,

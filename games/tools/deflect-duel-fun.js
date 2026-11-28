@@ -5,7 +5,7 @@
    events the rules record (TP.duel.events), so nothing is guessed.
 
    Usage (from the games folder):
-     node tools/deflect-duel-fun.js [matches=40] [players=4] [lives=3] [easy|normal|hard]
+     node tools/deflect-duel-fun.js [matches=40] [players=4] [lives=3] [easy|normal|hard] [classic|shifting|lowdeck]
 
    What it prints, and what we're aiming for. These are FLAGS for the
    boss to judge, not pass/fail, except page errors and stuck matches:
@@ -33,15 +33,16 @@ const matches = Number(process.argv[2] || 40);
 const players = Number(process.argv[3] || 4);
 const lives = Number(process.argv[4] || 3);
 const difficulty = process.argv[5] || "normal"; // easy | normal | hard
+const arena = process.argv[6] || "classic";      // classic | shifting | lowdeck
 const MAX_GAME_SEC = 300; // a match longer than 5 game-minutes counts as stuck
 
 const indexFile = path.resolve(__dirname, "../deflect-duel/index.html");
 
 // Runs INSIDE the page: plays one match by stepping the rules directly,
 // then returns the counted events and the result.
-function playOne({ players, lives, maxSec, difficulty }) {
+function playOne({ players, lives, maxSec, difficulty, arena }) {
   if (window.TP.duel) window.TP.duel.paused = true;
-  window.TP.duelTest.newMatch({ players, lives, difficulty });
+  window.TP.duelTest.newMatch({ players, lives, difficulty, arena });
   const d = window.TP.duel;
   d.paused = true;
   let t = 0;
@@ -76,7 +77,7 @@ const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "–");
     await page.waitForFunction(() => window.TP && TP.duel && TP.duelTest && TP.duelTest.newMatch, null, { timeout: 20000 });
 
     const runs = [];
-    for (let m = 0; m < matches; m++) runs.push(await page.evaluate(playOne, { players, lives, maxSec: MAX_GAME_SEC, difficulty }));
+    for (let m = 0; m < matches; m++) runs.push(await page.evaluate(playOne, { players, lives, maxSec: MAX_GAME_SEC, difficulty, arena }));
 
     /* ---------- Turn the events into rallies ----------
        A rally = the strikes since the last KO or stalemate reset. It
@@ -134,7 +135,7 @@ const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "–");
     const endBands = bands.map(([lo, hi]) => rallies.filter((x) => x.endSpeed !== null && x.endSpeed >= lo && x.endSpeed < hi).length);
     const M = runs.length;
 
-    console.log(`\nDeflect Duel FUN TABLE: ${M} matches, ${players} ${difficulty} bots, ${lives} lives (base ${base}, top ${top})`);
+    console.log(`\nDeflect Duel FUN TABLE: ${M} matches, ${players} ${difficulty} bots, arena ${arena}, ${lives} lives (base ${base}, top ${top})`);
     console.log("──────────────────────────────────────────────────────────────────");
     console.log(`Rally length (strikes)     median ${f1(median(rl))}, mean ${f1(rl.reduce((a, b) => a + b, 0) / (rl.length || 1))}, longest ${Math.max(0, ...rl)}   [aim: median 4–12]`);
     console.log(`Median KO speed            ${f1(median(koSpeeds))}   [aim: well above base ${base}]`);

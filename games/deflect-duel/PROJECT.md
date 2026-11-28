@@ -140,6 +140,19 @@ on the base branch until the Director verifies v2 and swaps it in.
 - **Results:** a podium, match stats (top speed, longest rally, time), a stats line per player,
   and MVP tags: MOST KOs, SPEED DEMON, AIR ACE, FLIP MASTER, RESET KING, THE WALL.
 
+**Round 3, phase 3 (arenas): first two built** (`TP.DUEL_ARENAS` in `duel.js`, drawn by
+`arena.js`, picked in the menu's *Arena* row, including Random).
+- **Shifting Pillars:** three floor-to-ceiling pillars sliding back and forth, so bank shots
+  move.
+- **Low Deck:** the ceiling at 8, plus four floor bounce pads that launch cars and kick balls
+  upward. About 22% of strikes are real flying aerials there.
+- **New rule test** `arenas`:
+  - 24 max-speed shots per arena never leave the box or enter a pillar (moving ones included).
+  - The pillars really move, and the pads really launch cars.
+- **Fun table** (30 matches each, 0 stuck):
+  - Shifting Pillars: median rally 6, 9% of rallies reach the top tier.
+  - Low Deck: median rally 4, 6% reach the top tier, median match 98 s.
+
 **Still open:**
 - Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
 - The tunables in `TP.DUEL_CFG`.

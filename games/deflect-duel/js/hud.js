@@ -188,6 +188,8 @@
       try { saved = JSON.parse(localStorage.getItem("deflectDuel.menu") || "{}") || {}; } catch (e) { saved = {}; }
       let pickedMode = ["stock", "teams", "time", "sudden"].includes(saved.mode) ? saved.mode : "stock";
       let pickedLevel = ["easy", "normal", "hard"].includes(saved.level) ? saved.level : "normal";
+      const ARENAS = Object.assign({ random: { name: "Random" } }, TP.DUEL_ARENAS || {});
+      let pickedArena = ARENAS[saved.arena] ? saved.arena : "classic";
 
       // Seat options: Off, then every known controller (Bot, Keyboard 1, ...).
       const LABELS = Object.assign({ off: "Off (empty)" }, TP.CONTROLLER_LABELS);
@@ -214,6 +216,12 @@
           <span class="muted">Mode</span>
           <span class="seg" id="mode">
             <button data-v="stock" title="Lives; last car standing">Free-for-all</button><button data-v="teams" title="Seats 1 &amp; 3 vs 2 &amp; 4; your teammate's ball is harmless">Teams 2v2</button><button data-v="time" title="2:30 on the clock; most KOs wins; endless respawns">Time</button><button data-v="sudden" title="One life each">Sudden Death</button>
+          </span>
+        </div>
+        <div class="row">
+          <span class="muted">Arena</span>
+          <span class="seg" id="arena">
+            ${Object.keys(TP.DUEL_ARENAS || {}).concat("random").map((id) => `<button data-v="${id}" title="${esc((TP.DUEL_ARENAS[id] || {}).blurb || "A different arena each match")}">${esc(ARENAS[id].name)}</button>`).join("")}
           </span>
         </div>
         <div class="row">
@@ -249,6 +257,7 @@
       const livesEl = card.querySelector("#lives");
       const modeEl = card.querySelector("#mode");
       const levelEl = card.querySelector("#level");
+      const arenaEl = card.querySelector("#arena");
       const startBtn = card.querySelector("#start");
       const errEl = card.querySelector("#menu-error");
 
@@ -273,6 +282,7 @@
       };
       modeEl.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; pickedMode = b.dataset.v; paintMode(); validate(); });
       levelEl.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; pickedLevel = b.dataset.v; paintSeg(levelEl, pickedLevel); });
+      arenaEl.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; pickedArena = b.dataset.v; paintSeg(arenaEl, pickedArena); });
 
       // Read the form back into a setup object.
       const read = () => [0, 1, 2, 3].map((i) => ({
@@ -308,6 +318,7 @@
       validate();
       paintMode();
       paintSeg(levelEl, pickedLevel);
+      paintSeg(arenaEl, pickedArena);
       attachNav(card);
 
       // Show how many gamepads the browser can see (they wake on a button press).
@@ -325,12 +336,12 @@
         if (!practice && !validate()) return;
         const newSetup = { slots: read() };
         TP.Rumble.saveSetup(newSetup.slots);
-        try { localStorage.setItem("deflectDuel.menu", JSON.stringify({ mode: pickedMode, level: pickedLevel })); } catch (e) { /* storage blocked: fine */ }
+        try { localStorage.setItem("deflectDuel.menu", JSON.stringify({ mode: pickedMode, level: pickedLevel, arena: pickedArena })); } catch (e) { /* storage blocked: fine */ }
         if (TP.sfx) { TP.sfx.unlock(); TP.sfx.play("go"); } // clicking counts as the audio "unlock" gesture
         window.removeEventListener("gamepadconnected", refreshPads);
         window.removeEventListener("gamepaddisconnected", refreshPads);
         TP.HUD.hideCard();
-        if (onStart) onStart(newSetup, pickedLives, { mode: pickedMode, difficulty: pickedLevel, practice });
+        if (onStart) onStart(newSetup, pickedLives, { mode: pickedMode, difficulty: pickedLevel, practice, arena: pickedArena });
       };
       startBtn.addEventListener("click", () => go(null));
       card.querySelector("#practice").addEventListener("click", () => go("practice"));

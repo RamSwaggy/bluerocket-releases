@@ -209,7 +209,7 @@
     duel = new TP.Duel({
       players: config.players, lives: config.lives, pillars: config.pillars, onEvent,
       mode: config.mode, difficulty: config.difficulty, timeLimit: config.timeLimit, practiceSpeed: config.practiceSpeed,
-      countdown: config.countdown,
+      countdown: config.countdown, arena: config.arena,
     });
     if (config.mode === "practice" && TP.DuelPractice) TP.DuelPractice.start(duel, { tutorial: !!config.tutorial });
     if (TP.DuelShow) TP.DuelShow.start(duel);
@@ -315,6 +315,8 @@
       mode: mode === "sudden" ? "stock" : mode,
       difficulty: extra.difficulty || "normal",
       timeLimit: 150,
+      // "random" picks a different arena for this match.
+      arena: extra.arena === "random" ? (() => { const ids = Object.keys(TP.DUEL_ARENAS); return ids[Math.floor(Math.random() * ids.length)]; })() : extra.arena,
     });
     return "";
   }
@@ -400,11 +402,12 @@
     startMatch({
       players: botPlayers(Number(params.get("players")) || 4),
       lives: Math.max(1, Number(params.get("lives")) || 3),
+      arena: params.get("arena") || undefined,
     });
     // QC's test hooks (TP.duel itself also has setInput/setBot/placeCar/setBall).
     TP.duelTest = {
-      newMatch({ players = 4, lives = 3, pillars, mode, difficulty, timeLimit, practiceSpeed } = {}) {
-        startMatch({ players: Array.isArray(players) ? players : botPlayers(players), lives, pillars, mode, difficulty, timeLimit, practiceSpeed });
+      newMatch({ players = 4, lives = 3, pillars, mode, difficulty, timeLimit, practiceSpeed, arena } = {}) {
+        startMatch({ players: Array.isArray(players) ? players : botPlayers(players), lives, pillars, mode, difficulty, timeLimit, practiceSpeed, arena });
         return TP.duel;
       },
     };

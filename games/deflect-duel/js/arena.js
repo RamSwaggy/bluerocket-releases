@@ -327,6 +327,9 @@
     const pillarFx = [];   // per pillar: { x, z, r, capMat, ringMat, pulse }
     const pillarH = BOX ? H : H + 1.2;
     for (const p of pillars) {
+      // Every mesh of this pillar, so a moving pillar can carry them all.
+      const parts = [];
+      const addPart = (m) => { m.userData.bx = m.position.x; m.userData.bz = m.position.z; parts.push(m); group.add(m); };
       const body = new THREE.Mesh(
         keep(new THREE.CylinderGeometry(p.r, p.r, pillarH, 40)),
         keep(new THREE.MeshStandardMaterial({ color: COL.pillar, roughness: 0.4, metalness: 0.4, emissive: 0x0b0e2a }))
@@ -334,7 +337,7 @@
       body.position.set(p.x, pillarH / 2, p.z);
       body.castShadow = !BOX;   // tall pillars would throw huge shadows across the box
       body.receiveShadow = true;
-      group.add(body);
+      addPart(body);
 
       // Glowing bands (and a lit cap when the pillar has a top you can see).
       // Transparent so the glow can dim along with the body (pillar x-ray).
@@ -344,30 +347,47 @@
       for (const y of bandYs) {
         const band = new THREE.Mesh(bandGeo, capMat);
         band.position.set(p.x, y, p.z);
-        group.add(band);
+        addPart(band);
       }
       if (!BOX) {
         const cap = new THREE.Mesh(keep(new THREE.CylinderGeometry(p.r * 0.7, p.r * 0.7, 0.06, 32)), capMat);
         cap.position.set(p.x, pillarH + 0.03, p.z);
-        group.add(cap);
+        addPart(cap);
       }
 
       // Halo ring on the floor around the base (and on the ceiling in the box).
       const ring = floorRing(p.r + 0.05, p.r + 0.55, COL.neonB, 0.35);
       ring.position.set(p.x, Y + 0.004, p.z);
-      group.add(ring);
+      addPart(ring);
       if (BOX) {
         const top = new THREE.Mesh(ring.geometry, ring.material);
         top.rotation.x = Math.PI / 2;
         top.position.set(p.x, H - 0.01, p.z);
-        group.add(top);
+        addPart(top);
       }
 
       // The body can fade to see-through when it blocks the camera's view
       // (see updatePillarFade). Transparent from the start so fading never
       // needs a shader rebuild mid-match.
       body.material.transparent = true;
-      pillarFx.push({ x: p.x, z: p.z, r: p.r, body, fade: 1, capMat, ringMat: ring.material, pulse: 0, color: new THREE.Color(COL.neonB) });
+      pillarFx.push({ x: p.x, z: p.z, bx: p.x, bz: p.z, r: p.r, body, parts, fade: 1, capMat, ringMat: ring.material, pulse: 0, color: new THREE.Color(COL.neonB) });
+    }
+
+    /* ---------- Bounce pads (Low Deck) ----------
+       Glowing discs on the floor at cfg.pads. They breathe gently and
+       flare when something bounces off them (padPulse). */
+    const padFx = [];
+    for (const pd of cfg.pads || []) {
+      const disc = floorRing(0, pd.r, COL.neonA, 0.22);
+      disc.position.set(pd.x, Y + 0.006, pd.z);
+      group.add(disc);
+      const rim = floorRing(pd.r - 0.25, pd.r, 0xffe14d, 0.8);
+      rim.position.set(pd.x, Y + 0.008, pd.z);
+      group.add(rim);
+      const arrow = floorRing(pd.r * 0.25, pd.r * 0.45, 0xffe14d, 0.6);
+      arrow.position.set(pd.x, Y + 0.009, pd.z);
+      group.add(arrow);
+      padFx.push({ pd, disc, rim, arrow, pulse: 0 });
     }
 
     /* ---------- Stand blocks outside the walls (decoration) ----------
@@ -525,6 +545,24 @@
       serveGlow.material.opacity = 0.04 + 0.04 * (0.5 + 0.5 * Math.sin(t * 2.2)) + serveFlash * 0.25;
       serveRing.scale.setScalar(1 + serveFlash * 0.25);
 
+      // Moving pillars (Shifting Pillars): follow the rules' live positions.
+      if (duel && duel.pillars) {
+        pillarFx.forEach((p, k) => {
+          const live = duel.pillars[k];
+          if (!live || (live.x === p.x && live.z === p.z)) return;
+          p.x = live.x; p.z = live.z;
+          const dx = live.x - p.bx, dz = live.z - p.bz;
+          for (const m of p.parts) { m.position.x = m.userData.bx + dx; m.position.z = m.userData.bz + dz; }
+        });
+      }
+      // Bounce pads: a gentle breathe, plus a flare after each bounce.
+      for (const f of padFx) {
+        f.pulse = Math.max(0, f.pulse - dt * 2.2);
+        const b = 0.5 + 0.5 * Math.sin(t * 3 + f.pd.x);
+        f.disc.material.opacity = 0.16 + 0.08 * b + 0.5 * f.pulse;
+        f.rim.material.opacity = 0.6 + 0.2 * b + 0.4 * f.pulse;
+        f.arrow.scale.setScalar(1 + 0.25 * b + 0.8 * f.pulse);
+      }
       updatePillarFade(dt);
       // Pillars: idle shimmer, plus a flare (in the ball's colour) that fades.
       for (const p of pillarFx) {
@@ -584,6 +622,8 @@
     return {
       group,
       update(dt) { update(dt); if (effects) effects.update(dt); },
+      // A bounce pad was used: make it flare.
+      padPulse(pd) { const f = padFx.find((q) => q.pd.x === pd.x && q.pd.z === pd.z); if (f) f.pulse = 1; },
       // The crowd reacts: amount 0..1 (a big moment = 1), css tints it.
       cheer(amount, css) {
         crowd = Math.min(1, Math.max(crowd, amount));
