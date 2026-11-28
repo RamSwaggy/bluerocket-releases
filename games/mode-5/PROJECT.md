@@ -32,9 +32,14 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
    meets the bar. Then QC sign-off → boss tells the Director "Mode 5: ready for reveal".
 
 ## Current jobs
-- Gameplay: M2 smarter bots, score-freeze guard, 2 more arenas, 2v2 teams, tutorial hints.
-- Art and UI: M2b framing fixes (phones), fill-text scale, round/match-end reveal, how-to visibility, short labels, wet-trail read, sudden-death + teams HUD, MenuNav.
-- QC: waiting on Gameplay's bug-1 fix (wet trail never starts when driving forward), then re-probe + batch.
+- Efficiency mode (Director, 2026-11-28): roles stood down; the boss builds and tests alone.
+- Status: feature-complete. Final test pass on team/mode-5, then "ready for reveal" to the Director.
+
+## How to test (final sign-off set, from `games/`)
+- `node tools/mode-5-smoke.js 3 16 600` — full best-of-3 bot match, 8 checks.
+- `node tools/mode-5-ui.js all` — menu (keyboard + gamepad), pause, start/quit sweep.
+- `node tools/mode-5-batch.js 6 16 120 1 [arena=N]` — balance / stuck / error batch.
+- `node tools/mode-5-feel.js normal 3 8,14,20` — scripted human loops in real time.
 
 ## Decisions log
 - Big fills: bots play tight by default, go big when safe / with Mega Roller / in Overdrive; hard bots seek chord loops. 10%+ fills mostly a human skill reward.
@@ -43,6 +48,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
+- Boss (parts 11–16): Space/Enter on menu buttons, focus kept on options, "Restart match" label, gamepad Start no longer re-pauses on resume/start, pop stun-lock fix (popGrace 2 s + bots leave their last victim 5 s), results card: Rematch/Menu/All-modes (keyboard, pad, touch; sticky on small screens), tie-break explanation, compact card on short screens, camera margin + lean to centre, menu footer fade, Split Level street widened (decks x ±20..48). Gameplay 374bcc0 merged (bot greed/mega/overdrive/chords, clip window, stun 0.85 s, pickup placement, seat-order fairness). QC tools updated for MenuNav.
 - Gameplay 405253b + b14b4bc: spawn angles, pause freeze, sudden death (tie-break round), bot retune for real risk, roundEndTime 7 s. Smoke 3 rounds @16× PASS 8/8, 72 pops.
 - Gameplay c8d2f61: BUG 1 fixed (wet trail always; close only on out→home), min fill/pop sizes.
 - Art efe8e96: M2b framing, scaled FILL text, round-end reveal + side/bottom card, how-to panel, short labels, wet-trail hazard shader, MenuNav, sudden-death banner, team chips. Boss review: Split Level decks + Rings circle not drawn yet (sent).
