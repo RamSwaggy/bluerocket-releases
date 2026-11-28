@@ -51,6 +51,15 @@
 
   let match = null, world = null, hud = null;
 
+  /* Pause: the menu/HUD emits "pause" and "resume". While paused the
+     simulation doesn't step, but the screen keeps rendering (so the pause
+     screen sits over a live-looking scene). Restarting, quitting or
+     starting from the menu always un-pauses. */
+  let paused = false;
+  TP.M5.on("pause", () => { paused = true; });
+  TP.M5.on("resume", () => { paused = false; acc = 0; });
+  for (const n of ["restart", "quit", "menuStart"]) TP.M5.on(n, () => { paused = false; acc = 0; });
+
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     renderer.setSize(w, h, false);
@@ -111,7 +120,7 @@
     TP.sched.update(realDt);
 
     let simDt = 0;
-    if (match) {
+    if (match && !paused) {
       let steps;
       if (SPEED) steps = SPEED;
       else { acc += realDt; steps = Math.min(5, Math.floor(acc / DT)); acc -= steps * DT; if (steps === 5) acc = 0; }

@@ -36,6 +36,9 @@
      land {player, airtime, x, z}              bump {a, b, attacker, victim, impact, x, z, hard}
      pickupSpawn {id, kind, x, z}              pickup {id, player, kind, x, z}
      hint {text, player?, id}
+   suddenDeath {players, teams?, round} — at that round's countdown, right
+     after roundCountdown: the listed players are tied for the lead after
+     the last round and play it off; only their scores can win it.
    Extras: dry {player, cells, closed?} (a trail dried: by itself, or
            closed: true when a loop closed),
            countdown {n} (3, 2, 1 each second, then 0 = GO).
@@ -144,6 +147,7 @@ TP.M5 = TP.M5 || {};
       this.roundWinner = null;
       this.standings = null;
       this.round = 0;
+      this.suddenDeath = null;   // { sides, players } during a sudden-death round
       this._hintsShown = new Set();
 
       this.arena = TP.M5.arenaFor(this.firstArena);
@@ -555,7 +559,10 @@ TP.M5 = TP.M5 || {};
       this.scores.forEach((s, i) => this.stats[i].roundPct.push(s));
 
       // Winner: the best score (a team's total, in teams). A tie = draw (-1).
-      const sides = this.teams ? this.teamScores : this.scores;
+      // In a sudden-death round only the contenders' scores count (the
+      // others still play, and can pop, but can't win it).
+      const sides = (this.teams ? this.teamScores : this.scores)
+        .map((v, i) => (!this.suddenDeath || this.suddenDeath.sides.includes(i) ? v : -1));
       const best = Math.max(...sides);
       const top = sides.map((s, i) => (s === best ? i : -1)).filter((i) => i >= 0);
       this.roundWinner = top.length === 1 ? top[0] : -1;
@@ -576,10 +583,21 @@ TP.M5 = TP.M5 || {};
       TP.M5.emit("roundEnd", ev);
     }
 
+    /* Is the match decided? Someone has a majority of the rounds, or all
+       rounds are played and one player (team) leads on round wins. If all
+       rounds are played and the lead is TIED, the tied players get one
+       SUDDEN-DEATH round (returns false and sets this.suddenDeath). If
+       sudden death itself ends level, total paint decides (_endMatch). */
     _matchOver() {
       const need = Math.floor(this.rounds / 2) + 1;
       const wins = this.teams ? this.teamWins : this.roundWins;
-      return Math.max(...wins) >= need || this.round >= this.rounds;
+      const top = Math.max(...wins);
+      if (top >= need) return true;
+      if (this.round < this.rounds) return false;
+      const leaders = wins.map((w, i) => (w === top ? i : -1)).filter((i) => i >= 0);
+      if (leaders.length === 1 || this.suddenDeath) return true;
+      this._pendingSudden = leaders;
+      return false;
     }
 
     _endMatch() {
@@ -616,8 +634,17 @@ TP.M5 = TP.M5 || {};
       if (this.phase !== "roundEnd") return;
       this.clock -= dt;
       if (this.clock > 0) return;
-      if (this._matchOver()) this._endMatch();
-      else this.startRound();
+      if (this._matchOver()) { this.suddenDeath = null; this._endMatch(); return; }
+      if (this._pendingSudden) {
+        // sides = player indices, or team indices in teams mode;
+        // players = the player indices taking part in either case.
+        const sides = this._pendingSudden;
+        this._pendingSudden = null;
+        const players = this.teams ? [0, 1, 2, 3].filter((i) => sides.includes(this.teams[i])) : sides.slice();
+        this.suddenDeath = { sides, players };
+      }
+      this.startRound();
+      if (this.suddenDeath) TP.M5.emit("suddenDeath", { players: this.suddenDeath.players, teams: this.teams ? this.suddenDeath.sides : undefined, round: this.round });
     }
 
     /* Tutorial hints: each one is shown once per match per human player
