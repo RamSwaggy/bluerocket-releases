@@ -1269,9 +1269,9 @@
       //    things have stalled, then go after it and strike it again.
       if (mine) {
         if ((bold > 0 || alive === 2) && b.speed < 32) {
-          const ctrl = TP.ai.driveTo(car, ...this._inside(b.pos.x, b.pos.z), { boostDist: 10 });
-          ctrl.hit = false;
-          return ctrl;
+          // Line up behind it toward the other car (same as meeting a
+          // free ball), so the next strike actually goes at somebody.
+          return this._botMeet(i);
         }
         return this._botIdle(i);
       }
@@ -1312,7 +1312,10 @@
         const rally = S.fumbleRally * b.hits;
         // And the longer nobody has been KO'd (after 20 s), the more
         // likely a misread, so a match always ends.
-        const drought = 0.015 * Math.max(0, this.time - this.lastKOt - 20);
+        // In a 1-v-1 endgame the drought bites sooner and harder, so the
+        // last two cars can't trade returns for minutes on end.
+        const drought = alive === 2 ? 0.03 * Math.max(0, this.time - this.lastKOt - 10)
+                                    : 0.015 * Math.max(0, this.time - this.lastKOt - 20);
         // Misread chance: a base, more for fast balls (curving up near the
         // top), more for long rallies and for a rushed window. Beatable at
         // high speed, but not hopeless.
@@ -1483,9 +1486,22 @@
         const d = dist2D(car.pos.x, car.pos.z, this.cars[j].pos.x, this.cars[j].pos.z);
         if (d < best) { best = d; target = this.cars[j]; }
       });
+      // A long KO drought (sooner in a 1-v-1): bots get sharp, aiming
+      // straight at the other car with no sloppiness, so somebody gets
+      // hit and the match ends.
+      const alive = this.players.filter((q) => !q.out).length;
+      const sharp = this.time - this.lastKOt > (alive === 2 ? 15 : 30);
       let steer = 0;
       if (target) steer = -TP.ai.angleTo(car, target.pos.x, target.pos.z) / (C.aimBendDeg * DEG);
-      steer += rand(-1, 1) * (S.aimNoise / C.aimBendDeg);
+      if (!sharp) steer += rand(-1, 1) * (S.aimNoise / C.aimBendDeg);
+      if (sharp && target) {
+        // Straight at it: the right elevation to reach the target's middle.
+        const dx = target.pos.x - car.pos.x, dz = target.pos.z - car.pos.z;
+        const dy = target.pos.y + C.carH / 2 - b.pos.y;
+        const up = Math.atan2(dy, Math.hypot(dx, dz));
+        const throttle = up > (C.angleUpDeg * DEG) / 2 ? 1 : up < -(C.angleDownDeg * DEG) / 2 ? -1 : 0;
+        return { steer: clamp(steer, -1, 1), throttle };
+      }
 
       // Up / straight / down. A high ball usually gets driven down into
       // the floor (a bounce shot); an airborne target gets an up shot;
@@ -1503,7 +1519,8 @@
     // just hold their ground, so somebody gets caught.
     _botIdle(i) {
       const car = this.cars[i], b = this.ball;
-      if (this.time - this.lastKOt > 40) return { throttle: 0, steer: 0, boost: false, jump: false, hit: false };
+      const alive = this.players.filter((q) => !q.out).length;
+      if (this.time - this.lastKOt > (alive === 2 ? 20 : 40)) return { throttle: 0, steer: 0, boost: false, jump: false, hit: false };
       let dx = car.pos.x - b.pos.x, dz = car.pos.z - b.pos.z;
       const d = Math.hypot(dx, dz) || 1;
       dx /= d; dz /= d;
