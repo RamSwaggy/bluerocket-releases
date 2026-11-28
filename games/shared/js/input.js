@@ -52,6 +52,10 @@
     { id: "boost", label: "Boost" },
     { id: "hit", label: "Hit" },
     { id: "heavy", label: "Heavy" },
+    // Optional: separate aim keys. Unbound (the default) = Up/Down aim as
+    // well as drive. Bind them and Up/Down only drive.
+    { id: "aimUp", label: "Aim up (optional)" },
+    { id: "aimDown", label: "Aim down (optional)" },
   ];
   const PAD_ACTIONS = [
     { id: "gas", label: "Gas" },
@@ -73,10 +77,12 @@
     kb1: { bindings: {
       up: [K("KeyW"), null], down: [K("KeyS"), null], left: [K("KeyA"), null], right: [K("KeyD"), null],
       jump: [K("Space"), null], boost: [K("ShiftLeft"), K("KeyF")], hit: [K("KeyE"), K("KeyJ")], heavy: [K("KeyR"), null],
+      aimUp: [null, null], aimDown: [null, null],
     } },
     kb2: { bindings: {
       up: [K("ArrowUp"), null], down: [K("ArrowDown"), null], left: [K("ArrowLeft"), null], right: [K("ArrowRight"), null],
       jump: [K("Enter"), K("Numpad0")], boost: [K("ShiftRight"), K("ControlRight")], hit: [K("Period"), K("Numpad1")], heavy: [K("Comma"), K("Numpad2")],
+      aimUp: [null, null], aimDown: [null, null],
     } },
     pad: {
       bindings: {
@@ -178,10 +184,12 @@
   function readKeyboard(prof) {
     const on = (a) => (prof.bindings[a] || []).some((b) => b && b.type === "key" && down.has(b.code));
     const fb = (on("up") ? 1 : 0) - (on("down") ? 1 : 0);
+    // Separate aim keys, if the player bound any; otherwise Up/Down aim too.
+    const hasAim = [...(prof.bindings.aimUp || []), ...(prof.bindings.aimDown || [])].some(Boolean);
     return {
       throttle: fb,
       steer: (on("right") ? 1 : 0) - (on("left") ? 1 : 0),
-      pitch: fb,
+      pitch: hasAim ? (on("aimUp") ? 1 : 0) - (on("aimDown") ? 1 : 0) : fb,
       boost: on("boost"), jump: on("jump"), hit: on("hit"), heavy: on("heavy"),
     };
   }
