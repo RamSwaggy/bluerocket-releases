@@ -91,7 +91,7 @@ const snap = (page) => page.evaluate(() => {
   return {
     frame: s.frame, phase: s.phase, round: s.round, wins: s.roundWins,
     cars: s.cars.map((c) => ({ x: c.x, z: c.z, y: c.y, state: c.state, move: c.move, hp: c.health })),
-    nEv: TP.fight.events.length, logLen: __rec.log.length,
+    nEv: TP.fight.events.length, logLen: window.__rec ? __rec.log.length : 0,
   };
 });
 const eventsSince = (page, n) => page.evaluate((n) => TP.fight.events.slice(n), n);
