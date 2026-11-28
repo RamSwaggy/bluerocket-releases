@@ -73,13 +73,21 @@ From the `games` folder:
   "isn't playable yet" until `duel.js` and `main.js` exist.
 - `node tools/turbo-party-smoke.js 2 8 200`: must still pass after any shared change.
 
-## Current state (as of 2026-11-27)
+## Current state (as of 2026-11-28)
 
-- **Done:** `index.html` (layout, styles, script tags) and `js/hud.js` (player chips with
-  hearts, ball speed, centre text, toasts, cards). In the shared engine: the Hit button,
-  hit/swing/KO sounds, and the `pivot` car setting (turning while nearly stopped, so you can
-  aim; Deflect Duel should use about 0.8).
-- **To build:** `js/duel.js` and `js/main.js`. See `README.md` for the checklist.
+- **First playable is merged** on `team/deflect-duel`:
+  - `js/duel.js`: rules, ball, hits, Smash, aim, ownership, KOs, respawn, hit-freeze, the 12 s
+    reset, pillars and bots.
+  - `js/main.js`: hub setup, menu, match flow, results and rematch, plus `?demo` and `?test`.
+  - `js/arena.js`: the neon arena.
+  - `js/hud.js`: menu and results cards, with gamepad and arrow-key navigation.
+  - The all-bot smoke test passes (4 and 2 players), and Turbo Party still passes.
+- **Key numbers** (all in `TP.DUEL_CFG`): ball serve 16, +2.5 per hit, top speed 56, Smash +8.
+  Cars top out at 17 (27 boosting).
+- **Next:**
+  - Art and UI job 2: ball glow and trail, swing ring, hit flash, KO effects, camera shake.
+  - QC job 2: scripted rule tests and a many-match balance run.
+  - Then a human playtest to tune the bots and speeds.
 
 ## Decisions (from Reece)
 
