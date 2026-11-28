@@ -48,7 +48,9 @@
       text-align: center; min-width: 120px;
     }
     #speed .label { font-size: 11px; color: var(--muted); letter-spacing: .15em; }
-    #speed .val { font-size: 30px; font-weight: 900; line-height: 1.05; }
+    #speed .val { font-size: 30px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; transition: transform .08s; }
+    /* While the number climbs, the box swells a little. */
+    #speed.rolling .val { transform: scale(1.12); }
 
     /* ---------- Big centre text ---------- */
     #center-msg {
