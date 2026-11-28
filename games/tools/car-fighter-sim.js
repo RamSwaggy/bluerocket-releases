@@ -425,6 +425,32 @@ function inPage(args) {
     return { ok: Math.abs(seen - a) <= tol || Math.abs(seen - b) <= tol, want: a };
   }
 
+  /* Throw input with the two buttons a few frames apart, the way a person
+     presses them (DESIGN.md §5 rule: Hit and Heavy within
+     FIGHT_RULES.throwPairFrames frames = a throw). P2 stands still, cars
+     touching. Returns the moves P1 started and P1's events. */
+  function staggeredThrow(first, second, gap) {
+    const fight = newFight({ fighter: opts.p1 || "rivet", controller: "kb1" }, { fighter: opts.p2 || "rivet", controller: "kb2" }, seed, 3, 60);
+    if (!skipToFight(fight)) return { error: "never reached phase fight" };
+    place(fight, 2.6);
+    const evStart = fight.events.length;
+    const moves = [];
+    const btn = (c, b) => { c[b] = true; c[b + "Pressed"] = true; };
+    for (let f = 0; f < 90; f++) {
+      const c1 = neutral();
+      if (f === 0) btn(c1, first);
+      if (f === gap) btn(c1, second);
+      // Keep both held after their press, like fingers on keys.
+      if (f > 0) c1[first] = true;
+      if (f > gap) c1[second] = true;
+      fight.step([c1, neutral()]);
+      const m = fight.state.cars[0].move;
+      if (m && moves[moves.length - 1] !== m) moves.push(m);
+    }
+    const evs = fight.events.slice(evStart).filter((e) => e.attacker === 0 && ["hit", "block", "throw", "whiff"].includes(e.type)).map((e) => `${e.type}:${e.move}`);
+    return { moves, evs };
+  }
+
   function runFrames() {
     const steerSign = calibrateSteer();
     const moves = listMoves();
@@ -535,6 +561,26 @@ function inPage(args) {
         damage: hr.hits.map((h) => Math.round(h.damage)).join(","), stun: hr.hit.stun, stunFrames: hr.stunFrames,
       } : null;
       delete row.hitRun; delete row.blockRun; delete row.table.raw;
+      report.rows.push(row);
+    }
+    // ---- Throw with the buttons pressed a few frames apart ----
+    const pair = (TP.FIGHT_RULES && TP.FIGHT_RULES.throwPairFrames) || 3;
+    const cases = [];
+    for (let g = 1; g <= pair; g++) cases.push(["hit", "heavy", g]);
+    cases.push(["heavy", "hit", 1]);
+    for (const [first, second, gap] of cases) {
+      const label = `${first === "hit" ? "E" : "R"} then ${second === "hit" ? "E" : "R"} +${gap}f`;
+      const row = { id: "tow_hook " + label, table: { startup: "-", active: "-", recovery: "-", damage: "-", hitstun: "-", blockstun: "-" }, input: `${first}, ${second} ${gap} frame${gap > 1 ? "s" : ""} later`, notes: [], status: "OK", summary: null };
+      const r = staggeredThrow(first, second, gap);
+      if (r.error) { row.status = "FAIL"; row.notes.push(r.error); }
+      else {
+        row.notes.push(`moves ${r.moves.join(" > ") || "none"}; events ${JSON.stringify(r.evs)}`);
+        if (r.moves[r.moves.length - 1] !== "tow_hook" || !r.evs.some((e) => e === "throw:tow_hook")) {
+          row.status = "FAIL";
+          row.notes.push(`expected Tow Hook: the buttons were ${gap} frame${gap > 1 ? "s" : ""} apart, inside throwPairFrames = ${pair}`);
+        }
+      }
+      if (row.status === "FAIL") report.problems++;
       report.rows.push(row);
     }
     return report;
