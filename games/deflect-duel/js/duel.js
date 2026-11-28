@@ -68,6 +68,7 @@
     swingTime: 0.28,     // how long one swing can connect
     missCooldown: 0.45,  // wait after a swing that hit nothing
     hitCooldown: 0.12,   // short wait after a swing that connected
+    rehitLock: 0.1,      // after any hit, nobody can hit the ball again for this long
     aimBendDeg: 25,      // full steering bends the shot this many degrees
 
     /* ---------- Getting hit ---------- */
@@ -232,6 +233,7 @@
         hits: 0,         // hits since the last serve
         hitId: 0,        // goes up on every hit (bots use it to spot a new shot)
         lastHitT: -99,   // match time of the last hit
+        lockUntil: 0,    // match time before which the ball can't be hit (rehitLock)
       };
       this.ballMesh = new THREE.Mesh(
         new THREE.SphereGeometry(C.ballR, 28, 18),
@@ -455,8 +457,11 @@
     }
 
     // Does any active swing reach the ball? The closest swinging car gets it.
+    // Only ONE hit can happen at a time: see _hit() for how the other
+    // swingers are handled, and rehitLock for the short lockout after it.
     _tryHits() {
       const C = this.cfg, b = this.ball;
+      if (this.time < b.lockUntil) return false;
       let best = -1, bestD = Infinity;
       this.players.forEach((p, i) => {
         if (p.out || p.dead > 0 || p.swingT <= 0 || p.swingHit) return;
@@ -499,6 +504,24 @@
       p.swingT = 0;
       p.cooldown = C.hitCooldown;
       p.hits++;
+
+      // Several cars swinging at the same ball at the same moment (say,
+      // everyone at the opening serve) is ONE hit: the closest swinger
+      // wins it, and everyone else's swing that could reach the ball is
+      // used up (no miss penalty, they were simply beaten to it).
+      // Without this, their still-running swings would hit it again on
+      // the next steps and stack the speed. A short lockout covers any
+      // swing that starts in the instant after.
+      this.players.forEach((q, j) => {
+        if (j === i || q.swingT <= 0 || q.swingHit) return;
+        const c = this.cars[j];
+        if (dist2D(c.pos.x, c.pos.z, b.pos.x, b.pos.z) <= C.hitRange + 0.5) {
+          q.swingT = 0;
+          q.swingHit = true;
+          q.cooldown = C.hitCooldown;
+        }
+      });
+      b.lockUntil = this.time + C.rehitLock;
 
       // The hit-freeze: faster ball → longer pause.
       const frac = clamp((speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
