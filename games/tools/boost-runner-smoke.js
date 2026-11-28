@@ -19,7 +19,9 @@
      - a "[Rocket Rumble] ... Ignored" warning (a mode tried to change
        part of the shared car feel)
      - car tuning that differs from TP.CAR_TUNING outside TP.MODE_TUNABLE
-     - a round whose race time goes past 120 s
+     - a round whose race time goes past 135 s (sudden death starts at
+       120 s and must finish the round within about 15 s; reaching
+       120 s is printed as a WARNING)
      - a stuck car: alive, racing, and no forward progress for more than
        3 s of race time
      - a soft-lock: the game clock stops moving, or 0-1 cars left and no
@@ -50,7 +52,8 @@ const seed = process.argv[5] || "1";
 const pageName = process.argv[6] || "sim.html";
 
 // Limits from DESIGN.md section 5 and the boss's job description.
-const MAX_ROUND_SECONDS = 120; // race time; sudden death starts here, so a round past this is a bug
+const WARN_ROUND_SECONDS = 120; // race time when sudden death starts: worth a WARNING
+const MAX_ROUND_SECONDS = 135; // sudden death must end the round within ~15 s, so past this is a bug
 const STUCK_SECONDS = 3; // alive with no forward progress for this long = stuck
 const PROGRESS_UNITS = 0.5; // how far forward (world units) counts as progress
 const NO_END_SECONDS = 2; // 0-1 cars left but still racing for this long = soft-lock
@@ -120,6 +123,7 @@ function installWatcher(limits) {
   let nanReported = {};
   let fewLeftSince = null;
   let tooLongReported = false;
+  let warnedSuddenDeath = false;
   let eventsSeen = 0; // how many BR.events we've already processed
   let eventRound = 0; // round number from the latest round_start event
 
@@ -156,6 +160,7 @@ function installWatcher(limits) {
       nanReported = {};
       fewLeftSince = null;
       tooLongReported = false;
+      warnedSuddenDeath = false;
     }
     const key = roundKey;
     const t = R.raceTime(g);
@@ -165,7 +170,7 @@ function installWatcher(limits) {
     if (!qc.tuningChecked && cars.length && window.TP && TP.CAR_TUNING && TP.MODE_TUNABLE) {
       qc.tuningChecked = true;
       const tun = R.tuning(g);
-      if (!tun) qc.notes.push("tuning check skipped: no game.tuning (or car.tuning) to read. Ask Gameplay to expose it.");
+      if (!tun) qc.notes.push("!!! TUNING CHECK SKIPPED: no game.tuning to read, so the shared-car-feel check did NOT run. Gameplay is adding game.tuning (see js/README.md). !!!");
       else {
         for (const k of new Set([...Object.keys(TP.CAR_TUNING), ...Object.keys(tun)])) {
           if (TP.MODE_TUNABLE.includes(k)) continue;
@@ -186,7 +191,13 @@ function installWatcher(limits) {
     // The rest only makes sense while racing (cars are frozen in the countdown).
     if (!R.racing(g)) return;
 
-    // Round too long: the 120 s backstop should already have ended it.
+    // Sudden death reached: allowed, but rounds should normally end long before.
+    if (t > limits.WARN_ROUND_SECONDS && !warnedSuddenDeath) {
+      warnedSuddenDeath = true;
+      qc.notes.push(`WARNING: round ${key} reached sudden death (${limits.WARN_ROUND_SECONDS} s of racing)`);
+    }
+
+    // Round too long: sudden death should have ended it by now.
     if (t > limits.MAX_ROUND_SECONDS && !tooLongReported) {
       tooLongReported = true;
       fail(`round ${key} is still racing at ${t.toFixed(1)} s (limit ${limits.MAX_ROUND_SECONDS} s)`);
@@ -237,7 +248,7 @@ function installWatcher(limits) {
     if (text.includes("[Rocket Rumble]") && text.includes("Ignored")) errors.push("CAR FEEL WARNING: " + text);
   });
 
-  await page.addInitScript(installWatcher, { MAX_ROUND_SECONDS, STUCK_SECONDS, PROGRESS_UNITS, NO_END_SECONDS });
+  await page.addInitScript(installWatcher, { WARN_ROUND_SECONDS, MAX_ROUND_SECONDS, STUCK_SECONDS, PROGRESS_UNITS, NO_END_SECONDS });
 
   const file = "file:///" + path.resolve(__dirname, "../boost-runner", pageName).replace(/\\/g, "/");
   const url = `${file}?demo&rounds=${rounds}&speed=${speed}&seed=${encodeURIComponent(seed)}`;
@@ -296,7 +307,12 @@ function installWatcher(limits) {
       if (info.end) console.log(`  END  t=${Number(info.end.t).toFixed(2).padStart(6)}  winner=${info.end.winner}  wins=${JSON.stringify(info.end.wins)}`);
     }
     if (qc.matchEnd) console.log(`\nMatch winner: ${qc.matchEnd.winner}   final wins: ${JSON.stringify(qc.matchEnd.wins)}`);
-    qc.notes.forEach((n) => console.log("NOTE: " + n));
+    // Notes are printed between banners so a skipped check can't hide in the output.
+    if (qc.notes.length) {
+      console.log("\n" + "=".repeat(72));
+      qc.notes.forEach((n) => console.log(n));
+      console.log("=".repeat(72));
+    }
   }
 
   const problems = [...errors, ...((qc && qc.failures) || []).map((f) => "CHECK: " + f)];
