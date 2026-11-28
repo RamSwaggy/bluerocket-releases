@@ -578,7 +578,7 @@
        onSwing(car)                        (the swipe itself is drawn per frame)
        onKO(victim, owner)                 explosion, screen flash, slow-mo
        onClash(carA, carB, ball)           the biggest flash: both colours, "CLASH!"
-       onBunt(car, ball)                   a soft upward puff
+       onBunt(car, ball)                   flip reset: soft thunk, ring, under-wheel glow
        onBounce(pos, normal)               sparks (v2: floor, walls, ceiling, pillars)
        onWallBounce(pos, normal)           the same, under its v1 name
        onServe()                           serve circle flares, trail resets
@@ -934,6 +934,7 @@
     const arcGeoB = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.7, (C.hitRange ?? 3.6), 28, 1, 0, Math.PI * 0.9));
     const reachGeo = keep(new THREE.RingGeometry((C.hitRange ?? 3.6) - 0.08, (C.hitRange ?? 3.6), 64));
     const shieldGeo = keep(new THREE.RingGeometry(1.95, 2.2, 48));
+    const resetGeo = keep(new THREE.PlaneGeometry(2.4, 3.6));
     function getCarFx(car) {
       let f = carFx.get(car);
       if (f) return f;
@@ -957,11 +958,18 @@
       shield.position.y = 0.1;
       shield.visible = false;
       car.mesh.add(shield);
-      f = { pivot, arcA, arcB, reach, shield };
+      // Flip-reset cue: a glowing pad under the wheels. It sits in the
+      // car BODY's group so it tilts with the car in the air.
+      const resetGlow = flat(resetGeo, 0);
+      resetGlow.position.y = 0.05;
+      resetGlow.visible = false;
+      ((car.mesh.userData && car.mesh.userData.body) || car.mesh).add(resetGlow);
+      f = { pivot, arcA, arcB, reach, shield, resetGlow, resetT: 0 };
       carFx.set(car, f);
       return f;
     }
 
+    let frameDt = 0;
     function updateCars() {
       duel.players.forEach((p, i) => {
         const car = duel.cars[i];
@@ -981,6 +989,12 @@
           f.arcA.material.opacity = 0.95 * fade;
           f.arcB.material.opacity = 0.35 * fade;
           f.reach.material.opacity = 0.35 * fade;
+        }
+        // Flip reset: the under-wheel glow flickers bright, then fades.
+        if (f.resetT > 0) {
+          f.resetT = Math.max(0, f.resetT - frameDt * 1.4);
+          f.resetGlow.visible = f.resetT > 0;
+          f.resetGlow.material.opacity = 0.85 * f.resetT * (0.75 + 0.25 * Math.sin(t * 40));
         }
         // Invulnerable after a respawn: a pulsing ring around the car.
         const safe = p.invuln > 0 && !p.out && p.dead <= 0;
@@ -1058,15 +1072,21 @@
         TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
       },
 
-      // A soft bunt: the ball pops gently upwards. A small, soft puff.
+      /* A bunt = a WHEELS-TOUCH FLIP RESET: the car's underside touched
+         the ball, and its jump and flip are back. No hit-freeze, so this is
+         deliberately soft: a dull thunk, a small ring at the contact, and a
+         glow under the car's wheels telling its driver "you can jump again". */
       onBunt(car, ball) {
         const pos = (ball && ball.pos) || duel.ball.pos;
         const color = car ? carColor(car) : 0xffffff;
-        ballFlash = 0.45;
-        pop(pos, color, R * 1.5, R * 4.5, 0.25);
-        shockwave(pos, color, R * 0.8, R * 3, 0.35, 0.5);
-        fx.burst(pos, [color, 0xffffff], { count: 10, speed: 3, up: 6, gravity: 9, life: 0.6, size: 0.16 });
-        addShake(0.08);
+        ballFlash = 0.35;
+        shockwave(pos, color, R * 0.8, R * 3.2, 0.35, 0.55);
+        fx.burst(pos, [color, 0xffffff], { count: 8, speed: 3, up: 2, gravity: 9, life: 0.45, size: 0.14 });
+        if (car) {
+          const f = getCarFx(car);
+          f.resetT = 1;             // the under-wheel glow, fading over ~0.7 s
+        }
+        if (TP.sfx) TP.sfx.play("bump");   // a soft thunk (shared sound)
       },
 
       // v2: any bounce (floor, walls, ceiling, pillars). The coloured patch
@@ -1140,6 +1160,7 @@
         for (const p of pops) p.sprite.material.opacity = 0;
       }
       updateBall(fdt, rawDt, frozen);
+      frameDt = rawDt;
       updateCars();
       updatePools(fdt);
       fx.update(fdt);
