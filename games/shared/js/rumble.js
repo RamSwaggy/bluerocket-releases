@@ -60,7 +60,7 @@ window.TP = window.TP || {};
       id: "car-fighter",
       name: "Car Fighter",
       tag: "1v1 fighting",
-      status: "plan",
+      status: "play",
       players: [1, 2],
       color: "#f87171",
       blurb: "Health bars, rounds and combos, all made from rams, flips, spins and boost dashes.",

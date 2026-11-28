@@ -141,6 +141,30 @@ and spark colour. Handling differs only through `TP.modeTuning({...})`: `maxSpee
 | **Haulback** (heavy) | Box truck | 1200 | lower `maxSpeed`, higher `bumpScale` | Ram and Corkscrew have 1 hit of armour, slower startup | **Quake Drop**: jumps and lands with a ground shockwave |
 | **Skitter** (light) | Low wedge | 850 | higher `maxSpeed` and `boostMax`, lower `grip` | faster moves, short sidestep recovery, less damage | **Slipstream**: a boost dash through the opponent that ends behind them, then a hit |
 
+**M2 starting numbers** (Gameplay's plan, accepted 2026-11-28, to be tuned with QC's sims):
+
+- **Haulback:**
+  - Handling: `maxSpeed 14`, `boostMax 24`.
+  - Damage ×1.1, light attacks start 1 frame slower.
+  - Ram: startup 14, 125 damage, 1 hit of armour. Corkscrew: startup 17, 1 hit of armour.
+  - Sidestep lasts 26 frames. Takes 10% less knockback.
+  - Quake Drop: startup 24, 210 damage, a shockwave that hits both sides and knocks down. It
+    can be blocked, and it misses an opponent in the air.
+- **Skitter:**
+  - Handling: `maxSpeed 20`, `boostMax 31`, `grip 7`.
+  - Damage ×0.85. Every move except the throw starts 1 frame faster, and light attacks
+    recover 2 frames faster.
+  - Dash Strike costs 20 boost. Sidestep lasts 18 frames. Takes 10% more knockback.
+  - Slipstream: an invulnerable boost dash through the opponent, then a hit (180 damage)
+    about 6 frames after the pass.
+  - **It is a real cross-up, not unblockable.** After the pass, the defender's auto-face
+    flips, so the defender blocks it by holding the new "away".
+- **Rivet:** Grinder is a 3-hit spin, hitting on frames 11, 17 and 23 for 70 + 70 + 90.
+- **Bot targets:**
+  - Hard beats Normal about 75% of the time. Normal beats Easy about 80%.
+  - Every car pairing at Normal lands at 40–60%.
+  - Average round 25–40 s, with fewer than 10% time-outs.
+
 Skitter can't have an extra jump: jump height is part of the shared car feel. Its air
 mobility comes from Slipstream instead.
 

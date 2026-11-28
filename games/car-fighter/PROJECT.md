@@ -66,7 +66,7 @@ The tools exist, but they can't pass until the M1 game code lands. In the browse
 `car-fighter/index.html?demo&speed=4&seed=1`. Any change that touches `../shared/` must also
 keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
-## Current state (as of 2026-11-27)
+## Current state (as of 2026-11-28)
 
 - `DESIGN.md` is signed off. The first M1 build jobs have gone to all three roles.
 - QC job 1 is merged (`aff8559`): `tools/car-fighter-smoke.js` and `tools/car-fighter-sim.js`
@@ -89,6 +89,9 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - smoke on seeds 12345 and 777
   - sim 200 (P1 45%, average round 26 s)
   - frames 11/11
+- **M2 started 2026-11-28.** Gameplay JOB 3: the cars, signatures and bots. Art JOB 3: bodies,
+  sfx and music, damage looks, combo counter, character select, MenuNav. **M1 is on the base branch**
+  (`claude/eager-tesla-vdhyd9` at `79161cb`), and the hub card says **Play**.
 - Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
