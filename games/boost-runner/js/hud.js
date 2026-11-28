@@ -85,7 +85,11 @@
        cam:   the BRCamera (for world → stage pixels)
        Returns how deep the worst car is into the danger edge (0..1),
        so main.js can pitch the warning beep. */
-    update(cars, wins, cam) {
+    update(cars, wins, cam, state = "race") {
+      // Rings and edge arrows only matter while racing. Once a round is
+      // decided (round end, match end) the winner may drive off the
+      // leading edge, and an arrow there would just be noise.
+      const racing = state === "race";
       const vp = cam.viewport, v = cam.view;
       const dangerX = v.dangerX ?? v.left + (v.right - v.left) * DANGER;
       let worst = 0;
@@ -102,6 +106,12 @@
         if (!c.alive) { m.tag.style.display = m.ring.style.display = m.arrow.style.display = "none"; continue; }
         const p = cam.toStage(c.x, c.y + 0.7);
         const inside = p.x >= 0 && p.x <= vp.w && p.y >= 0 && p.y <= vp.h;
+        if (!racing) {
+          m.ring.style.display = m.arrow.style.display = "none";
+          m.tag.style.display = inside ? "" : "none";
+          if (inside) m.tag.style.transform = `translate(${cam.toStage(c.x, c.y + 3.6).x}px, ${cam.toStage(c.x, c.y + 3.6).y}px)`;
+          continue;
+        }
 
         // Tag floats above the car's marker arrow.
         const tp = cam.toStage(c.x, c.y + 3.6);
@@ -126,7 +136,7 @@
       }
       // The danger glow brightens while anyone is in it.
       const d = $("danger");
-      d.classList.toggle("hot", worst > 0);
+      d.classList.toggle("hot", racing && worst > 0);
       return worst;
     },
 

@@ -230,7 +230,7 @@
         TP.BRHud.setStage(cam.viewport);
 
         if (!app.attract) {
-          const danger = TP.BRHud.update(g.cars, g.wins, cam);
+          const danger = TP.BRHud.update(g.cars, g.wins, cam, g.state);
           // Rising warning beep: faster and higher the deeper a car is in.
           if (danger > 0 && g.state === "race") {
             app.beepTimer -= realDt;

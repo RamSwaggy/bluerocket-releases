@@ -37,9 +37,9 @@
   /* ---------- Palette (none of these are player colours) ---------- */
   const PAL = {
     fog: 0x3a2346,        // dusky purple haze, also the horizon colour
-    skyTop: 0x0b0a24,     // deep indigo
+    skyTop: 0x070722,     // deep indigo
     skyMid: 0x2a1845,     // violet
-    ember: 0xd9735a,      // warm low glow at the horizon
+    ember: 0xe8704a,      // warm low glow at the horizon
     far: 0x4b3466,        // far silhouettes (fog lightens them further)
     mid: 0x2a2846,        // mid silhouettes (soft, so they read as background)
     window: 0xc99a6a,     // warm lit windows (dimmed: background, not track)
@@ -217,10 +217,13 @@
           float hash(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
           void main(){
             float y = vUv.y;                       // 0 bottom .. 1 top, 0.5 = horizon
-            vec3 c = mix(horizon, mid, smoothstep(0.5, 0.72, y));
-            c = mix(c, top, smoothstep(0.7, 1.0, y));
-            // Ember glow hugging the horizon.
-            c += ember * 0.55 * exp(-pow((y - 0.5) * 9.0, 2.0));
+            // Indigo high up, violet in the middle, ember at the horizon.
+            vec3 c = mix(horizon, mid, smoothstep(0.5, 0.6, y));
+            c = mix(c, top, smoothstep(0.58, 0.86, y));
+            // Ember glow rising off the horizon: a broad warm wash plus a
+            // brighter band right at the skyline, so the dusk reads.
+            c += ember * 0.45 * exp(-pow((y - 0.5) * 4.5, 2.0));
+            c += ember * 0.6 * exp(-pow((y - 0.5) * 12.0, 2.0));
             // Stars: only high up, and only a few cells light up.
             vec2 cell = floor(vUv * vec2(260.0, 150.0));
             float s = step(0.9965, hash(cell)) * smoothstep(0.66, 0.9, y);
