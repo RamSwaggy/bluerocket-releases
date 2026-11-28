@@ -135,7 +135,8 @@ function installWatcher(limits) {
       if (e.type === "round_start") eventRound = e.round;
       const r = (qc.rounds[eventRound] = qc.rounds[eventRound] || { kos: [], end: null });
       if (e.type === "ko") {
-        r.kos.push({ t: e.t, car: seatName(g, e.seat), cause: e.cause, chunk: e.chunk !== undefined ? e.chunk : R.chunkAtX(g, e.x) });
+        // ko carries chunk (placed index) and id (chunk id); print the id, falling back to a lookup by x.
+        r.kos.push({ t: e.t, car: seatName(g, e.seat), cause: e.cause, chunk: e.id != null ? `${e.id} (#${e.chunk})` : R.chunkAtX(g, e.x) });
       } else if (e.type === "round_end") {
         r.end = { t: e.t, winner: seatName(g, e.winner), wins: e.wins };
       } else if (e.type === "match_end") {
