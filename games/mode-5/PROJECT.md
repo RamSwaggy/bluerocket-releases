@@ -34,7 +34,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 ## Current jobs
 - Gameplay: M2 smarter bots, score-freeze guard, 2 more arenas, 2v2 teams, tutorial hints.
 - Art and UI: M2b framing fixes (phones), fill-text scale, round/match-end reveal, how-to visibility, short labels, wet-trail read, sudden-death + teams HUD, MenuNav.
-- QC: full run of smoke/probe/shots on merged M1 core; file bugs.
+- QC: waiting on Gameplay's bug-1 fix (wet trail never starts when driving forward), then re-probe + batch.
 
 ## Decisions log
 - 2026-11-27 (Director, standing rule): free assets and tools only; every third-party asset gets a neutral line in `games/CREDITS.md` (no spoilers) or it isn't merged. Our plan is all code-made (exempt).
@@ -42,6 +42,7 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
+- QC ef22ffb: smoke checks (score freeze, cars in bounds), tools/mode-5-batch.js, probe feel numbers. QC-1 found critical bug 1 (no wet trail when driving out) → Gameplay. Decisions: fill events only ≥8 enclosed cells; no stun pop for trails <6 cells; spawns angled off pillar.
 - Art 412ac47: real index.html, World on main.js hand-off, menu + pause overlay, perf pass. Boss screenshot review → M2b list.
 - Gameplay b70850a: core rules, Plaza, bots, match, main + bare index.html. Director shared 5f17ab7 merged. Smoke on merge: 3 rounds @16×, PASS 6/6, 214 fills, 13 pops.
 - QC 10a0e5e: tools/mode-5-{lib,smoke,shots,probe}.js (test-hook contract forwarded to Gameplay).
