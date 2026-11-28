@@ -37,6 +37,7 @@
           pivot      car tuning pivot left at the default
           nosave     Start doesn't save the setup
           norematch  rematch keeps old lives
+          stackhits  two cars swinging on the same frame both count
    ===================================================================== */
 (function () {
   "use strict";
@@ -219,10 +220,11 @@
 
     if (d.state === "serve") { serveLeft -= dt; if (serveLeft <= 0) d.state = "play"; }
 
+    let hitThisStep = false;   // only one car can hit the ball per step
     d.players.forEach((p, i) => {
       const s = swing[i];
       if (!s || p.out) return;
-      if (!s.done && d.state === "play" && tryHit(p, ctrls[i])) s.done = true;
+      if (!s.done && d.state === "play" && (!hitThisStep || BUG === "stackhits") && tryHit(p, ctrls[i])) { s.done = true; hitThisStep = true; }
       s.left -= dt;
       if (s.left <= 0) { if (!s.done) cooldown[i] = CFG.hitCooldown; swing[i] = null; }
     });

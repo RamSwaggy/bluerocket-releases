@@ -17,8 +17,9 @@
                    costs anyone else exactly 1 life; ball re-serves at
                    the centre; no second KO while invulnerable
      speed-steps   first hit = base speed; each later hit faster, never
-                   over the cap; Smash adds more and costs boost; a miss
-                   starts a cooldown; steering bends the hit ~25°
+                   over the cap; two cars hitting on one frame = one hit;
+                   Smash adds more and costs boost; a miss starts a
+                   cooldown; reach ~3.6; steering bends the hit ~25°
      hit-freeze    a hit pauses play; faster ball = longer pause; nothing
                    moves during it; pause stays short
      jump-dodge    an airborne car isn't KO'd by a ball passing under it
@@ -282,6 +283,19 @@ const TESTS = {
     r.ok(firstCap >= 0, `the ball reaches maxSpeed ${max} after enough hits`);
     r.ok(speeds.every((s) => s <= max * 1.001), `speed never goes over maxSpeed ${max} (top ${Math.max(...speeds).toFixed(2)})`);
     if (firstCap >= 0) r.ok(speeds.slice(firstCap).every((s) => Math.abs(s - max) <= max * 0.005), `stays at maxSpeed once capped (${speeds.slice(firstCap).map((s) => s.toFixed(1)).join(", ")})`);
+
+    // Two cars swinging at the same ball on the same frame: one hit, not two
+    // stacked (stacking would launch a serve far faster than base speed).
+    d = Q.fresh({ players: 2 });
+    Q.place(0, -2.2, 0, Math.PI / 2); Q.place(1, 2.2, 0, -Math.PI / 2);   // nose to nose, ball between
+    d.setBall({ pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, z: 0 }, owner: null });
+    d.setInput(0, { hit: true, hitPressed: true }); d.setInput(1, { hit: true, hitPressed: true });
+    d.update(Q.DT);
+    d.setInput(0, {}); d.setInput(1, {});
+    Q.stepUntil(() => !(d.freezeLeft > 0), 1);
+    if (!d.ball.neutral) r.ok(typeof base !== "number" || Math.abs(d.ball.speed - base) <= base * 0.05,
+      `two cars hitting a neutral ball on the same frame count as ONE hit (speed ${d.ball.speed.toFixed(2)}, base ${base})`);
+    else r.ok(false, "set-up: neither car hit the ball when both swung at it");
 
     // Smash: hitting while boosting adds more than a normal hit and costs boost.
     const twoHits = (boost) => {
