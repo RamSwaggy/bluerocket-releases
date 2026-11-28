@@ -1299,7 +1299,7 @@
           // higher, or side-flip out of the line of anything else.
           const need = yAt + C.ballR + 0.15; // wheels must clear the ball's top
           const plan = TP.ai.planJump(need, this.tuning);
-          if (plan.kind === "double" && tImpact <= plan.t + 0.05) {
+          if (plan.kind === "double" && tImpact <= plan.t + 0.15) { // a little early: the second jump climbs slower than planJump assumes
             S.act = { kind: "hop", until: this.time + 1.2, secondAt: plan.secondAt };
             return this._botAct(i);
           }
