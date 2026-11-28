@@ -286,12 +286,21 @@
     },
 
     /* Full-screen card (menu, results). Returns the card element. */
+    // Every card is also driven by controller (shared TP.MenuNav): D-pad
+    // moves the highlight, A presses, B = "back" ([data-nav-back]), Start
+    // presses the main action ([data-nav-primary]). The old menu had no
+    // controller support at all, so pads got stuck on it.
     card(html) {
+      if (UI._nav) { UI._nav.detach(); UI._nav = null; }
       $("card").innerHTML = html;
       $("overlay").classList.add("show");
+      if (TP.MenuNav) UI._nav = TP.MenuNav.attach($("card"));
       return $("card");
     },
-    hideCard() { $("overlay").classList.remove("show"); },
+    hideCard() {
+      if (UI._nav) { UI._nav.detach(); UI._nav = null; }
+      $("overlay").classList.remove("show");
+    },
 
     // Set by main.js: called once when the match is over, with the state
     // and our round log [{ round, winner (0, 1 or -1 for a draw), how }].

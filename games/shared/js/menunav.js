@@ -12,8 +12,13 @@
    Controls (any connected gamepad; keyboard arrows when not typing):
      D-pad / left stick ... move between buttons, dropdowns and links
                             (picks the nearest one in that direction)
-     ← → on a dropdown .... change its value (↑ ↓ still move away from it)
-     A (or Enter / Space) . press the highlighted button
+     A (or Enter / Space) . press the highlighted button; on a dropdown,
+                            step to its next value (wraps round)
+     ← → on a dropdown .... ALSO change its value, but only when there's
+                            nothing to move to on that side. (They used to
+                            always change the value, which trapped players
+                            in the hub's Players column and quietly
+                            unassigned their controller.)
      B (or Escape) ........ back (opts.onBack, or a [data-nav-back] element)
      Start ................ press the [data-nav-primary] element (e.g. "Play")
 
@@ -82,7 +87,11 @@ window.TP = window.TP || {};
       if (!from) return;
       const a = from.getBoundingClientRect();
       const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
-      let best = null, bestScore = Infinity;
+      // Two passes: first only items inside a 45° cone in the pressed
+      // direction (so ↓ on a mode card goes to the card below, not to a
+      // nearer dropdown off to the side); if the cone is empty, anything
+      // that's at least a little that way.
+      let best = null, bestScore = Infinity, bestInCone = false;
       for (const el of items()) {
         if (el === from || isText(el)) continue;
         const b = el.getBoundingClientRect();
@@ -90,10 +99,19 @@ window.TP = window.TP || {};
         const along = (bx - ax) * dx + (by - ay) * dy;     // distance in the pressed direction
         if (along <= 4) continue;                           // behind or level: skip
         const across = Math.abs((bx - ax) * dy - (by - ay) * dx); // sideways offset
-        const score = along + across * 2.5;
-        if (score < bestScore) { bestScore = score; best = el; }
+        const inCone = across <= along;
+        // Inside the cone: nearest wins (sideways offset counts extra).
+        // Outside it: the one closest to the pressed DIRECTION wins (smallest
+        // angle), so a gap in a grid, like the disabled "coming soon" card,
+        // leads to the diagonal card rather than a far-off column.
+        const score = inCone ? along + across * 2.5 : across / along;
+        // An in-cone item always beats an out-of-cone one.
+        if ((inCone && !bestInCone) || (inCone === bestInCone && score < bestScore)) {
+          bestScore = score; best = el; bestInCone = inCone;
+        }
       }
       if (best) highlight(best);
+      return !!best;
     }
 
     // ← → change a dropdown's value instead of moving away from it.
@@ -108,15 +126,18 @@ window.TP = window.TP || {};
       return true;
     }
 
+    // Arrows always try to MOVE first. Only on a dropdown with nothing to
+    // move to on that side do ← → change its value instead.
     function direction(dx, dy) {
       const el = ensureCurrent();
-      if (el && el.tagName === "SELECT" && dx !== 0 && nudgeSelect(el, dx)) return;
-      move(dx, dy);
+      if (move(dx, dy)) return;
+      if (el && el.tagName === "SELECT" && dx !== 0) nudgeSelect(el, dx);
     }
 
     function press() {
       const el = ensureCurrent();
       if (!el) return;
+      // A on a dropdown: next value, wrapping from the last back to the first.
       if (el.tagName === "SELECT") { nudgeSelect(el, 1) || nudgeSelect(el, -(el.options.length)); return; }
       if (isText(el)) return;
       play("coin");
@@ -190,8 +211,8 @@ window.TP = window.TP || {};
       const typing = isText(document.activeElement);
       const map = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (map[e.key] && !typing && !e.altKey) {
-        // Same as a gamepad: ↑↓ move between controls (even from a
-        // dropdown, so it can't trap you), ←→ change a dropdown's value.
+        // Same as a gamepad: arrows move between controls; ←→ change a
+        // dropdown's value only when there's nothing on that side.
         e.preventDefault();
         direction(...map[e.key]);
       } else if ((e.key === "Enter" || e.code === "NumpadEnter" || e.code === "Space") && !typing) {
