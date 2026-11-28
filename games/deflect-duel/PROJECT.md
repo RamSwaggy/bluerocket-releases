@@ -1,6 +1,6 @@
 # Deflect Duel: team project file
 
-**Read `../TEAMS.md` first** (team structure, branches, rules). This file is the Deflect Duel
+**Read `../TEAMS.md` first**, then `DESIGN.md` (the current design, v2) (team structure, branches, rules). This file is the Deflect Duel
 specifics. The boss keeps it up to date.
 
 ## What it is
@@ -110,3 +110,10 @@ From the `games` folder:
   ball stays flat at bumper height.
 - **First playable** = launch from the hub, pick 2–4 seats and 3/5 lives, play to a winner,
   results + rematch, an all-bot match finishes with no errors, QC's smoke test passes.
+- 2026-11-28 (Reece's direction, via the Director): **Design v2.** The game should feel and play
+  like car-soccer mechanics crossed with an arena ball-striking fighter. That means a truly 3D
+  ball (a neutral ball has gravity, an owned ball flies in straight lines), a ceiling, aimed
+  strikes (up, straight or down), bunts, clashes, flip strikes, the shared engine's new "rocket
+  moveset" (from the Core session), and a side-angle broadcast camera. See `DESIGN.md`. v1 stays
+  on the hub as Play while v2 is built. Genre conventions only, with no other game's names or
+  look.
