@@ -57,6 +57,13 @@
       this.listen();
     }
 
+    // The arena look changed (new round on another arena).
+    setWorld(world) {
+      this.world = world;
+      this.cellSize = world.cell;
+      this.half = world.size / 2;
+    }
+
     blobMat(color) {
       if (!this.blobMats[color]) {
         this.blobMats[color] = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.25 });
@@ -154,27 +161,34 @@
     listen() {
       if (!TP.M5.on || this.listening) return;
       this.listening = true;
-      const cs = () => this.cellSize;
-      TP.M5.on("splat", (e) => this.splat(e.x, e.z, (e.r || 3) * cs(), colorOf(e.player)));
-      TP.M5.on("fill", (e) => {
+      // Collect the "stop listening" handles for dispose().
+      this.offs = [];
+      const on = (n, fn) => { const off = TP.M5.on(n, fn); if (typeof off === "function") this.offs.push(off); };
+      // splat.r is in world units.
+      on("splat", (e) => this.splat(e.x, e.z, e.r || 3, colorOf(e.player)));
+      on("fill", (e) => {
         // Bigger fills, bigger party. pct is the % of the floor gained.
-        const big = Math.min(1, (e.pct || 0) / 12);
+        const pct = e.pct || 0;
+        // A sliver of a fill just gets a small ring; real loops get the party.
+        if (pct < 0.5) { this.flat("ring", e.cx || 0, e.cz || 0, colorOf(e.player), 0.5, 3, 0.35, 0.8); return; }
+        const big = Math.min(1, pct / 12);
         this.fillBurst(e.cx || 0, e.cz || 0, colorOf(e.player), big);
       });
-      TP.M5.on("pop", (e) => this.popSplash(e.x || 0, e.z || 0, colorOf(e.by)));
-      TP.M5.on("land", (e) => {
-        if (!this.cars) return;
-        const car = this.cars.find((c) => (c.index ?? (c.player && c.player.index)) === TP.M5.pi(e.player));
-        if (car) this.landRing(car.pos.x, car.pos.z, colorOf(e.player), e.airtime || 0.3);
+      on("pop", (e) => this.popSplash(e.x || 0, e.z || 0, colorOf(e.by)));
+      // Events carry x/z; older senders didn't, so fall back to the car.
+      const carOf = (p) => this.cars && this.cars.find((c) => (c.index ?? (c.player && c.player.index)) === TP.M5.pi(p));
+      const at = (e) => (e.x != null ? e : carOf(e.player) && carOf(e.player).pos);
+      on("land", (e) => { const p = at(e); if (p) this.landRing(p.x, p.z, colorOf(e.player), e.airtime || 0.3); });
+      on("pickupSpawn", (e) => this.pickupSpawnFx(e.x, e.z));
+      on("pickup", (e) => { const p = at(e); if (p) this.pickupFlash(p.x, p.z); });
+      on("bump", (e) => {
+        // Hard hits throw a burst of sparks in both colours.
+        if (!e.hard || e.x == null) return;
+        this.fx.burst(new THREE.Vector3(e.x, 1, e.z), [colorOf(e.a), colorOf(e.b), 0xffffff], { count: 22, speed: 10, up: 4, size: 0.22, life: 0.6 });
       });
-      TP.M5.on("pickupSpawn", (e) => this.pickupSpawnFx(e.x, e.z));
-      TP.M5.on("pickup", (e) => {
-        const car = this.cars && this.cars.find((c) => (c.index ?? (c.player && c.player.index)) === TP.M5.pi(e.player));
-        if (car) this.pickupFlash(car.pos.x, car.pos.z);
-      });
-      TP.M5.on("overdrive", () => { this.overdrive = true; });
-      TP.M5.on("roundCountdown", () => { this.overdrive = false; });
-      TP.M5.on("roundEnd", (e) => {
+      on("overdrive", () => { this.overdrive = true; });
+      on("roundCountdown", () => { this.overdrive = false; });
+      on("roundEnd", (e) => {
         this.overdrive = false;
         // Confetti over the whole floor for the round winner.
         if (e && e.winner != null && e.winner >= 0) {
@@ -196,7 +210,7 @@
 
       // Droplets flicked off each roller.
       for (const car of this.cars || []) {
-        if (!car || car.out || car.onGround === false || car.stunned) continue;
+        if (!car || car.out || car.onGround === false || car.stunned || car.stun > 0) continue;
         const v = car.vel ? Math.hypot(car.vel.x, car.vel.z) : 0;
         if (v < 3) continue;
         let t = (this.dropletTimers.get(car) || 0) - dt;
@@ -267,6 +281,8 @@
     }
 
     dispose() {
+      (this.offs || []).forEach((off) => off());
+      this.offs = [];
       this.fx.dispose();
       [this.blobGeo, this.ringGeo, this.thinGeo, this.discGeo].forEach((g) => g.dispose());
       Object.values(this.blobMats).forEach((m) => m.dispose());

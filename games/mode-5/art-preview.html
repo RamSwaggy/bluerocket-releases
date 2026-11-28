@@ -128,7 +128,7 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const scene = new THREE.Scene();
-    const world = new TP.M5.World(scene, arena, grid);
+    const world = new TP.M5.Stage(scene, arena, grid);  // the arena look on its own (no match)
     const vfx = new TP.M5.Vfx(scene, world);
     TP.M5.Audio.init();
     const players = TP.DEFAULT_NAMES.map((name, index) => ({ name, index }));
@@ -283,7 +283,11 @@
       if (k === "2") { const c = c0(); TP.M5.emit("pop", { victim: c.index, by: (c.index + 1) % 4, x: c.pos.x, z: c.pos.z }); }
       if (k === "3") { const c = c0(); TP.M5.emit("splat", { player: c.index, x: c.pos.x, z: c.pos.z, r: 5 }); }
       if (k === "o") { timeLeft = 20.5; }
-      if (k === "c") { TP.M5.emit("roundCountdown", { round: 2, arena }); setTimeout(() => TP.M5.emit("roundStart"), 3000); }
+      if (k === "c") {
+        TP.M5.emit("roundCountdown", { round: 2, arenaName: arena.name });
+        [3, 2, 1].forEach((n, i) => setTimeout(() => TP.M5.emit("countdown", { n }), i * 1000));
+        setTimeout(() => TP.M5.emit("roundStart"), 3000);
+      }
       if (k === "r") { paused = true; TP.M5.emit("roundEnd", { scores: scores(), winner: scores().indexOf(Math.max(...scores())) }); }
       if (k === "m") {
         paused = true;
@@ -304,7 +308,7 @@
       console.log("menuStart", JSON.stringify(e));
       timeLeft = (e.options && e.options.roundLength) || 120;
       overdrive = false;
-      TP.M5.emit("roundCountdown", { round: 1, arena });
+      TP.M5.emit("roundCountdown", { round: 1, arenaName: arena.name });
       setTimeout(() => { paused = false; TP.M5.emit("roundStart"); }, 3000);
     });
     TP.M5.on("pause", () => { paused = true; });

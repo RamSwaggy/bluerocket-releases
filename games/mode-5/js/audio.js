@@ -23,10 +23,10 @@
    crunch, pickup sparkle, pickup-spawn chime. Each is a few oscillators
    or a burst of filtered noise.
 
-   The shared TP.sfx doesn't expose its AudioContext, so mode sounds use our
-   own small one. To keep the shared M (mute) key and Start-button unlock
-   working for both, init() wraps TP.sfx.unlock / TP.sfx.toggleMute on THIS
-   page only (it calls the originals first, so their behaviour is unchanged).
+   Mode sounds play through the shared audio context and master volume
+   (TP.sfx.context()), so the shared M (mute) key and the Start-button
+   unlock cover them too. While the title menu is open (a bot match plays
+   behind it as a backdrop) mode sounds stay quiet.
    ===================================================================== */
 (function () {
   "use strict";
@@ -164,16 +164,19 @@
   /* =================================================================
      Mode sound effects (own small AudioContext; see header)
      ================================================================= */
-  let ctx = null, out = null, muted = false;
+  let ctx = null, out = null;
   let noiseBuf = null;
 
+  // Hook into the shared audio context (created by TP.sfx on unlock).
   function ensure() {
-    if (ctx) { if (ctx.state === "suspended") ctx.resume(); return !!ctx; }
+    if (ctx) return true;
     try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      out = ctx.createGain();
-      out.gain.value = muted ? 0 : 0.7;
-      out.connect(ctx.destination);
+      const shared = TP.sfx.context ? TP.sfx.context() : null;
+      if (!shared || !shared.ctx) return false;
+      ctx = shared.ctx;
+      out = ctx.createGain();       // our own volume knob, into the shared master
+      out.gain.value = 0.85;
+      out.connect(shared.master);
       noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 1.0, ctx.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -226,8 +229,9 @@
 
   const SOUNDS = {
     // Wet splat: low splashy noise + a soft thump. Bigger = lower + longer.
+    // r = splat radius in world units (about 2 to 8).
     splat(r = 3) {
-      const k = Math.min(1, r / 6);
+      const k = Math.min(1, r / 8);
       noise(0.16 + k * 0.14, "lowpass", 2400, 260, 0.32 + k * 0.15);
       tone(200 - k * 60, 55, 0.16 + k * 0.1, "sine", 0.3);
     },
@@ -306,11 +310,11 @@
   const Audio = {
     BPM, OVERDRIVE_BPM,
     play(name, arg) {
-      if (!ctx || muted) return;
+      if (TP.M5.Menu && TP.M5.Menu.isOpen) return;   // quiet behind the title menu
+      if (!ensure() || ctx.state !== "running") return;
       try { if (SOUNDS[name]) SOUNDS[name](arg); } catch (e) { /* never let audio break the game */ }
     },
-    unlock() { ensure(); },
-    setMuted(m) { muted = m; if (out) out.gain.value = m ? 0 : 0.7; },
+    unlock() { TP.sfx.unlock(); ensure(); },
     isOverdrive: () => overdrive,
 
     // Start the round's music from the top at normal speed.
@@ -327,18 +331,16 @@
       this.ready = true;
       TP.sfx.defineTrack("neon-turf", NEON_TURF);
 
-      // Make the shared unlock (Start button) and mute (M key) cover our sounds too.
-      const origUnlock = TP.sfx.unlock.bind(TP.sfx);
-      TP.sfx.unlock = () => { origUnlock(); ensure(); };
-      const origMute = TP.sfx.toggleMute.bind(TP.sfx);
-      TP.sfx.toggleMute = () => { const m = origMute(); Audio.setMuted(m); return m; };
 
       if (!TP.M5.on) return;
       const on = TP.M5.on;
       // Countdown beeps ("3, 2, 1") are played by the HUD as it shows each
       // number (it runs on game time, so ?speed=N stays in sync); GO is here.
       on("roundCountdown", () => Audio.stopMusic());
-      on("roundStart", () => { Audio.play("go"); Audio.startMusic(); });
+      on("roundStart", () => {
+        Audio.play("go");
+        if (!(TP.M5.Menu && TP.M5.Menu.isOpen)) Audio.startMusic();
+      });
       on("overdrive", () => {
         overdrive = true;
         TP.sfx.setTempo(OVERDRIVE_BPM);
@@ -347,7 +349,11 @@
       on("roundEnd", () => { Audio.stopMusic(); Audio.play("roundEnd"); setTimeout(() => Audio.play("roundWin"), 450); });
       on("matchEnd", () => { Audio.stopMusic(); setTimeout(() => Audio.play("matchWin"), 300); });
       on("splat", (e) => { if (ok("splat", 0.05)) Audio.play("splat", e.r); });
-      on("fill", (e) => Audio.play("fill", e.pct));
+      // Big fills get the whoosh-chord; slivers just a soft blip.
+      on("fill", (e) => {
+        if ((e.pct || 0) >= 0.5) Audio.play("fill", e.pct);
+        else if (ok("fillTiny", 0.12)) Audio.play("trail");
+      });
       on("pop", () => { if (ok("pop", 0.06)) Audio.play("pop"); });
       on("land", (e) => { if (ok("land", 0.05)) Audio.play("land", e.airtime); });
       on("bump", (e) => { if (ok("bump", 0.08)) Audio.play("bump", e.impact); });

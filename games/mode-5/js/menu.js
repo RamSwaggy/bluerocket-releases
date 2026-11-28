@@ -6,7 +6,11 @@
    Gameplay what the players chose, through events.
 
    Usage:
-     TP.M5.Menu.open();          // show the title menu (call once at boot)
+     TP.M5.Menu.open();          // show the title menu (index.html does this at boot)
+
+   Starting: Start calls Gameplay's TP.M5.startMatch({ players, rounds,
+   roundTime, arena, botLevel, teams }). While the menu is open a quiet
+   all-bot match plays behind it as a backdrop (also via startMatch).
      TP.M5.Pause.enabled = true; // done for you on Start; Esc / gamepad Start then pause
 
    Events it emits (TP.M5.emit):
@@ -40,11 +44,19 @@
     { key: "rounds", label: "Rounds", def: 3, choices: [[1, "1 round"], [3, "Best of 3"], [5, "Best of 5"]] },
     { key: "roundLength", label: "Round length", def: 120, choices: [[90, "1:30"], [120, "2:00"], [180, "3:00"]] },
     { key: "difficulty", label: "Bots", def: "normal", choices: [["easy", "Easy"], ["normal", "Normal"], ["hard", "Hard"]] },
-    { key: "arena", label: "Arena", def: "random", choices: [["random", "Random"], ["plaza", "Plaza"], ["split", "Split Level"], ["rings", "Rings"]] },
+    // Arena choices are filled in from Gameplay's TP.M5.ARENAS (see arenaChoices()).
+    { key: "arena", label: "Arena", def: "random", choices: [["random", "Random"]] },
     { key: "teams", label: "Teams", def: "ffa", choices: [["ffa", "Free-for-all"], ["2v2", "2 v 2"]] },
   ];
 
+  // "Random" plus every arena Gameplay has defined.
+  function arenaChoices() {
+    const def = OPTIONS.find((d) => d.key === "arena");
+    def.choices = [["random", "Random"]].concat((TP.M5.ARENAS || []).map((a) => [a.id, a.name]));
+  }
+
   function loadOptions() {
+    arenaChoices();
     const o = {};
     OPTIONS.forEach((d) => { o[d.key] = d.def; });
     try {
@@ -479,6 +491,19 @@
       Pause.enabled = false;
       Pause.close(true);
       emit("menuOpen");
+      this.attract();
+    },
+
+    // Backdrop: four bots painting a long round behind the menu. The HUD
+    // and mode sounds stay hidden/quiet while the menu is open.
+    attract() {
+      if (!TP.M5.startMatch) return;
+      const n = (TP.M5.ARENAS || [1]).length;
+      TP.M5.startMatch({
+        players: TP.DEFAULT_NAMES.map((name) => ({ name, controller: "bot" })),
+        rounds: 1, roundTime: 600, botLevel: "hard",
+        arena: Math.floor(Math.random() * n),
+      });
     },
     close() {
       if (!this.root) return;
@@ -496,7 +521,18 @@
       const slots = this.slots.map((s) => ({ name: s.name, controller: s.controller === "off" ? "bot" : s.controller }));
       this.close();
       Pause.enabled = true;
-      emit("menuStart", { slots, options: { ...this.options } });
+      const o = this.options;
+      emit("menuStart", { slots, options: { ...o } });
+      if (TP.M5.startMatch) {
+        // Arena: its index in TP.M5.ARENAS, or a random one.
+        const arenas = TP.M5.ARENAS || [];
+        let arena = arenas.findIndex((a) => a.id === o.arena);
+        if (arena < 0) arena = Math.floor(Math.random() * Math.max(1, arenas.length));
+        TP.M5.startMatch({
+          players: slots, rounds: o.rounds, roundTime: o.roundLength,
+          arena, botLevel: o.difficulty, teams: o.teams,
+        });
+      }
     },
   };
 
@@ -553,7 +589,7 @@
       this.root.classList.remove("show");
       this.isOpen = false;
       if (id === "resume") emit("resume");
-      else if (id === "restart") emit("restart");
+      else if (id === "restart") { emit("restart"); if (TP.M5.restart) TP.M5.restart(); }
       else if (id === "quit") { emit("quit"); Menu.open(); }
     },
   };

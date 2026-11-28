@@ -83,6 +83,15 @@
     .m5-hint { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 48px); }
   }
 
+  /* ----- Short landscape screens (phones on their side): one slim row.
+     The bar already shows each colour's %, so the chips go. ----- */
+  @media (max-height: 500px) and (min-aspect-ratio: 1/1) {
+    .m5-top { flex-direction: row; justify-content: center; gap: 10px; top: max(6px, env(safe-area-inset-top)); }
+    .m5-timer { font-size: 20px; padding: 3px 10px; }
+    .m5-bar { width: min(70vw, 620px); height: 16px; }
+    .m5-chips { display: none; }
+  }
+
   /* ----- Big centre banner ----- */
   .m5-banner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; transform: translateY(-50%); }
   .m5-banner .big { display: inline-block; font-weight: 900; font-style: italic; line-height: .95;
@@ -201,6 +210,17 @@
     }
 
     setCamera(camera) { this.camera = camera; }
+
+    // New match: clear anything left over from the last one.
+    reset() {
+      this.hideCard();
+      this.clearBanner();
+      clearTimeout(this.cardTimer);
+      this.overdrive = false;
+      this.countdownLeft = 0;
+      this.floatLayer.innerHTML = "";
+      this.timerEl.classList.remove("warn", "od");
+    }
     setPlayers(players) { this.players = players; this.buildBar(); }
     show(on) { this.root.style.display = on ? "" : "none"; this.measureSafeArea(); }
     showTop(on) { this.root.querySelector(".m5-top").style.visibility = on ? "" : "hidden"; }
@@ -381,16 +401,22 @@
     matchCard(e = {}) {
       const ps = this.players || [];
       const nameOf = (i) => { const p = ps.find((q, k) => (q.index ?? k) === i); return p ? p.name : `P${i + 1}`; };
-      const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.index));
+      const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.player ?? s.index));
       const champ = order[0];
+      const draw = e.winner === -1;
       const stats = e.stats || [];
-      const LABELS = { bestFill: "Best fill", pops: "Pops", painted: "Painted", distance: "Distance", fills: "Fills", rounds: "Rounds" };
-      const keys = Object.keys(stats[champ] || stats[0] || {});
+      const LABELS = { bestFill: "Best fill", fills: "Fills", pops: "Pops", distance: "Distance" };
+      // Show the stats we know how to label, in this order, if present.
+      const first = stats[champ] || stats[0] || {};
+      const keys = Object.keys(LABELS).filter((k) => typeof first[k] === "number");
+      // painted is a cell count from Gameplay; turn it into % of the floor if we can.
+      const grid = TP.M5.match && TP.M5.match.grid;
       const fmt = (k, v) => (v == null ? "–" : k === "distance" ? Math.round(v) + " m" :
-        k === "bestFill" || k === "painted" ? Math.round(v) + "%" : Math.round(v * 10) / 10);
+        k === "bestFill" ? (Math.round(v * 10) / 10) + "%" :
+        k === "painted" ? (grid && grid.paintable ? Math.round((v / grid.paintable) * 100) + "%" : Math.round(v)) : Math.round(v * 10) / 10);
       this.openCard(`
         <div class="kicker">Match over</div>
-        <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${esc(nameOf(champ))} wins!</h2>
+        <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${draw ? "It's a draw!" : esc(nameOf(champ)) + " wins!"}</h2>
         <div class="m5-row head"><span>Player</span><span>Rounds won</span><span style="text-align:right">Wins</span></div>
         ${order.map((i, rank) => {
           // Bar = rounds won, as a share of the most anyone won.
@@ -426,12 +452,23 @@
       on("menuOpen", () => { this.hideCard(); this.clearBanner(); this.show(false); });
       on("quit", () => this.show(false));
       on("roundCountdown", (e = {}) => {
-        this.show(true);
+        // (Not while the title menu is up: a backdrop match plays behind it.)
+        if (!(TP.M5.Menu && TP.M5.Menu.isOpen)) this.show(true);
         this.hideCard();
         this.overdrive = false;
         const round = e.round || 1;
-        const arenaName = e.arena && (e.arena.name || (typeof e.arena === "string" ? e.arena : ""));
-        this.countdown(e.seconds || 3, `Round ${round}${arenaName ? " · " + arenaName : ""}`);
+        const arenaName = e.arenaName || (e.arena && e.arena.name) || "";
+        this.countSub = `Round ${round}${arenaName ? " · " + arenaName : ""}`;
+        // Gameplay sends "countdown" {n} each second; until the first one
+        // arrives, show the round title.
+        this.gotCount = false;
+        this.banner(`ROUND ${round}`, { sub: arenaName, color: "#ffffff", glow: "#7dd3fc", hold: 1.0 });
+      });
+      on("countdown", (e) => {
+        this.gotCount = true;
+        if (!e.n) return; // 0 = GO, handled by roundStart
+        this.banner(String(e.n), { sub: this.countSub, color: "#ffffff", glow: "#7dd3fc", hold: 0.9 });
+        if (TP.M5.Audio) TP.M5.Audio.play("count");
       });
       on("roundStart", () => {
         this.countdownLeft = 0;
@@ -443,6 +480,9 @@
       });
       on("fill", (e) => {
         const pct = e.pct || 0;
+        // Tiny fills (closing a loop around a sliver) happen constantly;
+        // only real ones earn a number on screen.
+        if (pct < 0.5) return;
         // Big fills get a bigger number.
         const size = pct >= 10 ? 1.5 : pct >= 4 ? 1.15 : 0.85;
         this.floater(`FILL +${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`, e.cx || 0, e.cz || 0, colorOf(e.player), size);
@@ -472,4 +512,6 @@
   }
 
   TP.M5.Hud = Hud;
+  // main.js looks for TP.M5.HUD (capitals) to know the real HUD is here.
+  TP.M5.HUD = Hud;
 })();
