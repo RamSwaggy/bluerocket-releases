@@ -30,13 +30,24 @@ TP.BR = TP.BR || {};
   "use strict";
   const { clamp, wrapAngle } = TP.util;
 
+  /* Skill levels. "Hard chunks" are the tricky ones (wide gap, platform
+     hop, ramp jump): lower levels make more mistakes there.
+       jitter    marker timing error (units)
+       miss      chance to skip a marker (missHard: on hard chunks)
+       net       chance the look-ahead safety net is "awake" for a chunk
+                 (netHard: on hard chunks). Asleep = it trusts the markers.
+       late      safety-net lateness (units)
+       rescue    chance to try to save a fall (double jump / dash / boost)
+       aggro     Hit-dash eagerness at a rival just ahead (per s)
+       chase     eagerness to boost after a rival a little ahead (per s)
+       boostFull boost now and then just because the meter is full (hard only) */
   const LEVELS = {
-    //        marker timing error (units), skip a marker, safety-net lateness (units),
-    //        dash eagerness (per s), full-meter boost eagerness (per s), rescue skill
-    easy:   { jitter: 1.4, miss: 0.12, late: 0.9, aggro: 0.25, boostUse: 0.15, rescue: 0.6 },
-    normal: { jitter: 0.7, miss: 0.04, late: 0.4, aggro: 0.6, boostUse: 0.35, rescue: 0.85 },
-    hard:   { jitter: 0.3, miss: 0.0, late: 0.1, aggro: 1.2, boostUse: 0.6, rescue: 1.0 },
+    easy:   { jitter: 1.6, miss: 0.08, missHard: 0.25, net: 0.9, netHard: 0.6, late: 0.9, rescue: 0.3, aggro: 0.25, chase: 0.1, boostFull: 0 },
+    normal: { jitter: 0.9, miss: 0.03, missHard: 0.12, net: 0.97, netHard: 0.82, late: 0.4, rescue: 0.55, aggro: 0.6, chase: 0.35, boostFull: 0 },
+    hard:   { jitter: 0.3, miss: 0.0, missHard: 0.0, net: 1, netHard: 1, late: 0.1, rescue: 1.0, aggro: 1.2, chase: 0.8, boostFull: 0.6 },
   };
+  const HARD_CHUNKS = new Set(["gap_wide", "oneway", "ramp"]);
+  TP.BR.HARD_CHUNKS = HARD_CHUNKS;
   TP.BR.BOT_LEVELS = LEVELS;
 
   class Bot {
@@ -56,6 +67,23 @@ TP.BR = TP.BR || {};
       this.lastJumpT = -Infinity;   // round time of the last ground jump this bot asked for
       this.wasGround = true;
       this.backOffT = 0;       // seconds left reversing away from a wall
+      this.lastBackOff = -Infinity;
+      this.netAwake = new Map(); // chunk index → is the safety net on for it
+      this.chaseHold = false;
+    }
+
+    isHard(course, chunkIndex) {
+      const c = course.chunks[chunkIndex];
+      return !!c && HARD_CHUNKS.has(c.id);
+    }
+
+    // Is the look-ahead safety net awake for this chunk? (Rolled once per chunk.)
+    netFor(course, chunkIndex) {
+      if (!this.netAwake.has(chunkIndex)) {
+        const p = this.isHard(course, chunkIndex) ? this.L.netHard : this.L.net;
+        this.netAwake.set(chunkIndex, this.rng.chance(p));
+      }
+      return this.netAwake.get(chunkIndex);
     }
 
     // Ask for a jump press (handles releasing first so it registers as new).
@@ -68,9 +96,9 @@ TP.BR = TP.BR || {};
       this.hitT = 0.08;
     }
 
-    offsetFor(m) {
+    offsetFor(m, course) {
       if (!this.markerOffsets.has(m)) {
-        const skip = this.rng.chance(this.L.miss);
+        const skip = this.rng.chance(this.isHard(course, m.chunk) ? this.L.missHard : this.L.miss);
         this.markerOffsets.set(m, skip ? null : this.rng.range(-this.L.jitter, this.L.jitter * 0.6));
       }
       return this.markerOffsets.get(m);
@@ -92,7 +120,7 @@ TP.BR = TP.BR || {};
       /* ---------- Markers (chunk hints) ---------- */
       for (const m of this.markersNear(course, car.x)) {
         if (this.usedMarkers.has(m)) continue;
-        const off = this.offsetFor(m);
+        const off = this.offsetFor(m, course);
         if (off === null) { if (car.x > m.x + 2) this.usedMarkers.add(m); continue; }
         if (car.x >= m.x + off) {
           this.usedMarkers.add(m);
@@ -102,44 +130,62 @@ TP.BR = TP.BR || {};
       }
 
       if (car.onGround) {
-        /* ---------- Safety net: look ahead for gaps and walls ---------- */
         const look = this.lookAhead(course, car);
-        if (look.edge !== null) {
+        const ci = course.chunkIndexAt(car.x + 4); // the chunk we're heading into
+        const netOn = this.netFor(course, ci < 0 ? car.chunkIndex : ci);
+
+        /* ---------- Bumped back or stopped at a step face? ----------
+           Back off to get a run-up (~6 units), then go again: the normal
+           wall-jump rule below fires once we're back up to speed. If the
+           camera edge is too close for that, hop and boost over instead. */
+        const nearFace = look.wall !== null && look.wall < 3.5 && car.vx < 8;
+        const edgeClose = car.x < view.left + view.width * 0.2;
+        if (nearFace && this.backOffT <= 0 && ctx.time - this.lastBackOff > 1.5) {
+          if (edgeClose && car.boost > 15) {
+            if (ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
+          } else {
+            this.backOffT = 1.2;
+            this.lastBackOff = ctx.time;
+          }
+        }
+        const backingOff = this.backOffT > 0 && !(look.wall === null || look.wall >= 6);
+        if (this.backOffT > 0) this.backOffT = backingOff ? this.backOffT - dt : 0;
+        if (backingOff) out.drive = -1;
+
+        /* ---------- Safety net: look ahead for gaps and walls ---------- */
+        if (netOn && look.edge !== null) {
           // Jump right at the edge (a little late on easy).
           const at = Math.max(0.3, speed * dt * 1.5 + 0.35 - this.L.late * 0.2);
           if (look.edge <= at && ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
         }
-        if (look.wall !== null) {
+        if (look.wall !== null && !backingOff) {
           // The best take-off window for a ~1.4 step at 17 is ~3–9.5 units out.
-          const fast = speed > 9;
+          const fast = car.vx > 9;
           if ((fast && look.wall <= 5.2 + this.L.late * 0.5 && look.wall >= 2.2) || (!fast && look.wall <= 1.6)) {
             if (ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
           }
         }
 
-        /* ---------- Stuck against a wall? ----------
-           Hop and boost over it (the nose is level, so the boost pushes us
-           forward). With no boost left, back off first to get a run-up. */
-        if (look.wall !== null && look.wall <= 1.2 && speed < 3) {
-          if (car.boost > 15) {
-            if (ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
-          } else {
-            this.backOffT = 0.6;
-          }
+        /* ---------- Ground boost: only with a reason ----------
+           1) the camera edge is catching us, 2) a wide gap is coming,
+           3) chasing a rival a little ahead, 4) hard bots only: now and
+           then on a full meter. */
+        if (!backingOff) {
+          if (car.x < view.left + view.width * 0.25 && car.boost > 8) out.boost = true;
+          const ch = ci >= 0 ? course.chunks[ci] : null;
+          if (look.edge !== null && look.edge < 6 && ch && ch.gap >= 14 && car.boost > 40) out.boost = true;
+          let rivalAhead = false;
+          for (const r of cars) if (r !== car && r.alive && r.x - car.x > 3 && r.x - car.x < 10) rivalAhead = true;
+          if (!this.chaseHold && rivalAhead && car.boost > 60 && this.rng.chance(this.L.chase * dt)) this.chaseHold = true;
+          if (this.chaseHold && (!rivalAhead || car.boost < 40)) this.chaseHold = false;
+          if (this.chaseHold) out.boost = true;
+          if (!this.boostHold && car.boost >= 99 && this.rng.chance(this.L.boostFull * dt)) this.boostHold = true;
+          if (this.boostHold && car.boost < 55) this.boostHold = false;
+          if (this.boostHold) out.boost = true;
         }
-        if (this.backOffT > 0) {
-          this.backOffT -= dt;
-          out.drive = -1;
-        }
-
-        /* ---------- Ground boost ---------- */
-        const behind = car.x < view.left + view.width * 0.35;
-        if (behind && car.boost > 8) out.boost = true;
-        if (!this.boostHold && car.boost >= 99 && this.rng.chance(this.L.boostUse * dt)) this.boostHold = true;
-        if (this.boostHold && car.boost < 55) this.boostHold = false;
-        if (this.boostHold) out.boost = true;
       } else {
         this.boostHold = false;
+        this.chaseHold = false;
         /* ---------- In the air: predict the landing ---------- */
         const land = this.predictLanding(course, view, car, ctx.T);
         // Hopping up a wall with no forward speed: boost, nose a little up.
