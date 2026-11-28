@@ -403,6 +403,7 @@
         <footer class="m5m-foot">
           <a class="m5m-btn m5m-back" href="${esc(TP.Rumble ? TP.Rumble.HUB_URL : "../index.html")}">← All modes</a>
           <button class="m5m-btn m5m-help" id="m5m-help" type="button"><span class="q">?</span> How to play</button>
+          <button class="m5m-btn m5m-help" type="button" data-open-controls>🎮 Controls</button>
           <button class="m5m-btn m5m-start" id="m5m-start" type="button" data-nav-primary>START</button>
           <span class="m5m-press">or press <kbd class="m5k">Enter</kbd> / <kbd class="m5k">A</kbd></span>
         </footer>

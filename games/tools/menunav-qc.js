@@ -24,6 +24,8 @@ const PAGES = [
   { name: "turbo-party", url: "turbo-party/index.html" },
   { name: "deflect-duel", url: "deflect-duel/index.html" },
   { name: "car-fighter", url: "car-fighter/index.html" },
+  // First visit opens "How to play" over the menu; test the menu as a returning player.
+  { name: "neon-turf", url: "mode-5/index.html", storage: { "rocketRumble.mode5.seenHelp": "1" } },
 ];
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".jpg": "image/jpeg", ".glb": "model/gltf-binary", ".svg": "image/svg+xml", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav" };
@@ -52,6 +54,7 @@ const DIRS = { "←": "ArrowLeft", "→": "ArrowRight", "↑": "ArrowUp", "↓":
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    if (pg.storage) await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, pg.storage);
     await page.goto(base + pg.url);
     await page.waitForTimeout(1500);
     // Dismiss a title card / "press any button" screen if there is one.

@@ -206,13 +206,16 @@ async function menuKeyboard(browser) {
     await page.waitForFunction(() => TP.M5.Menu && TP.M5.Menu.isOpen, null, { timeout: 15000 });
   }
 
-  // 4. Seat 2's controller with arrow keys, seat 1's name by typing.
+  // 4. Seat 2's controller from the keyboard, seat 1's name by typing.
+  //    (Shared MenuNav rule since 2026-11-28: arrows MOVE between controls
+  //    so dropdowns can't trap a player; Enter / pad A steps a dropdown to
+  //    its next value.)
   await page.focus('#m5m-seats select[data-i="1"]');
   const before = await page.evaluate(() => document.querySelector('#m5m-seats select[data-i="1"]').value);
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
   await page.waitForTimeout(100);
   const after = await page.evaluate(() => ({ v: document.querySelector('#m5m-seats select[data-i="1"]').value, slot: TP.M5.Menu.slots[1].controller }));
-  check(after.v !== before && after.slot === after.v, "arrow keys change a seat's controller", `${before} → ${after.v} (menu slot: ${after.slot})`);
+  check(after.v !== before && after.slot === after.v, "Enter changes a seat's controller", `${before} → ${after.v} (menu slot: ${after.slot})`);
   await page.keyboard.press("ArrowUp"); // back to bot
   await page.focus('#m5m-seats input[data-i="0"]');
   await page.keyboard.press("Control+A");

@@ -20,7 +20,7 @@ Director merges them after verifying.
 | Car Fighter | ✅ Play (M1, 1 car) | **Active: one builder** (`session_01GHNBrq3cBwRUWBboR2aeNr`) | Round 2 roadmap in its PROJECT.md: QC test, M2 roster + select, pause/training/tutorial, presentation, modes (4-player bracket), stages. |
 | Deflect Duel | ✅ Play (v2) | **Active: boss only** | Round 3 roadmap in its PROJECT.md (feel, practice/tutorial/modes, presentation, arenas, car styles, cosmetics). |
 | Boost Runner | Coming soon | **Active: one builder** (`session_01GHNBrqDAAo8qpnUjEsWJJW`) | Round 2 roadmap (in its prompt; it pastes it into PROJECT.md on team/boost-runner). Phase 0 = playable → "ready for hub": verify with the hub-listing steps above. |
-| Surprise (mode 5) | Not listed | **Active: boss only** | **No-spoilers rule** (`TEAMS.md`). Never describe, show or ask Reece about it. Reveal only when the Surprise boss says "Mode 5: ready for reveal" and the Director has verified it. |
+| Neon Turf (mode 5) | ✅ Play (revealed 2026-11-28) | **Idle** (boss `session_01GHNBrqtCApg5LvFLes2fbo`) | Next: genre gap check if Reece asks. |
 | Core (car physics) | — | **Idle** | The rocket moveset is merged (opt-in `{ moveset: "rocket" }`). Possible next job: ramps and wall driving (`world.surfaceAt` plan in `car.js` comments). |
 
 ## How to verify a merge (the cheap version)

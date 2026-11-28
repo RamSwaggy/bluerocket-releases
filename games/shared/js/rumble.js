@@ -66,6 +66,16 @@ window.TP = window.TP || {};
       blurb: "Health bars, rounds and combos, all made from rams, flips, spins and boost dashes.",
       path: "car-fighter/index.html",
     },
+    {
+      id: "neon-turf",
+      name: "Neon Turf",
+      tag: "Paint-the-floor arena",
+      status: "play",
+      players: [1, 4],
+      color: "#22d3ee",
+      blurb: "Your car is a paint roller. Loop back to your colour to flood-fill everything inside, pop rivals' wet trails, and own the most floor when the clock runs out.",
+      path: "mode-5/index.html",
+    },
   ];
 
   // Defaults if nothing is saved yet: player 1 on keyboard, the rest bots.
