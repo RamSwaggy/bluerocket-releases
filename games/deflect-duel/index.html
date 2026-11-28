@@ -26,6 +26,10 @@
     #game { position: fixed; inset: 0; display: block; }
     .layer { position: fixed; pointer-events: none; }
 
+    /* ---------- Full-screen colour flash (KOs, smashes). Fades by itself. ---------- */
+    #flash { inset: 0; opacity: 0; transition: opacity .35s ease-out; }
+    #flash.now { transition: none; }
+
     /* ---------- Top HUD: player chips with lives, ball speed in the middle ---------- */
     #hud {
       top: 12px; left: 12px; right: 12px;
@@ -146,6 +150,7 @@
 <body>
   <canvas id="game"></canvas>
 
+  <div id="flash" class="layer"></div>
   <div id="hud" class="layer"></div>
   <div id="center-msg" class="layer"></div>
   <div id="toast" class="layer"></div>

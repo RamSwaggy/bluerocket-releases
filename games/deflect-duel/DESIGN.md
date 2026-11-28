@@ -1,6 +1,7 @@
 # Deflect Duel: Design v2
 
-**Status:** approved 2026-11-28 (Reece's direction, through the Director). This replaces the
+**Status:** approved 2026-11-28 (Reece's direction, through the Director). Updated the same
+day: **a bunt is a wheels-touch flip reset**, not a button. This replaces the
 flat, top-down v1 rules. v1 stays playable on the hub while v2 is built.
 
 **Reece's brief:** a car-soccer feel crossed with a fighting-game ball-strike game, and it
@@ -55,7 +56,7 @@ and costs boost.
 | **Drive or bump into it** | A physics push, the way a car-football ball reacts. **No** speed tier and **no** ownership change. One exception: bumping a *neutral* ball makes you its owner at `baseSpeed` (it doesn't become a straight-line ball). |
 | **Strike** (Hit button) | A quick swipe with a short window (`swingTime`). If the ball is in reach, it goes to the **next speed tier**, becomes **yours**, and flies in a straight line. |
 | **Flip into it** | Counts as a strike, with a **power bonus** (`flipBonus`), in the flip's direction. |
-| **Bunt** (Hit while airborne with no direction held) | Pops the ball **straight up, slowly**. You keep ownership, and the speed only partly resets (to `buntKeep` of its current speed, about 60%). It's a tempo tool: it buys time and sets up a strike. |
+| **Bunt = wheels touch** (the car touches the ball with its **underside**, all four wheels, usually in the air) | The ball **pops gently up and slows** (speed drops to `buntKeep` of what it was, about 60%). The toucher **keeps or takes ownership**. There's **no hit-freeze**, just a soft thunk and a ring. The car **gets its jump and flip back** (a *flip reset*: `car.resetAirMoves()`), so a skilled player can bunt and then flip-strike or fly again. It isn't a button: **Hit in the air with no direction is a normal straight strike**. A nose or side touch is just a bump. |
 | **Clash** (two strikes on the ball within `clashWindow`, about 0.1 s) | **Both** strikers bounce away, and the ball **stays where it is**, its ownership unchanged. Big flash and shake. (This also settles "several cars hit the ball on the same frame": that's a clash, not a stacked double hit.) |
 
 **Aiming a strike** (stick, or the keys):
@@ -86,7 +87,10 @@ pushes it.
 
 What Deflect Duel needs to read from Core: `car.airborne`, `car.jumpsLeft` (or similar),
 `car.flipping`, `car.flipDir` (a unit vector), `car.flipT`, the car's full 3D orientation, and
-an event or flag when a flip starts.
+an event or flag when a flip starts, `car.resetAirMoves()` (gives the jump and flip back), and a
+**wheels-contact test** (is the car's underside, its `down` vector, facing the ball, with the
+contact point inside the wheelbase?). Until Core's test lands, Deflect Duel uses a stand-in
+that checks the car's body orientation.
 
 ## 5. Camera
 
@@ -116,8 +120,9 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 - **Their own ball:** keep clear of its line, and get ready for the return.
 - **An enemy's ball coming at them:** strike it back (choosing up, straight or down) if it's
   slow enough for their skill. Otherwise **dodge**: jump over it, flip sideways out of its line,
-  or **bunt** to slow the rally down.
+  or meet it wheels-first to **bunt** it and slow the rally down.
 - Sometimes start a clash on purpose when two bots go for the same ball.
+- Stretch goal for hard bots: a deliberate **bunt, then flip-strike** combo.
 
 ## 8. What "done" looks like for v2
 
@@ -132,7 +137,7 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 - **Aerial share:** strikes made with the car off the ground. Aim for at least 20% once
   Core's moves land.
 - **Bot strike rate:** strikes attempted vs. connected (not near 0%, not near 100%).
-- **Clash and bunt counts** per match: they should happen sometimes, not never and not
+- **Clash, bunt and flip-reset counts** per match: they should happen sometimes, not never and not
   constantly.
 - **Ball speed vs. car speed:** how often the ball is faster than a boosting car (27).
 - Stalemate resets per match (fewer than 1).
@@ -148,5 +153,5 @@ Bots must use the whole moveset, scaled by a per-bot skill:
 | `ownedHold` / `ownedFade` | 3 s / 1.5 s | Owned straight-line flight, then the cool-down |
 | `angleUpDeg` / `angleDownDeg` / `aimBendDeg` | 35 / 35 / 25 | Strike aim |
 | `flipBonus` | +4 | Extra speed for a flip strike |
-| `buntKeep` / `buntUp` | 0.6 / 8 | Bunt speed kept and pop height |
+| `buntKeep` / `buntUp` | 0.6 / 6 | Bunt (wheels touch) speed kept and upward pop |
 | `clashWindow` | 0.1 s | Two strikes this close together clash |
