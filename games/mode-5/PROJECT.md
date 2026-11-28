@@ -42,6 +42,8 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
+- Gameplay c8d2f61: BUG 1 fixed (wet trail always; close only on out→home), min fill/pop sizes.
+- Art efe8e96: M2b framing, scaled FILL text, round-end reveal + side/bottom card, how-to panel, short labels, wet-trail hazard shader, MenuNav, sudden-death banner, team chips. Boss review: Split Level decks + Rings circle not drawn yet (sent).
 - Gameplay ff5a73d: bot rewrite, Split Level + Rings arenas, teams 2v2, hints, asserts. Smoke on merge 3 rounds PASS 8/8 (fps 17.6 swiftshader — watch perf). Bug 1 still open.
 - QC ef22ffb: smoke checks (score freeze, cars in bounds), tools/mode-5-batch.js, probe feel numbers. QC-1 found critical bug 1 (no wet trail when driving out) → Gameplay. Decisions: fill events only ≥8 enclosed cells; no stun pop for trails <6 cells; spawns angled off pillar.
 - Art 412ac47: real index.html, World on main.js hand-off, menu + pause overlay, perf pass. Boss screenshot review → M2b list.
