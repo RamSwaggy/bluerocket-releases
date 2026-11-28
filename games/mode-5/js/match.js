@@ -31,12 +31,13 @@
      roundEnd {round, scores, winner, roundWins, teams?, teamScores?, teamWins?}
      matchEnd {standings, stats, winner, roundWins, teams?, teamWins?}
      paint {player, x, z, cells}               trailStart {player}
-     fill {player, cells, pct, cx, cz, cellsList}
-     pop {victim, by, x, z, cells}             splat {player, x, z, r}
+     fill {player, cells, pct, cx, cz, cellsList, small}  (small = under CFG.minFill cells: keep quiet)
+     pop {victim, by, x, z, cells, minor}  (minor = tiny trail: no stun)             splat {player, x, z, r}
      land {player, airtime, x, z}              bump {a, b, attacker, victim, impact, x, z, hard}
      pickupSpawn {id, kind, x, z}              pickup {id, player, kind, x, z}
      hint {text, player?, id}
-   Extras: dry {player, cells} (a trail dried by itself),
+   Extras: dry {player, cells, closed?} (a trail dried: by itself, or
+           closed: true when a loop closed),
            countdown {n} (3, 2, 1 each second, then 0 = GO).
    `r` in splat is in world units; `cells` is a cell count; cellsList is
    the filled cell indices (for the fill-sweep effect).
@@ -192,6 +193,7 @@ TP.M5 = TP.M5 || {};
       this.pickupTimer = CFG.pickupEvery * 0.6; // first pickup a bit sooner
       this._pickupId = 0;
       this.trailAge = [0, 0, 0, 0];  // seconds each player's current trail has existed
+      this.out = [false, false, false, false]; // has each car left home since its last close?
       this._bumpCd = {};             // "a-b" → seconds until that pair can hard-bump again
       this.roundWinner = null;
       this._frozenT = 0;             // self-check: time with no paint change during play
@@ -269,6 +271,9 @@ TP.M5 = TP.M5 || {};
         if (this.trailAge[p] >= CFG.trailDry) {
           const cells = this.grid.dryTrail(p);
           this.trailAge[p] = 0;
+          // A trail that dries by itself just becomes turf: no fill, and
+          // the next close needs a fresh trip out.
+          this.out[p] = false;
           this._emit("dry", { player: p, cells });
         }
       }
@@ -368,16 +373,18 @@ TP.M5 = TP.M5 || {};
 
     /* Paint a circle under a car, applying the trail rules.
 
-       Paint a car lays on floor that isn't already its side's dry turf is
-       always WET (part of its trail). Your own dry turf stays dry when you
-       drive over it. Then, if the car's centre is on home turf (its own,
-       or a teammate's, dry paint) and it has a trail, the loop closes: the
-       trail dries and whatever it walls off fills.
-
-       (Why not paint dry while you're "at home"? Because the stripe
-       reaches a little ahead of the car: the car would always be standing
-       on paint it just laid, so it would never count as having left home.
-       Paint-everything-wet and close-when-home has no such loophole.)
+       • Every newly painted cell that isn't already our side's dry turf
+         is WET (part of our trail), always, home or not.
+       • out[p] = "this car has left home": set whenever the car's centre
+         is on a cell that isn't home (own or teammate dry turf).
+       • A loop closes ONLY on the way back in: the car was out, and its
+         centre is now on home turf. Then the trail dries and the flood
+         fill runs. Plain steps at home dry nothing, so paint you lay just
+         ahead of you as you drive off your turf stays wet: the moment you
+         leave, your trail is exposed.
+       (The stripe reaches a little ahead of the car, which is why we
+       can't just "close whenever the centre is home": that dried the
+       fresh paint in front of the car every step, so it never left home.)
 
        Finally, anyone whose wet trail the paint touched gets popped. */
     _paintCar(car, r, isSplat) {
@@ -388,10 +395,14 @@ TP.M5 = TP.M5 || {};
       if (res.gained && !isSplat) this._emit("paint", { player: p, x: car.pos.x, z: car.pos.z, cells: res.gained });
 
       const home = g.isHome(g.cellAt(car.pos.x, car.pos.z), p);
-      if (home && g.hasTrail(p)) {
-        // Back on our own colour (or just skimming its edge): close up.
-        this._closeLoop(p);
-      } else if (!hadTrail && g.hasTrail(p)) {
+      if (!home) {
+        this.out[p] = true;
+      } else if (this.out[p]) {
+        // Back in from outside: close the loop (if the trail survived).
+        this.out[p] = false;
+        if (g.hasTrail(p)) this._closeLoop(p);
+      }
+      if (!hadTrail && g.hasTrail(p)) {
         this.trailAge[p] = 0;
         this._emit("trailStart", { player: p });
         this._hint("trail", p);
@@ -399,17 +410,25 @@ TP.M5 = TP.M5 || {};
       if (res.hitWet) this._popMask(res.hitWet, p);
     }
 
+    /* Close p's loop: the trail dries, the flood fill runs. Fills under
+       CFG.minFill cells still count but are "small" (effects and HUD
+       stay quiet for them, and they don't count as a fill in stats). */
     _closeLoop(p) {
+      const dried = this.grid.wetCount[p];
       const f = this.grid.closeLoop(p);
       this.trailAge[p] = 0;
+      if (dried) this._emit("dry", { player: p, cells: dried, closed: true });
       if (!f.cells) return;
       const pct = Math.round((f.cells / this.grid.paintable) * 1000) / 10;
       const st = this.stats[p];
-      st.fills++;
       st.painted += f.cells;
-      st.bestFill = Math.max(st.bestFill, pct);
-      this._emit("fill", { player: p, cells: f.cells, pct, cx: f.cx, cz: f.cz, cellsList: f.list });
-      this._hint("fill", p);
+      const small = f.cells < CFG.minFill;
+      if (!small) {
+        st.fills++;
+        st.bestFill = Math.max(st.bestFill, pct);
+        this._hint("fill", p);
+      }
+      this._emit("fill", { player: p, cells: f.cells, pct, cx: f.cx, cz: f.cz, cellsList: f.list, small });
     }
 
     // Pop every rival whose bit is set in `mask`, credited to `by`.
@@ -425,15 +444,19 @@ TP.M5 = TP.M5 || {};
       const victim = this.cars[q];
       if (this.sameSide(q, by)) return;
       if (victim.mega > 0 || victim.grace > 0 || !this.grid.hasTrail(q)) return;
+      // A tiny trail (a few cells just off your turf) is a "minor" pop:
+      // the popper still takes the cells, but no spin-out, no boost loss.
+      const minor = this.grid.wetCount[q] < CFG.minPop;
       const res = this.grid.popTrail(q, by);
       this.trailAge[q] = 0;
+      this.stats[by].painted += res.cells;
+      this._emit("pop", { victim: q, by, x: victim.pos.x, z: victim.pos.z, cells: res.cells, minor });
+      if (minor) return;
       victim.stun = CFG.stunTime;
       victim.grace = CFG.stunTime + CFG.popGrace;
       victim.boost = 0;
       this.stats[by].pops++;
-      this.stats[by].painted += res.cells;
       this.stats[q].popped++;
-      this._emit("pop", { victim: q, by, x: victim.pos.x, z: victim.pos.z, cells: res.cells });
       this._hint("popped", q);
       this._hint("popper", by);
     }
