@@ -17,7 +17,8 @@
                                   still adds a full jump
      3. Second-jump window        a press after 1.25 s does nothing
      4. Front flip                +8 u/s along the nose, 360° in 0.6 s,
-                                  car.flipping / flipDir set during it
+                                  car.flipping / flipDir set during it, and a
+                                  flip straight off the ground lands clean
      5. Side flip                 +6 u/s sideways, rolls 360°
      6. Air control               pitch rate follows the stick, and stops
                                   quickly when released (angular damping)
@@ -197,11 +198,10 @@ function doubleJump(secondAtFrame) {
 /* =====================================================================
    4. Front flip
    ===================================================================== */
-function flipRun(pitch, steer, startSpeed = 10) {
+function flipRun(pitch, steer, startSpeed = 10, secondAt = 7) {
   const car = newCar();
   car.vel.set(0, 0, startSpeed); // heading 0 = nose along +Z
   let before = null, after = null, flipFrames = 0, minRoofY = 1, q0 = null, dirSeen = null;
-  const secondAt = 7;
   run(car, 70, (i) => C({ jump: i === 0 || i === secondAt, pitch: i === secondAt ? pitch : 0, steer: i === secondAt ? steer : 0 }),
     FLAT, RT, DT, (i, c) => {
       if (i === secondAt - 1) { before = c.vel.clone(); q0 = c.quat.clone(); }
@@ -226,6 +226,11 @@ function flipRun(pitch, steer, startSpeed = 10) {
     `flipDir (${f2(r.dirSeen.x)}, ${f2(r.dirSeen.z)})`);
   check("4f. front flip: lands clean and keeps driving", r.car.onGround && !r.car.tumbling && r.car.lastLanding && r.car.lastLanding.clean,
     `speed after landing ${f2(r.car.speed2D())}`);
+  // A human-speed double tap (second press 0.2 s after take-off) must
+  // still finish the flip and land clean, not tumble.
+  const slow = flipRun(1, 0, 10, 12);
+  check("4f2. front flip pressed at 0.2 s still lands clean", slow.car.lastLanding && slow.car.lastLanding.clean,
+    slow.car.lastLanding ? `landed ${slow.car.lastLanding.clean ? "clean" : "tumbling"}` : "never landed");
   // Back flip: weaker burst backwards.
   const b = flipRun(-1, 0);
   check("4g. back flip: backwards burst", near(b.after.z - b.before.z, -R.flipBackward, 0.05),

@@ -554,10 +554,15 @@
         // The flip is a fixed animation of the PHYSICS orientation: the
         // angle is worked out from time-into-flip (not added up step by
         // step), so it ends at exactly 360° whatever the step size.
+        // The spin eases out (fast first, slow settle): it feels punchier,
+        // and a flip done straight off the ground (second press ~0.2 s
+        // after take-off) is all but finished when the wheels come back
+        // down, so it lands clean instead of tumbling.
         this._flipT += dt;
         const k = Math.min(1, this._flipT / R.flipDuration);
         this.flipProgress = k;
-        _q1.setFromAxisAngle(this._flipAxis, k * Math.PI * 2);
+        const spin = 1 - (1 - k) * (1 - k); // ease-out
+        _q1.setFromAxisAngle(this._flipAxis, spin * Math.PI * 2);
         this.quat.copy(this._flipQ0).multiply(_q1);
         if (k >= 1) {
           this.flipping = false;
