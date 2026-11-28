@@ -160,6 +160,9 @@ Created 2026-11-27. All are cloud sessions tagged `team:<game>` plus `role:<role
 | Boost Runner | `session_01GHNBrsk3LnQA2PCCCRSzxD` | `session_01GHNBrsNjSm8NLsDts3nDdU` | `session_01GHNBrowW48d38MRxz3z9U7` | `session_01GHNBrrLjMJWrWEvKiCzLJn` |
 | Car Fighter | `session_01GHNBrsKZCF3ywtyYiG3aDC` | `session_01GHNBrpqsFPkZtFWPbeSe24` | `session_01GHNBrs22k4u4qavTiP35oE` | `session_01GHNBrsHShaTu6YTArUzwUG` |
 
+**Core (car physics):** `session_01GHNBrspisUmr33CiDjJ1pk`, branch `team/core`. It reports to the
+Director and builds the shared "rocket moveset" (double jump, flips, 3D air control, aerial boost).
+
 Bosses who need to coordinate a `games/shared/` change can message each other with the IDs above.
 
 ## Director decisions log
@@ -240,3 +243,10 @@ This rule applies to **every** session, the Director included:
    the session list.
 6. **The bar is a finished, polished game**, not a prototype. Only the Director decides when it's
    ready, and only the Director reveals it.
+- **2026-11-28, Deflect Duel v2 (Reece):** "it should feel like rocket league mechanics, and
+  lethal league mechanics had a baby, and it should play like it too."
+  - 3D ball: neutral = gravity and bounce; owned = straight-line flight.
+  - Contact pushes; flip-strikes; up/straight/down aimed strikes; bunt; clash.
+  - Broadcast camera and a ceiling.
+  - The car's rocket moveset (double jump, flips, aerials) is built **once in shared** by the new Core
+    session. It's opt-in per mode, so no mode's feel changes until its team tunes for it.
