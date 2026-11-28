@@ -360,7 +360,7 @@
         if ((e.pct || 0) >= 0.5) Audio.play("fill", e.pct);
         else if (ok("fillTiny", 0.12)) Audio.play("trail");
       });
-      on("pop", () => { if (ok("pop", 0.06)) Audio.play("pop"); });
+      on("pop", (e) => { if (!e.minor && ok("pop", 0.06)) Audio.play("pop"); });   // minor (tiny-trail) pops stay quiet
       on("land", (e) => { if (ok("land", 0.05)) Audio.play("land", e.airtime); });
       on("bump", (e) => { if (ok("bump", 0.08)) Audio.play("bump", e.impact); });
       on("pickup", () => Audio.play("pickup"));

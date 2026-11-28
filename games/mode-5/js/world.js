@@ -1116,7 +1116,7 @@
         this.celebrate(e.teams ? e.teams.map((t, i) => (t === e.winner ? i : -1)) : e.winner);
       });
       on("bump", (e) => { if (e.hard || e.impact > 9) this.shake(0.5); });
-      on("pop", () => this.shake(0.35));
+      on("pop", (e) => { if (!e.minor) this.shake(0.35); });
       on("land", (e) => { if (e.airtime > 0.8) this.shake(0.25); });
     }
 

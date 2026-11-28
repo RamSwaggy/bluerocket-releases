@@ -180,7 +180,7 @@
         const big = Math.min(1, pct / 12);
         this.fillBurst(e.cx || 0, e.cz || 0, colorOf(e.player), big);
       });
-      on("pop", (e) => this.popSplash(e.x || 0, e.z || 0, colorOf(e.by)));
+      on("pop", (e) => !e.minor && this.popSplash(e.x || 0, e.z || 0, colorOf(e.by)));
       // Events carry x/z; older senders didn't, so fall back to the car.
       const carOf = (p) => this.cars && this.cars.find((c) => (c.index ?? (c.player && c.player.index)) === TP.M5.pi(p));
       const at = (e) => (e.x != null ? e : carOf(e.player) && carOf(e.player).pos);

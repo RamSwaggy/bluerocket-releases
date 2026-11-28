@@ -720,7 +720,7 @@
         const txt = `+${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`;
         this.floater(pct >= 10 ? `FILL ${txt}!` : txt, p.x, p.z, colorOf(e.player), size, pct >= 10 ? 1.4 : 0.9);
       });
-      on("pop", (e) => this.floater("POPPED!", e.x || 0, e.z || 0, colorOf(e.victim), 0.75, 1.0));
+      on("pop", (e) => !e.minor && this.floater("POPPED!", e.x || 0, e.z || 0, colorOf(e.victim), 0.75, 1.0));
       on("pickup", (e) => {
         const NAMES = { bomb: "PAINT BOMB!", mega: "MEGA ROLLER!", boost: "BOOST!" };
         const p = this.carPos(e.player);
