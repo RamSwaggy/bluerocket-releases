@@ -18,7 +18,7 @@ Director merges them after verifying.
 |---|---|---|---|
 | Turbo Party | ✅ Play | **Paused** | Trophy reachability. Bots never bought Trophy Warp; job 10 (bot item strategy + Goal Frenzy tie-break) was in progress. If that's not enough, decide a rule change (cheaper Warp or a 2nd trophy). |
 | Car Fighter | ✅ Play (M1, 1 car) | **Paused** | M2: two more cars (Haulback, Skitter), signatures, Easy/Hard bots, sfx/music, damage looks, character select. |
-| Deflect Duel | ✅ Play (v1) | **Active: boss only (one builder)** | v2: 3D ball, aimed strikes, flip-strikes, wheels-touch bunt = flip reset (one air move back), clash, broadcast camera, ceiling, rocket moveset, speed escalation (×1.12 + 1.5, top ~210, freeze up to ~1.2 s, swept collision). Replace v1 on the hub **only at "a good playable level"** (Reece). Verify before swapping. |
+| Deflect Duel | ✅ Play (v2) | **Active: boss only** | v2 merged on the hub (7c5ded7). Next: Reece's feel check, then Easy/Hard bots. |
 | Boost Runner | Coming soon | **Paused** | Logic done (bot rounds, fair seats). Job 3 (bot difficulty spread, softer squeeze) was in progress. Art/menus not merged yet. Put it on the hub when it's playable and verified. |
 | Surprise (mode 5) | Not listed | **Active: boss only** | **No-spoilers rule** (`TEAMS.md`). Never describe, show or ask Reece about it. Reveal only when the Surprise boss says "Mode 5: ready for reveal" and the Director has verified it. |
 | Core (car physics) | — | **Idle** | The rocket moveset is merged (opt-in `{ moveset: "rocket" }`). Possible next job: ramps and wall driving (`world.surfaceAt` plan in `car.js` comments). |
