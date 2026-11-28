@@ -46,7 +46,7 @@
     /* ---------- Arena ---------- */
     arenaW: 44,          // width along X (left ↔ right on screen)
     arenaD: 28,          // depth along Z (top ↔ bottom on screen)
-    wallH: 2.4,          // wall height (looks only; nothing can go over the walls)
+    wallH: 2.2,          // wall height (looks only; nothing can go over the walls)
     pillars: true,       // two round pillars for bank shots (false = open arena)
     pillarList: [        // centre and radius of each pillar
       { x: 0, z: -7.5, r: 1.8 },
@@ -56,7 +56,7 @@
     /* ---------- Ball ---------- */
     ballR: 0.9,          // ball radius
     ballY: 1.1,          // hover height (bumper height). The ball never leaves it.
-    baseSpeed: 18,       // speed of the first hit after a serve
+    baseSpeed: 16,       // speed of the first hit after a serve (under the car's 17, so you can chase it)
     speedStep: 2.5,      // added by every later hit
     maxSpeed: 56,        // top speed (even with a smash)
     smashBonus: 8,       // extra speed added by a smash (hit while boosting)
@@ -93,6 +93,20 @@
 
   const NO_HOOK = () => {};
 
+  // One bot difficulty level, but every bot is a little different.
+  function makeBotSkill() {
+    return {
+      reaction: rand(0.08, 0.2),   // seconds before reacting to a new hit
+      maxReturn: rand(32, 46),     // fastest ball it will try to hit back
+      aimNoise: rand(4, 14),       // degrees of sloppiness in its aim
+      swingLead: rand(0.04, 0.12), // how early it swings
+      jumpLead: rand(0.12, 0.22),  // how early it jumps a ball it can't return
+      fumble: 0.1,                 // chance it misreads a slow shot...
+      fumbleFast: 0.35,            // ...plus this much more at max speed
+      planFor: -1, plan: "",       // decision for the current shot
+    };
+  }
+
   /* ---------- Where each car starts (by player order, not seat) ----------
      The first two spots are diagonally opposite, so a 1v1 starts fair. */
   function spawnSpot(i) {
@@ -109,10 +123,17 @@
        opts.players   [{ seat, name, controller }]  seat 0..3 picks the colour
        opts.lives     3 or 5
        opts.onEvent   optional (name, data) callback for main.js (toasts, sounds)
+       opts.pillars   optional true/false to override DUEL_CFG.pillars for this match
+     Axes: X runs along the 44-unit side, Z along the 28-unit side, the
+     serve spot is (0, 0), and the inner wall faces are at x = ±arenaW/2
+     and z = ±arenaD/2.
      ===================================================================== */
   class Duel {
     constructor(opts) {
-      const C = (this.cfg = TP.DUEL_CFG);
+      // This match's copy of the config (so a per-match pillars choice
+      // doesn't change the shared defaults).
+      const C = (this.cfg = Object.assign({}, TP.DUEL_CFG));
+      if (typeof opts.pillars === "boolean") C.pillars = opts.pillars;
       this.onEvent = opts.onEvent || NO_HOOK;
       this.lives = opts.lives || 3;
       this.pillars = C.pillars ? C.pillarList : [];
@@ -135,8 +156,6 @@
 
       /* ---------- Scene and camera ---------- */
       this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0x0d1430);
-      TP.addStadiumLights(this.scene, C.arenaW / 2);
       // One fixed camera over the whole arena: everyone shares the screen.
       this.camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 400);
       this.camera.position.set(0, 36, 24);
@@ -150,6 +169,9 @@
         this.arenaLook = TP.DuelArena.build(this.scene, C, this) || null;
         if (this.arenaLook && this.arenaLook.hooks) Object.assign(this.hooks, this.arenaLook.hooks);
       } else {
+        // Placeholder look: plain background, the shared lights, boxes.
+        this.scene.background = new THREE.Color(0x0d1430);
+        TP.addStadiumLights(this.scene, C.arenaW / 2);
         this._buildPlaceholderArena();
       }
 
@@ -191,20 +213,15 @@
           prevHit: false,        // hit button state last step (edge detection)
           lastSteer: 0,          // steering this step (for aim)
         });
+        // Each player also exposes its TP.Car as .car (hidden from
+        // JSON.stringify, since a car holds 3D meshes).
+        Object.defineProperty(this.players[i], "car", { value: car, enumerable: false });
         // Swing ring placeholder: a flat ring showing your reach while swinging.
         car.mesh.add(this._makeSwingRing(seat));
-        // One difficulty level, but every bot is a little different.
-        this.bots.push(cfg.controller === "bot" ? {
-          reaction: rand(0.08, 0.2),  // seconds before reacting to a new hit
-          maxReturn: rand(32, 46),    // fastest ball it will try to hit back
-          aimNoise: rand(4, 14),      // degrees of sloppiness in its aim
-          swingLead: rand(0.04, 0.12),// how early it swings
-          jumpLead: rand(0.12, 0.22), // how early it jumps a ball it can't return
-          fumble: 0.1,                // chance it misreads a slow shot...
-          fumbleFast: 0.35,           // ...plus this much more at max speed
-          planFor: -1, plan: "",      // decision for the current shot
-        } : null);
+        this.bots.push(cfg.controller === "bot" ? makeBotSkill() : null);
       });
+      // Test hook: controls forced from outside (setInput), per player.
+      this.inputOverride = this.players.map(() => null);
       /* ---------- The ball ---------- */
       this.ball = {
         pos: new THREE.Vector3(0, C.ballY, 0),
@@ -305,8 +322,9 @@
           }
         }
 
-        // Humans and bots produce the same controls.
-        const ctrl = this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller);
+        // Humans and bots produce the same controls. (A test can force
+        // a player's controls with setInput.)
+        const ctrl = this.inputOverride[i] || (this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller));
         car.update(dt, ctrl, this, this.tuning);
         this._keepCarInArena(car);
 
@@ -399,14 +417,26 @@
       }
     }
 
-    // Walls and pillars: perfect bounces (no speed lost).
+    // A bounce happened: tell the hooks, and flash the wall in the arena
+    // look (in the ball owner's colour) if it supports that.
+    _bounced(normal) {
+      const b = this.ball;
+      const pos = b.pos.clone();
+      this.hooks.onWallBounce(pos, normal);
+      if (this.arenaLook && typeof this.arenaLook.flashWall === "function") {
+        this.arenaLook.flashWall(pos, normal, b.owner === null ? "#ffffff" : this.players[b.owner].css);
+      }
+    }
+
+    // Walls and pillars: perfect bounces (no speed lost). Normals point
+    // back into the arena.
     _bounceBall() {
       const C = this.cfg, b = this.ball;
       const limX = C.arenaW / 2 - C.ballR, limZ = C.arenaD / 2 - C.ballR;
-      if (b.pos.x > limX) { b.pos.x = limX; b.vel.x = -Math.abs(b.vel.x); this.hooks.onWallBounce(b.pos.clone(), { x: -1, z: 0 }); }
-      if (b.pos.x < -limX) { b.pos.x = -limX; b.vel.x = Math.abs(b.vel.x); this.hooks.onWallBounce(b.pos.clone(), { x: 1, z: 0 }); }
-      if (b.pos.z > limZ) { b.pos.z = limZ; b.vel.z = -Math.abs(b.vel.z); this.hooks.onWallBounce(b.pos.clone(), { x: 0, z: -1 }); }
-      if (b.pos.z < -limZ) { b.pos.z = -limZ; b.vel.z = Math.abs(b.vel.z); this.hooks.onWallBounce(b.pos.clone(), { x: 0, z: 1 }); }
+      if (b.pos.x > limX) { b.pos.x = limX; b.vel.x = -Math.abs(b.vel.x); this._bounced({ x: -1, z: 0 }); }
+      if (b.pos.x < -limX) { b.pos.x = -limX; b.vel.x = Math.abs(b.vel.x); this._bounced({ x: 1, z: 0 }); }
+      if (b.pos.z > limZ) { b.pos.z = limZ; b.vel.z = -Math.abs(b.vel.z); this._bounced({ x: 0, z: -1 }); }
+      if (b.pos.z < -limZ) { b.pos.z = -limZ; b.vel.z = Math.abs(b.vel.z); this._bounced({ x: 0, z: 1 }); }
       for (const pl of this.pillars) {
         const dx = b.pos.x - pl.x, dz = b.pos.z - pl.z;
         const d = Math.hypot(dx, dz), minD = pl.r + C.ballR;
@@ -419,7 +449,7 @@
         if (vn < 0) {
           b.vel.x -= 2 * vn * nx;
           b.vel.z -= 2 * vn * nz;
-          this.hooks.onWallBounce(b.pos.clone(), { x: nx, z: nz });
+          this._bounced({ x: nx, z: nz });
         }
       }
     }
@@ -576,7 +606,7 @@
         duration: +this.time.toFixed(1),
         standings: order.map((idx, k) => {
           const p = this.players[idx];
-          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, kos: p.kos, hits: p.hits };
+          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, livesLeft: p.lives, kos: p.kos, hits: p.hits };
         }),
         koLog: this.koLog.slice(),
       };
@@ -804,6 +834,43 @@
         m.castShadow = true;
         this.scene.add(m);
       }
+    }
+
+    /* =====================================================================
+       Test hooks (QC drives these; main.js only exposes them in ?demo/?test)
+       ===================================================================== */
+
+    // Force player i's controls ({ throttle, steer, boost, jump, hit });
+    // pass null to hand control back to the human or bot.
+    setInput(i, ctrl) {
+      this.inputOverride[i] = ctrl ? Object.assign({ throttle: 0, steer: 0, boost: false, jump: false, hit: false }, ctrl) : null;
+    }
+
+    // Turn player i into a bot (true) or take the bot away (false: the
+    // player then reads its controller, or setInput).
+    setBot(i, on) {
+      this.bots[i] = on ? makeBotSkill() : null;
+      if (on) this.players[i].controller = "bot";
+    }
+
+    // Put car i at {x, z} facing headingRad (0 = facing +Z).
+    placeCar(i, pos, headingRad = 0) {
+      this.cars[i].placeAt(pos.x, pos.z, headingRad);
+    }
+
+    // Put the ball anywhere: { pos: {x, z}, vel: {x, z}, owner: index or null }.
+    // The ball goes live at once (a waiting serve is skipped).
+    setBall({ pos, vel, owner = null } = {}) {
+      const b = this.ball;
+      if (pos) b.pos.set(pos.x, this.cfg.ballY, pos.z);
+      if (vel) b.vel.set(vel.x, 0, vel.z);
+      b.speed = Math.hypot(b.vel.x, b.vel.z);
+      b.owner = owner;
+      b.neutral = owner === null;
+      b.hitId++;
+      b.lastHitT = this.time;
+      this.noHitTime = 0;
+      if (this.state === "serve") { this.state = "play"; this.serveTimer = 0; }
     }
 
     /* =====================================================================

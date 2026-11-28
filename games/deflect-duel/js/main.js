@@ -17,13 +17,25 @@
      ?players=3       how many bots in ?demo (2–4, default 4)
      ?lives=5         lives per car (default 3)
      ?speed=4         run game time faster (testing)
+     ?test            like ?demo, plus QC's test hooks (see the bottom of this file)
+
+   Test hooks (only in ?demo / ?test):
+     TP.duel.paused = true      this loop stops updating and drawing the
+                                match, so a test can call TP.duel.update()
+                                itself
+     TP.duelTest.newMatch({ players, lives, pillars })
+                                start a fresh match. players is a count (all
+                                bots) or [{ seat, name, controller }]
+     TP.duel.setInput(i, ctrl) / setBot(i, on) / placeCar(i, {x,z}, heading)
+     TP.duel.setBall({ pos, vel, owner })        (these live in duel.js)
    ===================================================================== */
 (function () {
   "use strict";
 
   const params = new URLSearchParams(location.search);
   const SPEED = Math.max(0.1, Number(params.get("speed")) || 1);
-  const DEMO = params.has("demo");
+  const TEST = params.has("test");
+  const DEMO = params.has("demo") || TEST;
 
   // The hub glue. If rumble.js isn't loaded (it should be), fall back to
   // sensible defaults so the mode still runs on its own.
@@ -69,7 +81,9 @@
 
     TP.Input.poll();       // 1) read controllers
     TP.sched.update(dt);   // 2) advance timers (results delay, etc.)
-    if (duel) {
+    if (duel && duel.paused) {
+      // A test is driving the match by hand: leave it alone.
+    } else if (duel) {
       duel.update(dt);     // 3) the rules (fixed steps inside)
       showCountdown();
       updateHud();
@@ -144,7 +158,7 @@
     if (duel) duel.dispose();
     lastConfig = config;
     shownCount = -1;
-    duel = new TP.Duel({ players: config.players, lives: config.lives, onEvent });
+    duel = new TP.Duel({ players: config.players, lives: config.lives, pillars: config.pillars, onEvent });
     showHints(config.players);
   }
 
@@ -168,7 +182,9 @@
     TP.sched.wait(2).then(() => {
       TP.HUD.center("");
       if (typeof TP.HUD.showResults === "function") {
-        TP.HUD.showResults(result, rematch, backToMenu);
+        // Art's card wants { winner, places: [{ name, css, kos, livesLeft }] }.
+        const places = result.standings.map((s) => ({ name: s.name, css: s.css, kos: s.kos, livesLeft: s.lives }));
+        TP.HUD.showResults(Object.assign({}, result, { winner: places[0] || null, places }), rematch, backToMenu);
       } else {
         showResultsFallback(result);
       }
@@ -296,14 +312,22 @@
   }
 
   /* ---------- Go ---------- */
+  // n all-bot players, seats 0..n-1.
+  const botPlayers = (n) => TP.DEFAULT_NAMES.slice(0, Math.min(4, Math.max(2, n))).map((name, seat) => ({ seat, name, controller: "bot" }));
+
   if (DEMO) {
     // All bots, no menu. QC's smoke test uses this.
-    const n = Math.min(4, Math.max(2, Number(params.get("players")) || 4));
-    const lives = Math.max(1, Number(params.get("lives")) || 3);
     startMatch({
-      players: TP.DEFAULT_NAMES.slice(0, n).map((name, seat) => ({ seat, name, controller: "bot" })),
-      lives,
+      players: botPlayers(Number(params.get("players")) || 4),
+      lives: Math.max(1, Number(params.get("lives")) || 3),
     });
+    // QC's test hooks (TP.duel itself also has setInput/setBot/placeCar/setBall).
+    TP.duelTest = {
+      newMatch({ players = 4, lives = 3, pillars } = {}) {
+        startMatch({ players: Array.isArray(players) ? players : botPlayers(players), lives, pillars });
+        return TP.duel;
+      },
+    };
   } else {
     showMenu();
   }
