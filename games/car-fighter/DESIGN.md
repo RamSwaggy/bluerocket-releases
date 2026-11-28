@@ -141,7 +141,19 @@ and spark colour. Handling differs only through `TP.modeTuning({...})`: `maxSpee
 | **Haulback** (heavy) | Box truck | 1200 | lower `maxSpeed`, higher `bumpScale` | Ram and Corkscrew have 1 hit of armour, slower startup | **Quake Drop**: jumps and lands with a ground shockwave |
 | **Skitter** (light) | Low wedge | 850 | higher `maxSpeed` and `boostMax`, lower `grip` | faster moves, short sidestep recovery, less damage | **Slipstream**: a boost dash through the opponent that ends behind them, then a hit |
 
-**M2 starting numbers** (Gameplay's plan, accepted 2026-11-28, to be tuned with QC's sims):
+**M2 starting numbers** (Gameplay's plan, accepted 2026-11-28, to be tuned with QC's sims).
+**Tuned since** (Gameplay `383d4e8`):
+- Haulback: 1150 HP, damage ×1.0.
+- Skitter: 950 HP, knockback ×1.05.
+- Health in the table above is superseded by these values.
+
+Measured by the boss at Normal, both seat orders:
+- Rivet beats Haulback about 45% of the time.
+- Rivet beats Skitter about 41%.
+- Haulback beats Skitter about 57%.
+- Hard beats Normal about 75%.
+
+The starting numbers were:
 
 - **Haulback:**
   - Handling: `maxSpeed 14`, `boostMax 24`.

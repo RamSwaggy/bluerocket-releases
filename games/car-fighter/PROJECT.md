@@ -92,6 +92,12 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 - **M2 started 2026-11-28.** Gameplay JOB 3: the cars, signatures and bots. Art JOB 3: bodies,
   sfx and music, damage looks, combo counter, character select, MenuNav. **M1 is on the base branch**
   (`claude/eager-tesla-vdhyd9` at `79161cb`), and the hub card says **Play**.
+- Gameplay JOB 3 (M2) is merged (`383d4e8`):
+  - all 3 cars and their signatures (Grinder, Quake Drop, Slipstream cross-up)
+  - Easy, Normal and Hard bots
+  - display info for character select
+  Smoke test with Haulback vs Skitter: PASS. All pairings are within 40–60%.
+- QC's frames tool needs updates for per-car tables, multi-hit moves and cross-ups (QC JOB 3).
 - Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
