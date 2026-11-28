@@ -146,7 +146,8 @@ function instrumentScript() {
       M5.on(name, (data) => {
         // Copy only plain values: event payloads may hold THREE objects.
         let copy = null;
-        try { copy = JSON.parse(JSON.stringify(data === undefined ? null : data)); } catch (e) { copy = String(data); }
+        // (cellsList on fill can be thousands of numbers: keep only its length.)
+        try { copy = JSON.parse(JSON.stringify(data === undefined ? null : data, (k, v) => (k === "cellsList" && Array.isArray(v) ? v.length : v))); } catch (e) { copy = String(data); }
         const m = M5.match;
         window.__m5log.push({ name, t: performance.now(), round: m ? m.round : null, data: copy });
       });
@@ -235,8 +236,12 @@ async function runMatch(browser, { speed, rounds, time, maxSeconds, verbose, ext
   const perRound = [];
   let cur = null;
   for (const e of log) {
-    if (e.name === "roundStart") { cur = { fills: new Map(), pops: 0, bestFill: 0 }; perRound.push(cur); continue; }
+    if (e.name === "roundStart") { cur = { fills: new Map(), small: 0, pops: 0, minorPops: 0, bestFill: 0 }; perRound.push(cur); continue; }
     if (!cur) continue;
+    // A fill flagged small:true (under CFG.minFill cells) is a silent
+    // tidy-up, not a real loop close: counted apart.
+    if (e.name === "fill" && e.data && e.data.small) { cur.small++; continue; }
+    if (e.name === "pop" && e.data && e.data.minor) cur.minorPops++;
     if (e.name === "fill") {
       const p = e.data && e.data.player;
       cur.fills.set(p, (cur.fills.get(p) || 0) + 1);

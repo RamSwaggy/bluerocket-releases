@@ -18,12 +18,11 @@
 
    How the human seat is set up: the saved Rocket Rumble setup is
    written into localStorage before the page loads (seat 1 = "kb1",
-   seats 2-4 = "bot"), then the page is opened WITHOUT ?demo and without
-   ?speed (real time, like a person playing): index.html?rounds=1&time=90.
-   main.js auto-starts from the saved setup while there's no menu. Once a
-   menu exists, the probe starts the match itself with
-   TP.M5.startMatch({ players, rounds, roundTime }) (falls back to a
-   Start/Play button, then Space/Enter).
+   seats 2-4 = "bot"), then the page is opened with ?demo&human=1 and no
+   ?speed (real time, like a person playing): ?demo skips the title menu,
+   human=1 keeps seat 1 on its saved controller. If no round starts, the
+   probe starts one itself with TP.M5.startMatch({ players, ... }). It
+   refuses to go on if no seat is on kb1 (it would be steering a bot).
 
    Assumption from DESIGN.md: event payload `player` / `victim` / `by`
    is the index into TP.M5.match.players (0 = seat 1).
@@ -52,7 +51,9 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
     } catch (e) { /* storage blocked: the game falls back to its default, which is also kb1 + bots */ }
   }, { key: SETUP_KEY });
 
-  await page.goto(pageUrl({ rounds: 1, time: 90 }));
+  // ?demo skips the title menu (whose all-bot backdrop match would
+  // otherwise be TP.M5.match); human=1 keeps seat 1 on its saved kb1.
+  await page.goto(pageUrl({ demo: true, human: 1, rounds: 1, time: 90 }));
 
   /* ---------- Keyboard helper ----------
      Keeps track of which keys are held so we only send real changes,
@@ -94,7 +95,13 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
     let s = await state();
     // Which seat is the human? The one on kb1, else seat 1.
     let hi = s.players.findIndex((p) => p.controller === "kb1");
-    if (hi < 0) hi = 0;
+    if (hi < 0) {
+      // No human seat = we're watching a bot (e.g. the menu backdrop).
+      // Every result after this would be about a bot: stop here.
+      result("setup", false, `no seat on kb1 in TP.M5.match (controllers: ${s.players.map((p) => p.controller).join(",")}); the probe would be steering nobody`);
+      await browser.close();
+      process.exit(1);
+    }
     const me = () => s.players[hi];
     console.log(`Human is player index ${hi} (${me().name || "?"}) at (${me().x.toFixed(1)}, ${me().z.toFixed(1)}), heading ${me().heading.toFixed(2)}`);
     if (!Number.isFinite(me().x) || !Number.isFinite(me().heading)) {
@@ -127,6 +134,12 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
           topSpeed = Math.max(topSpeed, c.speed || 0);
           if (tSpeed2 === null && c.speed > 2) tSpeed2 = Date.now() - tKey;
           if (tSpeed8 === null && c.speed > 8) tSpeed8 = Date.now() - tKey;
+          // QC_TRACE=1 prints the car every ~0.5 s (to see WHY a loop fails).
+          if (process.env.QC_TRACE && Date.now() - (global.__lastTrace || 0) > 500) {
+            global.__lastTrace = Date.now();
+            const ex = await page.evaluate((hi) => { const m = TP.M5.match, c = m.cars[hi]; return { stun: +(c.stun || 0).toFixed(2), out: m.out ? m.out[hi] : null, wet: m.grid.wetCount ? m.grid.wetCount[hi] : null, boost: Math.round(c.boost), pct: m.scores[hi] }; }, hi);
+            console.log(`    t ${((Date.now() - tStart) / 1000).toFixed(1)}s wp ${wi} pos (${c.x.toFixed(1)}, ${c.z.toFixed(1)}) hdg ${c.heading.toFixed(2)} v ${(c.speed || 0).toFixed(1)} ${JSON.stringify(ex)}`);
+          }
           const w = waypoints[wi];
           const dx = w.x - c.x, dz = w.z - c.z;
           if (Math.hypot(dx, dz) < 2.5) { wi++; continue; }

@@ -51,7 +51,7 @@ const maxSeconds = 60 + rounds * (time + 15) * 2;   // generous real-time limit 
     if (end) { if (end.data.winner >= 0) seatWins[end.data.winner]++; else draws++; }
     r.perRound.forEach((pr, i) => {
       popsPerRound.push(pr.pops);
-      fillsPerRound.push([...pr.fills.values()].reduce((a, b) => a + b, 0));
+      fillsPerRound.push([...pr.fills.values()].reduce((a, b) => a + b, 0));   // real fills only (small ones excluded)
       if (pr.bestFill > bestFill) { bestFill = pr.bestFill; bestFillWhere = `match ${n} round ${i + 1}`; }
     });
     r.mon.stuck.forEach((s) => stuck.push({ match: n, ...s }));
@@ -79,7 +79,7 @@ const maxSeconds = 60 + rounds * (time + 15) * 2;   // generous real-time limit 
   console.log(`Average final % by seat: ${pctBySeat.map((a) => avg(a).toFixed(1)).join(", ")}  (unpainted ${(100 - pctBySeat.reduce((s, a) => s + avg(a), 0)).toFixed(1)}%)`);
   console.log(`Best single fill: +${bestFill.toFixed(1)}% (${bestFillWhere})`);
   console.log(`Pops per round: avg ${avg(popsPerRound).toFixed(1)}, min ${Math.min(...popsPerRound)}, max ${Math.max(...popsPerRound)}`);
-  console.log(`Fills per round (all cars): avg ${avg(fillsPerRound).toFixed(1)}`);
+  console.log(`Real fills per round (all cars, small:true excluded): avg ${avg(fillsPerRound).toFixed(1)}`);
   // Fill-size histogram: lots of 1-5 cell fills = FILL effects/sounds
   // spamming for nothing; we want few, meaningful fills.
   const hist = (arr, buckets) => buckets.map(([lo, hi]) => `${lo}${hi === Infinity ? "+" : "-" + hi}: ${arr.filter((x) => x >= lo && x <= hi).length}`).join("  ");
