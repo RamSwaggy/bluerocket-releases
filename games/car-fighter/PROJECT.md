@@ -89,6 +89,9 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - smoke on seeds 12345 and 777
   - sim 200 (P1 45%, average round 26 s)
   - frames 11/11
+- **M2 started 2026-11-28.** Gameplay JOB 3: the cars, signatures and bots. Art JOB 3: bodies,
+  sfx and music, damage looks, combo counter, character select, MenuNav. The Director was told
+  M1 is ready for the hub card to go to Play.
 - Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
