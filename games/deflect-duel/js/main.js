@@ -63,8 +63,15 @@
 
   // M mutes everything (same key as the other modes), unless typing a name.
   window.addEventListener("keydown", (e) => {
-    if (e.code !== "KeyM" || (e.target && e.target.tagName === "INPUT")) return;
-    if (TP.sfx && TP.sfx.toggleMute) TP.sfx.toggleMute();
+    if (e.target && e.target.tagName === "INPUT") return;
+    if (e.code === "KeyM") { if (TP.sfx && TP.sfx.toggleMute) TP.sfx.toggleMute(); return; }
+    // Practice room / tutorial: number keys set the launcher speed,
+    // Escape goes back to the menu.
+    if (TP.DuelPractice && TP.DuelPractice.active) {
+      const m = /^Digit([0-5])$/.exec(e.code);
+      if (m) TP.DuelPractice.dial(Number(m[1]));
+      if (e.code === "Escape") backToMenu();
+    }
   });
 
   /* ---------- The current match ---------- */
@@ -81,6 +88,7 @@
 
     TP.Input.poll();       // 1) read controllers
     TP.sched.update(dt);   // 2) advance timers (results delay, etc.)
+    if (TP.DuelPractice && TP.DuelPractice.active && duel && !duel.paused) TP.DuelPractice.update(dt);
     if (duel && duel.paused) {
       // A test is driving the match by hand: leave it alone.
     } else if (duel) {
@@ -106,7 +114,16 @@
   function updateHud() {
     const b = duel.ball;
     const css = b.owner === null ? "#ffffff" : duel.players[b.owner].css;
-    TP.HUD.update(duel.players, b.speed, css);
+    // The practice launcher isn't a player: no chip for it.
+    const shown = duel.players.filter((p) => !p.launcher);
+    let clock = "";
+    if (duel.mode === "time") {
+      const t = Math.ceil(duel.clockLeft);
+      clock = duel.overtime ? "OVERTIME: next KO wins" : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+    } else if (duel.mode === "practice") {
+      clock = duel.practiceSpeed ? `LAUNCHER ${Math.round(duel.practiceSpeed)}` : "LAUNCHER OFF";
+    }
+    TP.HUD.update(shown, b.speed, css, { mode: duel.mode, clock });
   }
 
   // 3-2-1-GO before the first serve.
@@ -154,6 +171,11 @@
         // The big flash and the "CLASH!" toast come from Art's onClash hook.
         if (!TP.DuelArena) TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
         break;
+      case "overtime":
+        TP.HUD.center("OVERTIME", "Next KO wins", "#ffe14d");
+        TP.sfx.play("go");
+        TP.sched.wait(1.6).then(() => { if (duel && duel.state !== "over") TP.HUD.center(""); });
+        break;
       case "stalemate":
         TP.HUD.toast("Nobody hit it: re-serve", "", 1.2);
         break;
@@ -166,6 +188,7 @@
   /* ---------- Starting a match ---------- */
   // config.players: [{ seat, name, controller }], config.lives: 3 or 5
   function startMatch(config) {
+    if (TP.DuelPractice) TP.DuelPractice.stop();
     TP.sfx.unlock();
     TP.HUD.hideCard();
     TP.HUD.center("");
@@ -173,8 +196,13 @@
     if (duel) duel.dispose();
     lastConfig = config;
     shownCount = -1;
-    duel = new TP.Duel({ players: config.players, lives: config.lives, pillars: config.pillars, onEvent });
-    showHints(config.players);
+    duel = new TP.Duel({
+      players: config.players, lives: config.lives, pillars: config.pillars, onEvent,
+      mode: config.mode, difficulty: config.difficulty, timeLimit: config.timeLimit, practiceSpeed: config.practiceSpeed,
+      countdown: config.countdown,
+    });
+    if (config.mode === "practice" && TP.DuelPractice) TP.DuelPractice.start(duel, { tutorial: !!config.tutorial });
+    if (config.mode !== "practice") showHints(config.players);
   }
 
   // Each human's keys along the bottom of the screen.
@@ -191,14 +219,15 @@
   /* ---------- Match over → results ---------- */
   function onMatchEnd(result) {
     TP.sfx.play("trophy");
-    TP.HUD.center(`${result.winnerName} WINS!`, "", result.winnerCss);
+    if (result.mode === "teams") TP.HUD.center(`${result.winnerTeamName} WIN!`, "", result.winnerCss);
+    else TP.HUD.center(`${result.winnerName} WINS!`, "", result.winnerCss);
     TP.HUD.hint("");
     // Let the moment land before the results card covers the arena.
     TP.sched.wait(2).then(() => {
       TP.HUD.center("");
       if (typeof TP.HUD.showResults === "function") {
         // Art's card wants { winner, places: [{ name, css, kos, livesLeft }] }.
-        const places = result.standings.map((s) => ({ name: s.name, css: s.css, kos: s.kos, livesLeft: s.lives }));
+        const places = result.standings.map((s) => ({ name: s.name, css: s.css, kos: s.kos, livesLeft: s.lives, team: s.team, score: s.score }));
         TP.HUD.showResults(Object.assign({}, result, { winner: places[0] || null, places }), rematch, backToMenu);
       } else {
         showResultsFallback(result);
@@ -209,6 +238,7 @@
   function rematch() { if (lastConfig) startMatch(lastConfig); }
 
   function backToMenu() {
+    if (TP.DuelPractice) TP.DuelPractice.stop();
     if (duel) { duel.dispose(); duel = null; }
     TP.sched.clear();
     TP.HUD.update(null);
@@ -245,13 +275,30 @@
       .filter((p) => p.controller && p.controller !== "off");
   }
 
-  // Called by either menu when Start is pressed. Returns an error message,
-  // or "" if the match started.
-  function startFromMenu(slots, lives) {
+  // Called by either menu when Start (or Practice / Tutorial) is pressed.
+  // extra = { mode: "stock"|"teams"|"time"|"sudden", difficulty, practice }.
+  // Returns an error message, or "" if the match started.
+  function startFromMenu(slots, lives, extra = {}) {
     const players = playersFromSlots(slots);
+    // Practice / tutorial: just you (the first human seat, else Keyboard 1
+    // in seat 1) and the ball launcher.
+    if (extra.practice) {
+      const me = players.find((p) => p.controller !== "bot") || { seat: 0, name: TP.DEFAULT_NAMES[0], controller: "kb1" };
+      Rumble.saveSetup(slots);
+      startMatch({ players: [me], lives: 3, mode: "practice", practiceSpeed: extra.practice === "tutorial" ? 0 : 40, tutorial: extra.practice === "tutorial", countdown: 1 });
+      return "";
+    }
     if (players.length < 2) return "Fill at least 2 seats to play.";
     Rumble.saveSetup(slots);
-    startMatch({ players, lives: Number(lives) === 5 ? 5 : 3 });
+    const mode = extra.mode || "stock";
+    startMatch({
+      players,
+      // Sudden Death is the normal rules with one life each.
+      lives: mode === "sudden" ? 1 : Number(lives) === 5 ? 5 : 3,
+      mode: mode === "sudden" ? "stock" : mode,
+      difficulty: extra.difficulty || "normal",
+      timeLimit: 150,
+    });
     return "";
   }
 
@@ -260,10 +307,10 @@
     const lives = 3;
     if (typeof TP.HUD.showMenu === "function") {
       // Art's menu. It calls back with (slots, lives) or ({ slots, lives }).
-      TP.HUD.showMenu(setup, lives, (a, b) => {
+      TP.HUD.showMenu(setup, lives, (a, b, extra) => {
         const slots = a && a.slots ? a.slots : a;
         const l = a && a.slots ? a.lives ?? b : b;
-        return startFromMenu(slots, l);
+        return startFromMenu(slots, l, extra || {});
       });
       return;
     }
@@ -339,8 +386,8 @@
     });
     // QC's test hooks (TP.duel itself also has setInput/setBot/placeCar/setBall).
     TP.duelTest = {
-      newMatch({ players = 4, lives = 3, pillars } = {}) {
-        startMatch({ players: Array.isArray(players) ? players : botPlayers(players), lives, pillars });
+      newMatch({ players = 4, lives = 3, pillars, mode, difficulty, timeLimit, practiceSpeed } = {}) {
+        startMatch({ players: Array.isArray(players) ? players : botPlayers(players), lives, pillars, mode, difficulty, timeLimit, practiceSpeed });
         return TP.duel;
       },
     };

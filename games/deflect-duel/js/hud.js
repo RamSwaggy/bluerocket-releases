@@ -77,17 +77,30 @@
        the speed box's label and underline. The NUMBER rolls up to the new
        speed (see rollSpeed) and its colour ramps white → cyan → yellow →
        orange → red → pink as the ball gets faster, growing as it goes. */
-    update(players, speed, ballCss) {
+    /* info (optional) changes the chips for other modes:
+         info.mode   "time": chips show KOs instead of hearts
+                     "teams": chips show a team mark (▲ / ■)
+                     "practice": chips show how many times you've been hit
+         info.clock  text under the speed, e.g. "2:13" or "OVERTIME" */
+    update(players, speed, ballCss, info) {
       if (!players) { $("hud").classList.remove("show"); lastHud = ""; speedRoll.shown = 0; speedRoll.to = 0; return; }
+      const mode = (info && info.mode) || "stock";
       const half = Math.ceil(players.length / 2);
+      const status = (p) => {
+        if (mode === "time") return `${p.score || 0} KO${p.score === 1 ? "" : "s"}`;
+        if (mode === "practice") return `hit ×${p.knockedOut || 0}`;
+        return p.lives > 0 ? "♥".repeat(p.lives) : "OUT";
+      };
+      const mark = (p) => (mode === "teams" ? `<span class="team">${p.team === 0 ? "▲" : "■"}</span> ` : "");
       const chip = (p) => `
-        <div class="chip ${p.lives <= 0 ? "out" : ""}" style="border-color:${p.css}">
-          <span style="color:${p.css}">${esc(p.name)}</span>
-          <span class="lives">${p.lives > 0 ? "♥".repeat(p.lives) : "OUT"}</span>
+        <div class="chip ${mode !== "time" && mode !== "practice" && p.lives <= 0 ? "out" : ""}" style="border-color:${p.css}">
+          <span style="color:${p.css}">${mark(p)}${esc(p.name)}</span>
+          <span class="lives">${status(p)}</span>
         </div>`;
+      const clock = info && info.clock ? `<div class="label">${esc(info.clock)}</div>` : "";
       const html =
         players.slice(0, half).map(chip).join("") +
-        `<div id="speed"><div class="label">BALL SPEED</div><div class="val">0</div></div>` +
+        `<div id="speed"><div class="label">BALL SPEED</div><div class="val">0</div>${clock}</div>` +
         players.slice(half).map(chip).join("");
       // Only rebuild the chips when something in them changed (it's per-frame).
       if (html !== lastHud) { $("hud").innerHTML = html; lastHud = html; }
@@ -140,7 +153,11 @@
                  (from TP.Rumble.loadSetup()). Seat i's colour is always
                  TP.PLAYER_CSS[i], the same in every Rocket Rumble mode.
        lives   — starting choice, 3 or 5.
-       onStart — called as onStart(setup, lives) with the edited setup.
+       onStart — called as onStart(setup, lives, extra) with the edited
+                 setup. extra = { mode, difficulty, practice } where mode is
+                 "stock" | "teams" | "time" | "sudden", difficulty is "easy" |
+                 "normal" | "hard", and practice is null, "practice" or
+                 "tutorial" (the Practice / Tutorial buttons).
        The setup is also saved back to the hub (TP.Rumble.saveSetup) so the
        next mode you open starts with the same players. */
     showMenu(setup, lives, onStart) {
@@ -150,6 +167,11 @@
 
       const slots = (setup && setup.slots ? setup.slots : TP.Rumble.loadSetup().slots).slice(0, 4);
       let pickedLives = lives === 5 ? 5 : 3;
+      // Remember the last mode and bot level picked (this browser only).
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem("deflectDuel.menu") || "{}") || {}; } catch (e) { saved = {}; }
+      let pickedMode = ["stock", "teams", "time", "sudden"].includes(saved.mode) ? saved.mode : "stock";
+      let pickedLevel = ["easy", "normal", "hard"].includes(saved.level) ? saved.level : "normal";
 
       // Seat options: Off, then every known controller (Bot, Keyboard 1, ...).
       const LABELS = Object.assign({ off: "Off (empty)" }, TP.CONTROLLER_LABELS);
@@ -173,9 +195,19 @@
         </div>
 
         <div class="row">
-          <span class="muted">Lives</span>
+          <span class="muted">Mode</span>
+          <span class="seg" id="mode">
+            <button data-v="stock" title="Lives; last car standing">Free-for-all</button><button data-v="teams" title="Seats 1 &amp; 3 vs 2 &amp; 4; your teammate's ball is harmless">Teams 2v2</button><button data-v="time" title="2:30 on the clock; most KOs wins; endless respawns">Time</button><button data-v="sudden" title="One life each">Sudden Death</button>
+          </span>
+        </div>
+        <div class="row">
+          <span class="muted" id="lives-label">Lives</span>
           <span class="seg" id="lives">
             <button data-v="3">3</button><button data-v="5">5</button>
+          </span>
+          <span class="muted">Bots</span>
+          <span class="seg" id="level">
+            <button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button>
           </span>
           <span class="muted" id="padinfo"></span>
           <span class="muted">· <kbd>M</kbd> mutes</span>
@@ -185,17 +217,22 @@
           <tr><td>Keyboard 1</td><td>Drive <kbd>W</kbd><kbd>S</kbd> · Steer/aim <kbd>A</kbd><kbd>D</kbd> · Hit <kbd>E</kbd> · Jump <kbd>Space</kbd> · Boost <kbd>Shift</kbd></td></tr>
           <tr><td>Keyboard 2</td><td>Drive <kbd>↑</kbd><kbd>↓</kbd> · Steer/aim <kbd>←</kbd><kbd>→</kbd> · Hit <kbd>.</kbd> · Jump <kbd>Enter</kbd> · Boost <kbd>R-Shift</kbd></td></tr>
           <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Steer/aim stick · Hit <kbd>X</kbd>/<kbd>RB</kbd> · Jump <kbd>A</kbd> · Boost <kbd>B</kbd></td></tr>
-          <tr><td>Tip</td><td>Hit while boosting for a <b>Smash</b>: a much faster ball.</td></tr>
+          <tr><td>Aim</td><td>Hold <b>Up</b>/<b>Down</b> while you hit to aim up/down. On a keyboard you can bind separate <b>Aim up/down</b> keys in 🎮 Controls so <kbd>W</kbd>/<kbd>S</kbd> only drive.</td></tr>
+          <tr><td>Moves</td><td>Boost + Hit = <b>Smash</b> · jump twice = double jump · jump + direction = <b>flip</b> · land on the ball = <b>bunt</b>. New? Try the <b>Tutorial</b>.</td></tr>
         </table>
 
         <p class="error" id="menu-error"></p>
         <div class="btn-row sticky">
           <button class="btn" id="start" data-nav-primary>Start duel</button>
+          <button class="btn alt" id="practice" title="You vs a ball launcher, endless lives">Practice</button>
+          <button class="btn alt" id="tutorial" title="A 90-second walkthrough of every move">Tutorial</button>
         <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
           <a class="btn hub" href="${TP.Rumble.HUB_URL}">← All modes</a>
         </div>`);
 
       const livesEl = card.querySelector("#lives");
+      const modeEl = card.querySelector("#mode");
+      const levelEl = card.querySelector("#level");
       const startBtn = card.querySelector("#start");
       const errEl = card.querySelector("#menu-error");
 
@@ -208,6 +245,18 @@
         paintLives();
       });
       paintLives();
+
+      // Mode and bot level work the same way as the lives toggle.
+      const paintSeg = (el, v) => el.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+      const paintMode = () => {
+        paintSeg(modeEl, pickedMode);
+        // Time mode has no lives; Sudden Death is always one life.
+        const noLives = pickedMode === "time" || pickedMode === "sudden";
+        livesEl.style.opacity = noLives ? 0.35 : 1;
+        card.querySelector("#lives-label").textContent = pickedMode === "sudden" ? "Lives: 1" : pickedMode === "time" ? "Lives: ∞" : "Lives";
+      };
+      modeEl.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; pickedMode = b.dataset.v; paintMode(); validate(); });
+      levelEl.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; pickedLevel = b.dataset.v; paintSeg(levelEl, pickedLevel); });
 
       // Read the form back into a setup object.
       const read = () => [0, 1, 2, 3].map((i) => ({
@@ -227,6 +276,11 @@
         let msg = "";
         if (active < 2) msg = "Turn on at least 2 seats (players or bots).";
         else if (dup) msg = `Two seats are both on ${TP.CONTROLLER_LABELS[dup]}. Give each person their own controller.`;
+        else if (pickedMode === "teams") {
+          // Teams are by seat: 1 & 3 against 2 & 4. Both sides need someone.
+          const on = s.map((seat) => seat.controller !== "off");
+          if (!(on[0] || on[2]) || !(on[1] || on[3])) msg = "Teams: seats 1 & 3 play seats 2 & 4. Put someone on each side.";
+        }
         errEl.textContent = msg;
         startBtn.disabled = !!msg;
         return !msg;
@@ -236,6 +290,8 @@
         el.addEventListener("input", validate);
       });
       validate();
+      paintMode();
+      paintSeg(levelEl, pickedLevel);
       attachNav(card);
 
       // Show how many gamepads the browser can see (they wake on a button press).
@@ -249,16 +305,20 @@
       window.addEventListener("gamepadconnected", refreshPads);
       window.addEventListener("gamepaddisconnected", refreshPads);
 
-      startBtn.addEventListener("click", () => {
-        if (!validate()) return;
+      const go = (practice) => {
+        if (!practice && !validate()) return;
         const newSetup = { slots: read() };
         TP.Rumble.saveSetup(newSetup.slots);
+        try { localStorage.setItem("deflectDuel.menu", JSON.stringify({ mode: pickedMode, level: pickedLevel })); } catch (e) { /* storage blocked: fine */ }
         if (TP.sfx) { TP.sfx.unlock(); TP.sfx.play("go"); } // clicking counts as the audio "unlock" gesture
         window.removeEventListener("gamepadconnected", refreshPads);
         window.removeEventListener("gamepaddisconnected", refreshPads);
         TP.HUD.hideCard();
-        if (onStart) onStart(newSetup, pickedLives);
-      });
+        if (onStart) onStart(newSetup, pickedLives, { mode: pickedMode, difficulty: pickedLevel, practice });
+      };
+      startBtn.addEventListener("click", () => go(null));
+      card.querySelector("#practice").addEventListener("click", () => go("practice"));
+      card.querySelector("#tutorial").addEventListener("click", () => go("tutorial"));
       return card;
     },
 
@@ -275,15 +335,23 @@
       const winCss = (w && w.css) || (places[0] && places[0].css) || "var(--accent2)";
       const ord = (n) => ["1st", "2nd", "3rd", "4th"][n - 1] || n + "th"; // at most 4 players
 
+      // Different modes, different headline and second stat.
+      const mode = (result && result.mode) || "stock";
+      const teams = mode === "teams";
+      const headline = teams && result.winnerTeamName
+        ? `<span style="color:${winCss}">${esc(result.winnerTeamName)}</span> win!`
+        : winName ? `<span style="color:${winCss}">${esc(winName)}</span> wins!` : "Draw!";
+      const sub = { stock: "Last car standing.", teams: "Last team standing.", time: "Most KOs when the clock ran out." }[mode] || "";
+      const wTeam = teams ? result.winnerTeam : null;
       const card = TP.HUD.card(`
-        <h2>${winName ? `<span style="color:${winCss}">${esc(winName)}</span> wins!` : "Draw!"}</h2>
-        <p>Last car standing.</p>
+        <h2>${headline}</h2>
+        <p>${sub}</p>
         ${places.map((p, i) => `
-          <div class="result-row ${i === 0 && winName ? "win" : ""}" style="border-color:${p.css}">
-            <span class="place">${ord(i + 1)}</span>
-            <span class="who" style="color:${p.css}">${esc(p.name)}</span>
+          <div class="result-row ${(teams ? p.team === wTeam : i === 0) && winName ? "win" : ""}" style="border-color:${p.css}">
+            <span class="place">${teams ? (p.team === wTeam ? "WIN" : "") : ord(i + 1)}</span>
+            <span class="who" style="color:${p.css}">${teams ? (p.team === 0 ? "▲ " : "■ ") : ""}${esc(p.name)}</span>
             <span class="stat">${p.kos ?? 0} KO${(p.kos ?? 0) === 1 ? "" : "s"}</span>
-            <span class="stat">${(p.livesLeft ?? 0) > 0 ? "♥".repeat(p.livesLeft) : "OUT"}</span>
+            <span class="stat">${mode === "time" ? "" : (p.livesLeft ?? 0) > 0 ? "♥".repeat(p.livesLeft) : "OUT"}</span>
           </div>`).join("")}
         <div class="btn-row">
           <button class="btn" id="rematch" data-nav-primary>Rematch</button>

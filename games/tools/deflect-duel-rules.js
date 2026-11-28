@@ -534,6 +534,78 @@ const TESTS = {
     return r.done();
   },
 
+  /* ---------- Modes (round 3, phase 1) ----------
+     Teams: a teammate's ball passes through you; the last TEAM standing
+     wins. Time: no lives lost, KOs score, the clock ends it, a tie goes to
+     overtime and the next KO wins. Sudden Death: one life. Practice: the
+     launcher fires at you, you never run out of lives. Bot levels exist. */
+  modes: function () {
+    const Q = window.QC, r = Q.result();
+    const bots4 = [0, 1, 2, 3].map((seat) => ({ seat, name: TP.DEFAULT_NAMES[seat], controller: "bot" }));
+
+    // Teams: seat 0 (team 0) owns a ball that flies through seat 2 (team 0) and hits seat 1 (team 1).
+    let d = Q.fresh({ players: bots4, lives: 3, mode: "teams" });
+    r.ok(d.mode === "teams" && d.players[0].team === d.players[2].team && d.players[0].team !== d.players[1].team, `teams by seat: 1 & 3 vs 2 & 4 (teams ${d.players.map((p) => p.team).join(",")})`);
+    Q.place(0, -18, -10, 0); Q.place(3, 18, -10, 0);
+    Q.place(2, -5, 0, 0); Q.place(1, 6, 0, 0);
+    d.setBall({ pos: { x: -10, y: 0.9, z: 0 }, vel: { x: 30, z: 0 }, owner: 0 });
+    Q.stepUntil(() => d.koLog.length > 0, 1.5);
+    r.ok(d.players[2].lives === 3, `a teammate's ball passes harmlessly through (Green lives ${d.players[2].lives})`);
+    r.ok(d.koLog.length === 1 && d.koLog[0].victim === 1, `...and KOs the other team (KOs: ${JSON.stringify(d.koLog.map((k) => k.victim))})`);
+    // Knock out both members of team 1 by hand: team 0 wins with two cars left.
+    d.players[1].lives = 1; d.players[3].lives = 1;
+    for (const v of [1, 3]) {
+      Q.stepUntil(() => d.players[v].dead <= 0 && d.players[v].invuln <= 0 && d.state === "play", 6);
+      const c = d.players[v].pos;
+      d.setBall({ pos: { x: c.x - 4, y: 0.9, z: c.z }, vel: { x: 40, z: 0 }, owner: 0 });
+      Q.stepUntil(() => d.players[v].out || d.state === "over", 1.5);
+    }
+    r.ok(d.state === "over" && d.result && d.result.winnerTeam === 0, `last team standing wins (state ${d.state}, team ${d.result && d.result.winnerTeam}, "${d.result && d.result.winnerTeamName}")`);
+
+    // Time mode: KOs score and nobody runs out of lives; the clock ends it.
+    d = Q.fresh({ players: 2, lives: 3, mode: "time", timeLimit: 6 });
+    Q.place(0, -18, -10, 0); Q.place(1, 6, 0, 0);
+    d.setBall({ pos: { x: -2, y: 0.9, z: 0 }, vel: { x: 30, z: 0 }, owner: 0 });
+    Q.stepUntil(() => d.koLog.length > 0, 1.5);
+    r.ok(d.players[1].lives === 3 && !d.players[1].out && d.players[0].score === 1, `time: a KO scores a point and costs no life (score ${d.players[0].score}, lives ${d.players[1].lives})`);
+    Q.stepUntil(() => d.state === "over", 12);
+    r.ok(d.state === "over" && d.winner === 0, `time: when the clock runs out, most KOs wins (state ${d.state}, winner ${d.winner})`);
+    // A tie at the bell → overtime, and the next KO wins.
+    d = Q.fresh({ players: 2, lives: 3, mode: "time", timeLimit: 2 });
+    Q.place(0, -18, -10, 0); Q.place(1, 18, 10, 0);
+    Q.stepUntil(() => d.overtime, 6);
+    r.ok(d.overtime && d.state !== "over", `time: a tie at the bell goes to overtime (overtime ${d.overtime})`);
+    Q.place(1, 6, 0, 0);
+    d.setBall({ pos: { x: -2, y: 0.9, z: 0 }, vel: { x: 30, z: 0 }, owner: 0 });
+    Q.stepUntil(() => d.state === "over", 2);
+    r.ok(d.state === "over" && d.winner === 0, `time: the next KO wins overtime (winner ${d.winner})`);
+
+    // Sudden death = one life.
+    d = Q.fresh({ players: 2, lives: 1 });
+    Q.place(0, -18, -10, 0); Q.place(1, 6, 0, 0);
+    d.setBall({ pos: { x: -2, y: 0.9, z: 0 }, vel: { x: 30, z: 0 }, owner: 0 });
+    Q.stepUntil(() => d.state === "over", 2);
+    r.ok(d.state === "over" && d.winner === 0, `sudden death: one KO ends it (winner ${d.winner})`);
+
+    // Practice: the launcher fires at the lone player; KOs never end it.
+    d = Q.fresh({ players: [{ seat: 0, name: "Me", controller: "kb1" }], lives: 3, mode: "practice", practiceSpeed: 40 });
+    const L = d.launcherIndex;
+    r.ok(typeof L === "number" && d.players[L].launcher && d.players[L].out, `practice: a launcher "player" exists and isn't on the field`);
+    Q.place(0, 0, 0, 0);
+    Q.step(8);
+    const launches = d.events.filter((e) => e.type === "launch").length;
+    r.ok(launches >= 2, `practice: the launcher keeps firing (${launches} launches in 8 s)`);
+    r.ok(d.state !== "over" && d.players[0].lives === 3 && (d.players[0].knockedOut || 0) >= 1, `practice: being hit never ends it (hit ${d.players[0].knockedOut || 0}×, lives ${d.players[0].lives}, state ${d.state})`);
+
+    // Bot levels.
+    for (const lv of ["easy", "normal", "hard"]) {
+      d = Q.fresh({ players: 2, lives: 3, difficulty: lv });
+      d.setBot(0, true);
+      r.ok(d.difficulty === lv && d.bots[0] && d.bots[0].level === lv, `bots: ${lv} level is applied (${d.bots[0] && d.bots[0].level})`);
+    }
+    return r.done();
+  },
+
   /* ---------- v2: hit-freeze doesn't count toward the stalemate clock ---------- */
   "v2-freeze-vs-stalemate": function () {
     const Q = window.QC, r = Q.result();

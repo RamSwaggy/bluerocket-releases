@@ -173,28 +173,54 @@
 
   const NO_HOOK = () => {};
 
-  // One bot difficulty level, but every bot is a little different.
-  function makeBotSkill() {
+  /* Bot difficulty. Normal is the tuned default (the fun table is
+     measured against it). Easy bots react late, misread more, rarely fly
+     and give up on fast balls early; Hard bots are quick, accurate, fly
+     and flip a lot, and keep returning very fast balls. Every bot still
+     gets a little random variety within its level. */
+  const BOT_LEVELS = {
+    easy: {
+      reaction: [0.25, 0.4], maxReturn: [60, 100], leadErr: 0.3, aimNoise: [14, 24], fumble: 0.18,
+      fumbleFast: [0.55, 0.7], needWindow: [0.5, 0.7], fumbleRally: 0.025, aerial: [0.1, 0.3],
+      flipper: [0.05, 0.15], flipDodge: [0.1, 0.25], smash: 0.08,
+    },
+    normal: {
+      reaction: [0.08, 0.2], maxReturn: [140, 230], leadErr: 0.2, aimNoise: [4, 14], fumble: 0.06,
+      fumbleFast: [0.35, 0.55], needWindow: [0.3, 0.45], fumbleRally: 0.012, aerial: [0.6, 1.0],
+      flipper: [0.2, 0.5], flipDodge: [0.3, 0.7], smash: 0.25,
+    },
+    hard: {
+      reaction: [0.04, 0.09], maxReturn: [200, 260], leadErr: 0.1, aimNoise: [1, 5], fumble: 0.025,
+      fumbleFast: [0.18, 0.3], needWindow: [0.18, 0.28], fumbleRally: 0.006, aerial: [0.85, 1.0],
+      flipper: [0.4, 0.65], flipDodge: [0.6, 0.9], smash: 0.4,
+    },
+  };
+  const pick = (v) => (Array.isArray(v) ? rand(v[0], v[1]) : v);
+
+  // A bot's skill for this match: its level's numbers, with some variety.
+  function makeBotSkill(level = "normal") {
+    const L = BOT_LEVELS[level] || BOT_LEVELS.normal;
     return {
-      reaction: rand(0.08, 0.2),   // seconds before reacting to a new strike
-      maxReturn: rand(140, 230),   // fastest ball it will even try to strike back (faster = dodge)
-      leadErr: 0.2,                // how far off its swing timing can be, per shot (seconds)
+      level: BOT_LEVELS[level] ? level : "normal",
+      smash: L.smash,              // chance it Smashes a return
+      reaction: pick(L.reaction),  // seconds before reacting to a new strike
+      maxReturn: pick(L.maxReturn),// fastest ball it will even try to strike back (faster = dodge)
+      leadErr: L.leadErr,          // how far off its swing timing can be, per shot (seconds)
       lead: 0.08,                  // this shot's swing timing (re-rolled per shot)
-      aimNoise: rand(4, 14),       // degrees of sloppiness in its aim
+      aimNoise: pick(L.aimNoise),  // degrees of sloppiness in its aim
       swingLead: rand(0.04, 0.12), // how early it swings
       jumpLead: rand(0.3, 0.42),   // jump this long before impact (peak height ≈ 0.37 s)
-      fumble: 0.06,                // chance it misreads a slow shot...
-      fumbleFast: rand(0.35, 0.55),// ...plus up to this much more as the ball nears max speed
-      needWindow: rand(0.3, 0.45), // seconds of warning it wants (freeze + travel); less = shakier
-      fumbleRally: 0.012,          // ...plus this much per strike in the current rally
-      aerial: rand(0.6, 1.0),      // how keen it is to fly up to a high ball (rocket moveset)
-      flipper: rand(0.2, 0.5),     // chance it flips into a low ball instead of swiping
-      flipDodge: rand(0.3, 0.7),   // chance it dodges by flipping sideways instead of jumping
+      fumble: L.fumble,            // chance it misreads a slow shot...
+      fumbleFast: pick(L.fumbleFast), // ...plus up to this much more as the ball nears max speed
+      needWindow: pick(L.needWindow), // seconds of warning it wants (freeze + travel); less = shakier
+      fumbleRally: L.fumbleRally,  // ...plus this much per strike in the current rally
+      aerial: pick(L.aerial),      // how keen it is to fly up to a high ball (rocket moveset)
+      flipper: pick(L.flipper),    // chance it flips into a low ball instead of swiping
+      flipDodge: pick(L.flipDodge),// chance it dodges by flipping sideways instead of jumping
       move: null,                  // a committed move: { kind: "flip"|"aerial", until, x, y, z }
       planFor: -1, plan: "",       // decision for the current shot
     };
   }
-
   /* ---------- Where each car starts (by player order, not seat) ----------
      The first two spots are diagonally opposite, so a 1v1 starts fair. */
   function spawnSpot(i, C) {
@@ -285,6 +311,15 @@
        opts.lives     3 or 5
        opts.onEvent   optional (name, data) callback for main.js (toasts, sounds)
        opts.pillars   optional true/false to override DUEL_CFG.pillars for this match
+       opts.mode      "stock" (default: lives, last car standing),
+                      "teams" (2 vs 2 by seat: 1 & 3 against 2 & 4; a teammate's
+                               ball is harmless; last TEAM standing wins),
+                      "time"  (timeLimit seconds, endless respawns, most KOs
+                               wins; a tie goes to sudden-death overtime),
+                      "practice" (one human, a ball launcher, endless lives)
+                      Sudden Death is "stock" with lives = 1.
+       opts.difficulty "easy" | "normal" (default) | "hard" for every bot
+       opts.timeLimit  seconds for "time" mode (default 150)
      ===================================================================== */
   class Duel {
     constructor(opts) {
@@ -294,6 +329,15 @@
       if (typeof opts.pillars === "boolean") C.pillars = opts.pillars;
       this.onEvent = opts.onEvent || NO_HOOK;
       this.lives = opts.lives || 3;
+      this.mode = ["teams", "time", "practice"].includes(opts.mode) ? opts.mode : "stock";
+      this.difficulty = BOT_LEVELS[opts.difficulty] ? opts.difficulty : "normal";
+      // Time mode: the clock, and whether we're in sudden-death overtime.
+      this.timeLimit = opts.timeLimit || 150;
+      this.clockLeft = this.mode === "time" ? this.timeLimit : 0;
+      this.overtime = false;
+      // Practice: how fast the launcher fires (0 = launcher off).
+      this.practiceSpeed = opts.practiceSpeed ?? 30;
+      this.practiceWait = 1.2;
       this.pillars = C.pillars ? C.pillarList : [];
 
       // Same car as every Rocket Rumble mode; Deflect Duel only lets you
@@ -394,8 +438,33 @@
         Object.defineProperty(this.players[i], "car", { value: car, enumerable: false });
         // Swing ring placeholder: a flat ring showing your reach while swinging.
         car.mesh.add(this._makeSwingRing(seat));
-        this.bots.push(cfg.controller === "bot" ? makeBotSkill() : null);
+        this.bots.push(cfg.controller === "bot" ? makeBotSkill(this.difficulty) : null);
       });
+      // Teams: seats 1 & 3 (team 0) against seats 2 & 4 (team 1). Every
+      // other mode: everyone's on their own team.
+      this.players.forEach((p) => { p.team = this.mode === "teams" ? p.seat % 2 : p.index; p.score = 0; });
+
+      // Practice: one more "player", the ball launcher. It has no body on
+      // the field (it's out from the start, so nothing collides with it or
+      // counts it), it just owns the balls it fires, in its own colour.
+      if (this.mode === "practice") {
+        const used = new Set(this.players.map((p) => p.seat));
+        const seat = [2, 3, 1, 0].find((k) => !used.has(k));
+        const car = new TP.Car(this.scene, { index: seat, name: "Launcher", color: TP.PLAYER_COLORS[seat], css: TP.PLAYER_CSS[seat], controller: "bot" });
+        car.placeAt(-C.arenaW / 2 + 2, -C.arenaD / 2 + 2, 0);
+        car.out = true;
+        car.mesh.visible = false;
+        this.cars.push(car);
+        const lp = { index: this.players.length, seat, name: "Launcher", css: TP.PLAYER_CSS[seat], controller: "bot", lives: 0, out: true,
+          launcher: true, team: -1, score: 0, invuln: 0, dead: 0, swingT: 0, swingHit: false, cooldown: 0, pos: car.pos, airborne: false,
+          kos: 0, hits: 0, bunts: 0, clashes: 0, prevHit: false, lastSteer: 0, lastThrottle: 0, buntReady: 0,
+          stats: { swings: 0, strikes: 0, strikesAir: 0, strikesUp: 0, strikesDown: 0, strikesFlip: 0, smashes: 0, clashes: 0, bunts: 0, bumps: 0 } };
+        Object.defineProperty(lp, "car", { value: car, enumerable: false });
+        this.players.push(lp);
+        this.bots.push(null);
+        this.launcherIndex = lp.index;
+      }
+
       // Test hook: controls forced from outside (setInput), per player.
       this.inputOverride = this.players.map(() => null);
 
@@ -502,7 +571,73 @@
       this.time += dt;
       this._stepCars(dt);
       this._stepBall(dt);
+      if (this.state === "over") return;
+      if (this.mode === "time") this._stepClock(dt);
+      if (this.mode === "practice") this._stepLauncher(dt);
     }
+
+    /* ---------- Modes ---------- */
+
+    // Is player j's ball harmless to player i? Your own ball always is; in
+    // Teams, so is a teammate's.
+    _friendly(i, j) {
+      if (j === null || j === undefined) return false;
+      return i === j || (this.mode === "teams" && this.players[i].team === this.players[j].team);
+    }
+
+    // The players still in the match (the practice launcher never counts).
+    _alive() { return this.players.filter((p) => !p.out && !p.launcher); }
+
+    // How many cars are still in, for the bots' endgame logic.
+    _aliveCount() { return this._alive().length; }
+
+    // Time mode: count down; at zero the most KOs wins. A tie becomes
+    // sudden-death overtime: the next KO that breaks the tie wins it.
+    _stepClock(dt) {
+      if (this.overtime) return;
+      this.clockLeft = Math.max(0, this.clockLeft - dt);
+      if (this.clockLeft > 0) return;
+      const leader = this._timeLeader();
+      if (leader !== null) this._endMatch(leader);
+      else { this.overtime = true; this.onEvent("overtime"); }
+    }
+
+    // The single player with the most KOs, or null if it's a tie.
+    _timeLeader() {
+      const ps = this.players.filter((p) => !p.launcher);
+      const best = Math.max(...ps.map((p) => p.score));
+      const top = ps.filter((p) => p.score === best);
+      return top.length === 1 ? top[0].index : null;
+    }
+
+    // Practice: whenever the ball is free (neutral, or the player has had
+    // it for a while), fire a new one at the player from the far side at
+    // the dial speed. Speed 0 = launcher off: the ball is served normally.
+    _stepLauncher(dt) {
+      const C = this.cfg, b = this.ball, L = this.launcherIndex;
+      if (!this.practiceSpeed || this.state !== "play") return;
+      const human = this.players.find((p) => !p.launcher);
+      if (!human || human.dead > 0) return;
+      const free = b.mode === "neutral" || (b.owner !== L && b.ownT > 2.5) || (b.owner === L && b.mode === "cooling");
+      this.practiceWait = free ? this.practiceWait - dt : 1.2;
+      if (this.practiceWait > 0) return;
+      this.practiceWait = 1.2;
+      const car = this.cars[human.index];
+      // Fire from the far end, at roughly head height, straight at the car.
+      const sx = car.pos.x > 0 ? -C.arenaW / 2 + 3 : C.arenaW / 2 - 3;
+      const from = { x: sx, y: rand(1.2, 4), z: rand(-C.arenaD / 2 + 4, C.arenaD / 2 - 4) };
+      const to = { x: car.pos.x, y: car.pos.y + C.carH / 2, z: car.pos.z };
+      const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, l = Math.hypot(dx, dy, dz) || 1;
+      const v = this.practiceSpeed;
+      this.setBall({ pos: from, vel: { x: dx / l * v, y: dy / l * v, z: dz / l * v }, owner: L });
+      this.freezeLeft = this._freezeFor(v); // the same readable standoff as a real strike
+      b.lastFreeze = this.freezeLeft;
+      this._log("launch", L, { speed: v });
+      this.onEvent("launch", { speed: v });
+    }
+
+    // Practice speed dial (0 = launcher off).
+    setPracticeSpeed(v) { this.practiceSpeed = Math.max(0, Math.min(this.cfg.maxSpeed, v)); this.practiceWait = 0.6; }
 
     /* =====================================================================
        Cars: driving, swiping, walls, pillars, bumping
@@ -855,7 +990,7 @@
       if (angle === "down") p.stats.strikesDown++;
       if (flip) { p.stats.strikesFlip++; this.stats.flipStrikes = (this.stats.flipStrikes || 0) + 1; }
       if (smash) p.stats.smashes++;
-      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash, carY: +car.pos.y.toFixed(2) });
+      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip, smash, carY: +car.pos.y.toFixed(2), from: before.owner });
       this.hooks.onHit(car, b, frac, smash, info);
       this.onEvent("hit", { player: p, speed, frac, smash, info });
     }
@@ -1022,7 +1157,7 @@
       if (this.time < b.safeUntil) return false;
       const victims = [];
       this.players.forEach((p, i) => {
-        if (p.out || p.dead > 0 || i === b.owner || p.invuln > 0) return;
+        if (p.out || p.dead > 0 || p.invuln > 0 || this._friendly(i, b.owner)) return;
         // True 3D: the ball sphere against the car's body box. Jumping
         // over the ball works only if you really are above it.
         if (this._contact(this.cars[i])) victims.push(i);
@@ -1031,12 +1166,18 @@
 
       const owner = b.owner;
       for (const i of victims) this._ko(i, owner);
+      if (this.state === "over") return true; // a time-mode overtime KO ended it
 
-      // Last car standing? (If somehow nobody is left, the last striker
-      // wins: Reece's double-KO rule.)
-      const alive = this.players.filter((p) => !p.out);
-      if (alive.length <= 1) {
-        this._endMatch(alive.length ? alive[0].index : owner);
+      // Last car (or team) standing? If somehow nobody is left, the last
+      // striker wins: Reece's double-KO rule.
+      const alive = this._alive();
+      const teamsLeft = new Set(alive.map((p) => p.team)).size;
+      if (this.mode !== "time" && this.mode !== "practice" && teamsLeft <= 1) {
+        // Teams: the winner is the team; we name its best player (most
+        // KOs) and the results card shows the whole team.
+        const winners = alive.length ? alive : [this.players[owner]];
+        const best = winners.slice().sort((a, b2) => b2.kos - a.kos)[0];
+        this._endMatch(best ? best.index : owner);
       } else {
         this.freezeLeft = C.koFreeze;
         this._serve();
@@ -1088,8 +1229,12 @@
     _ko(i, ownerIdx) {
       const C = this.cfg, p = this.players[i], car = this.cars[i];
       const owner = this.players[ownerIdx];
-      p.lives = Math.max(0, p.lives - 1);
-      if (owner) owner.kos++;
+      // Time mode and practice: no lives, you just respawn. Time mode
+      // scores a point for the owner instead.
+      const endless = this.mode === "time" || this.mode === "practice";
+      if (!endless) p.lives = Math.max(0, p.lives - 1);
+      if (owner) { owner.kos++; owner.score++; }
+      p.knockedOut = (p.knockedOut || 0) + 1;
       this.koLog.push({ t: +this.time.toFixed(2), victim: i, owner: ownerIdx, speed: +this.ball.speed.toFixed(1) });
       this._log("ko", ownerIdx, { victim: i, speed: +this.ball.speed.toFixed(1) });
       this.stalemateStreak = 0;
@@ -1104,11 +1249,16 @@
       p.swingT = 0;
       car.out = true;
       car.mesh.visible = false;
-      if (p.lives <= 0) {
+      if (!endless && p.lives <= 0) {
         p.out = true;
         this.outOrder.push(i);
       } else {
         p.dead = C.respawnDelay;
+      }
+      // Time-mode overtime: the first KO that breaks the tie wins.
+      if (this.mode === "time" && this.overtime) {
+        const leader = this._timeLeader();
+        if (leader !== null) this._endMatch(leader);
       }
     }
 
@@ -1149,18 +1299,35 @@
       this.state = "over";
       this.winner = winnerIdx;
       this.freezeLeft = 0;
-      // Standings: winner first, then everyone else, last knocked out first.
-      const order = [winnerIdx, ...this.outOrder.slice().reverse().filter((k) => k !== winnerIdx)];
-      for (const p of this.players) if (!order.includes(p.index)) order.push(p.index);
+      // Standings. Stock: winner first, then the last knocked out first.
+      // Time: by KOs (then fewest times knocked out). Teams: the winning
+      // team first (its best player on top), then the rest.
+      let order;
+      const real = this.players.filter((p) => !p.launcher);
+      if (this.mode === "time") {
+        order = real.slice().sort((a, b) => (b.score - a.score) || ((a.knockedOut || 0) - (b.knockedOut || 0))).map((p) => p.index);
+        order = [winnerIdx, ...order.filter((k) => k !== winnerIdx)];
+      } else {
+        order = [winnerIdx, ...this.outOrder.slice().reverse().filter((k) => k !== winnerIdx)];
+        for (const p of real) if (!order.includes(p.index)) order.push(p.index);
+        if (this.mode === "teams") {
+          const wt = this.players[winnerIdx].team;
+          order = [...order.filter((k) => this.players[k].team === wt), ...order.filter((k) => this.players[k].team !== wt)];
+        }
+      }
       const w = this.players[winnerIdx];
+      const teamNames = ["Blue & Green", "Orange & Pink"];
       this.result = {
+        mode: this.mode,
+        winnerTeam: this.mode === "teams" && w ? w.team : null,
+        winnerTeamName: this.mode === "teams" && w ? teamNames[w.team] : "",
         winner: winnerIdx,
         winnerName: w ? w.name : "",
         winnerCss: w ? w.css : "",
         duration: +this.time.toFixed(1),
         standings: order.map((idx, k) => {
           const p = this.players[idx];
-          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, livesLeft: p.lives, kos: p.kos, hits: p.hits };
+          return { place: k + 1, index: idx, seat: p.seat, name: p.name, css: p.css, lives: p.lives, livesLeft: p.lives, kos: p.kos, hits: p.hits, team: p.team, score: p.score, knockedOut: p.knockedOut || 0 };
         }),
         koLog: this.koLog.slice(),
         stats: Object.assign({}, this.stats),
@@ -1224,13 +1391,14 @@
           return ctrl;
         }
       }
-      const mine = b.owner === i;
+      // "Mine" = harmless to me: my own ball, or (Teams) a teammate's.
+      const mine = b.owner !== null && this._friendly(i, b.owner);
       const dangerous = b.mode !== "neutral" && !mine && b.owner !== null;
       // Boldness: after each stalemate since the last KO, bots return
       // faster balls and misread fewer, so a cautious owner and a cautious
       // dodger can't stall a match forever. In a 1-v-1 endgame the owner
       // also chases its own ball (see 3 below).
-      const alive = this.players.filter((q) => !q.out).length;
+      const alive = this._aliveCount();
       const bold = this.stalemateStreak;
       const maxReturn = S.maxReturn + 6 * bold;
       const handle = !dangerous || b.speed <= maxReturn;
@@ -1349,7 +1517,7 @@
           ctrl.steer = aim.steer;
           ctrl.throttle = aim.throttle;
           // Sometimes return it as a Smash (boost held as it swipes).
-          ctrl.boost = car.boost > C.smashBoostCost + 5 && Math.random() < 0.25;
+          ctrl.boost = car.boost > C.smashBoostCost + 5 && Math.random() < S.smash;
         }
         return ctrl;
       }
@@ -1469,7 +1637,7 @@
       const car = this.cars[i];
       let target = null, best = Infinity;
       this.players.forEach((q, j) => {
-        if (j === i || q.out || q.dead > 0) return;
+        if (this._friendly(i, j) || q.out || q.dead > 0 || q.launcher) return;
         const d = dist2D(car.pos.x, car.pos.z, this.cars[j].pos.x, this.cars[j].pos.z);
         if (d < best) { best = d; target = this.cars[j]; }
       });
@@ -1482,14 +1650,14 @@
       const C = this.cfg, car = this.cars[i], S = this.bots[i], b = this.ball;
       let target = null, best = Infinity;
       this.players.forEach((q, j) => {
-        if (j === i || q.out || q.dead > 0) return;
+        if (this._friendly(i, j) || q.out || q.dead > 0 || q.launcher) return;
         const d = dist2D(car.pos.x, car.pos.z, this.cars[j].pos.x, this.cars[j].pos.z);
         if (d < best) { best = d; target = this.cars[j]; }
       });
       // A long KO drought (sooner in a 1-v-1): bots get sharp, aiming
       // straight at the other car with no sloppiness, so somebody gets
       // hit and the match ends.
-      const alive = this.players.filter((q) => !q.out).length;
+      const alive = this._aliveCount();
       const sharp = this.time - this.lastKOt > (alive === 2 ? 15 : 30);
       let steer = 0;
       if (target) steer = -TP.ai.angleTo(car, target.pos.x, target.pos.z) / (C.aimBendDeg * DEG);
@@ -1519,7 +1687,7 @@
     // just hold their ground, so somebody gets caught.
     _botIdle(i) {
       const car = this.cars[i], b = this.ball;
-      const alive = this.players.filter((q) => !q.out).length;
+      const alive = this._aliveCount();
       if (this.time - this.lastKOt > (alive === 2 ? 20 : 40)) return { throttle: 0, steer: 0, boost: false, jump: false, hit: false };
       let dx = car.pos.x - b.pos.x, dz = car.pos.z - b.pos.z;
       const d = Math.hypot(dx, dz) || 1;
@@ -1549,7 +1717,7 @@
     // Turn player i into a bot (true) or take the bot away (false: the
     // player then reads its controller, or setInput).
     setBot(i, on) {
-      this.bots[i] = on ? makeBotSkill() : null;
+      this.bots[i] = on ? makeBotSkill(this.difficulty) : null;
       if (on) this.players[i].controller = "bot";
     }
 
@@ -1678,6 +1846,10 @@
       const b = this.ball;
       return {
         state: this.state,
+        mode: this.mode,
+        difficulty: this.difficulty,
+        clockLeft: +this.clockLeft.toFixed(2),
+        overtime: this.overtime,
         countdown: +this.countdown.toFixed(2),
         time: +this.time.toFixed(2),
         freezeLeft: +this.freezeLeft.toFixed(3),
@@ -1693,6 +1865,7 @@
           lives: p.lives, out: p.out, invuln: +p.invuln.toFixed(2), dead: +p.dead.toFixed(2),
           swingT: +p.swingT.toFixed(3), cooldown: +p.cooldown.toFixed(2),
           pos: v(p.pos), airborne: p.airborne, kos: p.kos, hits: p.hits, bunts: p.bunts, clashes: p.clashes,
+          team: p.team, score: p.score, launcher: !!p.launcher,
         })),
       };
     }

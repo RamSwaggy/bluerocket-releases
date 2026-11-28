@@ -105,6 +105,27 @@ on the base branch until the Director verifies v2 and swaps it in.
   - per match: about 3 flip strikes, 1.6 clashes and 1 flip reset
   - no stalemates, seats fair, nothing stuck
 
+**Round 3, phase 1 (learn and choose): built.**
+- **Modes** (menu *Mode*):
+  - Free-for-all: lives, last car standing.
+  - **Teams 2v2:** seats 1 & 3 against 2 & 4. A teammate's ball is harmless; last team standing wins.
+  - **Time:** 2:30 with endless respawns; most KOs wins, and a tie goes to overtime where the
+    next KO wins.
+  - **Sudden Death:** one life each.
+- **Bot levels** (menu *Bots*): Easy, Normal and Hard. The fun table, 40 matches each:
+  - Easy: median rally 4, 1% of rallies reach the top tier.
+  - Normal: median rally 6, 9% reach the top tier.
+  - Hard: median rally 8.5, 19% reach the top tier.
+- **Practice room** (menu *Practice*): you against a ball launcher, with endless lives.
+  - Keys 0–5, or Heavy, set the launcher speed (off, 16, 40, 80, 140, 210).
+  - Esc goes back to the menu.
+- **Tutorial** (menu *Tutorial*, `js/tutorial.js`): 8 steps, each waiting for the real move:
+  strike, aim up, aim down, return, double jump, flip strike, bunt (flip reset), and clash
+  (read only). Heavy skips a step.
+- **Phase 0:** the optional keyboard Aim up/down keys (shared Controls screen) already work,
+  because aim reads the pitch axis. The menu mentions them.
+- **New rule test** `modes` checks teams, time, overtime, sudden death, practice and bot levels.
+
 **Still open:**
 - Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
 - The tunables in `TP.DUEL_CFG`.
