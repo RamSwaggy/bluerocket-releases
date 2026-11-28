@@ -2,7 +2,7 @@
    Sumo Ring — last car standing.
    Everyone starts on a round platform floating in space. Bump rivals off
    the edge. After 12 seconds the platform starts shrinking, down to a
-   tiny disc by 38 seconds, so rounds rarely go the distance. Fall off
+   tiny disc by 31 seconds, so rounds rarely go the distance. Fall off
    and you're out. Survivors at the 45-second mark share first place — but
    a car that's already gone over the edge when the time runs out counts
    as having fallen, not as a survivor.
@@ -23,25 +23,29 @@
        tuning       — car settings for this mode, via TP.modeTuning
        minR         — the smallest radius the platform shrinks to
        shrinkFrom / shrinkTo — seconds when shrinking starts / reaches minR */
-  /* Tuned for the shared car change that lets head-on knockback carry
-     past reverse top speed (rams hit much harder). Measured over 60 bot
-     rounds: average ~30 s, about 1 round in 30 under 12 s, none reaching
-     45 s. Why each value:
+  /* Tuned for the shared car feel as of the Director's speed-cap fix
+     (held gas caps at 17, boost 27, head-on knockback carries past
+     reverse top speed). Measured over 40 bot rounds: average 28.3 s, none
+     under 12 s, none reaching 45 s. Why each value:
        • bumpScale 0.8 (was 1.15) and grip 10 (was 8): with the harder
          head-on hits, the old values turned the opening seconds into a
          pile-up that knocked out 2–3 cars before the ring even shrank.
        • maxSpeed 14 / boostMax 20 unchanged: lower top speeds than other
          modes so one ram doesn't launch both cars off.
-       • minR 5 (was 8), shrinking 12 s → 38 s (was 15 → 35): the old
+       • minR 5 (was 8), shrinking 12 s → 31 s (was 15 → 35): the old
          16-unit disc left room for the last two cars to circle each
          other until time ran out (about half of all rounds).
+       • shrinkTo is effectively the round-length dial: almost every
+         round ends 2–3 s before the shrink finishes, as the last cars
+         are squeezed off the small disc (measured: 38 → ~34 s average,
+         34 → ~30.5 s, 32 → ~29.5 s, 31 → ~28.3 s).
        (A "calm start" — no boost and capped gas for the first 2–3 s —
        was also tried; it didn't help once bumps were softer, so it's out.) */
   const CONFIG = {
     tuning: { bumpScale: 0.8, grip: 10, maxSpeed: 14, boostMax: 20 },
     minR: 5,
     shrinkFrom: 12,
-    shrinkTo: 38,
+    shrinkTo: 31,
   };
 
   class SumoRing extends TP.Arena {
