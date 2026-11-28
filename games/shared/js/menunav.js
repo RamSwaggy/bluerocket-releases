@@ -12,7 +12,7 @@
    Controls (any connected gamepad; keyboard arrows when not typing):
      D-pad / left stick ... move between buttons, dropdowns and links
                             (picks the nearest one in that direction)
-     ← → on a dropdown .... change its value
+     ← → on a dropdown .... change its value (↑ ↓ still move away from it)
      A (or Enter) ......... press the highlighted button
      B (or Escape) ........ back (opts.onBack, or a [data-nav-back] element)
      Start ................ press the [data-nav-primary] element (e.g. "Play")
@@ -190,10 +190,15 @@ window.TP = window.TP || {};
       const typing = isText(document.activeElement);
       const map = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (map[e.key] && !typing && !e.altKey) {
-        // Let a focused dropdown use ↑↓ natively; ←→ nudge it via direction().
-        if (document.activeElement && document.activeElement.tagName === "SELECT" && map[e.key][1] !== 0) return;
+        // Same as a gamepad: ↑↓ move between controls (even from a
+        // dropdown, so it can't trap you), ←→ change a dropdown's value.
         e.preventDefault();
         direction(...map[e.key]);
+      } else if ((e.key === "Enter" || e.code === "NumpadEnter") && !typing) {
+        // Press it ourselves rather than relying on the browser: shared
+        // input.js cancels Enter's default action in every game page.
+        e.preventDefault();
+        if (!e.repeat) press();
       } else if (e.key === "Escape") {
         back();
       }
