@@ -38,6 +38,10 @@
                                   bit-identical results to the car.js before
                                   the moveset existed (commit be9570b, read
                                   with git), and to a stored fingerprint
+    14. Flip reset                wheels-first onto a ball restores the air
+                                  move (TP.Car.sphereContact + resetAirMoves);
+                                  nose-first, side-first, nose-tip and
+                                  bumper touches don't
 
    Exit code 0 = every check passed, 1 = something failed.
    ===================================================================== */
@@ -102,6 +106,8 @@ function run(car, frames, ctrlAt, world = FLAT, tuning = RT, dt = DT, each) {
     if (each) each(i, car);
   }
 }
+
+const AXIS = (x, y, z) => new THREE.Vector3(x, y, z);
 
 // Angle (radians) between two quaternions.
 function quatAngle(a, b) {
@@ -517,6 +523,58 @@ function classicRun(env) {
   const probe = newCar(E, { rocket: false });
   check("13c. classic car never runs the rocket step", !probe.usesRocket(T) && !probe.usesRocket(TP.modeTuning({ pivot: 0.8 })) &&
     probe.usesRocket(RT));
+}
+
+
+/* =====================================================================
+   14. Flip reset: wheels on the ball give the air move back
+   ===================================================================== */
+// Drop a car onto a still ball (centre (0, 5, 0), radius 1.2) with its air
+// move already spent. Stop at the first touch and report what it was.
+function dropOnBall(setup) {
+  const ball = { x: 0, y: 5, z: 0 }, radius = 1.2;
+  const car = newCar();
+  car.placeAt(0, 0, 0, 9);
+  car.onGround = false;
+  setup(car);
+  car.update(DT, C(), FLAT, RT);    // first airborne step starts the airtime...
+  car.airJumpUsed = true;          // ...then mark the second jump as spent
+  for (let i = 0; i < 120; i++) {
+    car.update(DT, C(), FLAT, RT);
+    const hit = TP.Car.sphereContact(car, ball, radius);
+    if (hit) {
+      const reset = hit.wheels ? car.resetAirMoves() : false;
+      return { car, hit, reset };
+    }
+  }
+  return { car, hit: null, reset: false };
+}
+{
+  const flat = dropOnBall(() => {});
+  check("14. flip reset: wheels-first onto the ball restores the air move",
+    flat.hit && flat.hit.wheels && flat.reset && flat.car.canAirJump && flat.car.airTime === 0,
+    flat.hit ? `down·normal ok, canAirJump ${flat.car.canAirJump}` : "never touched");
+  // ...and the restored move really works: press jump with a direction = flip.
+  let flipped = false;
+  flat.car.update(DT, C(), FLAT, RT);
+  flat.car.update(DT, C({ jump: true, pitch: 1 }), FLAT, RT);
+  flipped = flat.car.flipping && flat.car.flipStarted;
+  check("14b. flip reset: a flip works after the reset (flipStarted fires)", flipped);
+
+  const nose = dropOnBall((c) => c.quat.setFromAxisAngle(AXIS(1, 0, 0), Math.PI / 2)); // nose straight down
+  check("14c. nose-first onto the ball: no reset", nose.hit && !nose.hit.wheels && !nose.car.canAirJump,
+    nose.hit ? "touched, wheels: false" : "never touched");
+  const side = dropOnBall((c) => c.quat.setFromAxisAngle(AXIS(0, 0, 1), Math.PI / 2)); // on its side
+  check("14d. side-first onto the ball: no reset", side.hit && !side.hit.wheels && !side.car.canAirJump);
+  const tip = dropOnBall((c) => { c.pos.z = -1.45; });  // flat, but the ball is under the very nose
+  check("14e. wheels-down but ball under the nose tip (outside the wheelbase): no reset",
+    tip.hit && !tip.hit.wheels, tip.hit ? `contact z ${f2(tip.hit.point.z - tip.car.pos.z)} from centre` : "never touched");
+  // Driving into the ball side-on, upright: a bumper hit, not a wheels hit.
+  const bump = TP.Car.sphereContact(Object.assign(newCar(), {}), { x: 0, y: 1, z: 2.3 }, 1.2);
+  check("14f. bumper touch on the ground is not a wheels contact", bump && !bump.wheels);
+  const g = newCar();
+  check("14g. resetAirMoves does nothing on the ground", g.resetAirMoves() === false && g.onGround);
+  check("14h. car.airborne mirrors onGround", g.airborne === false && flat.car.airborne === true);
 }
 
 console.log(failures ? `\nRESULT: FAIL (${failures} check${failures > 1 ? "s" : ""} failed)` : "\nRESULT: PASS (all moveset checks)");

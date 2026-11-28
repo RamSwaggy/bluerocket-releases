@@ -111,6 +111,14 @@
     ceilingBounce: 0.3,   // fraction of upward speed returned (downwards) when the roof hits the ceiling
     wallBounce: 0.5,      // fraction of into-the-wall speed returned when hitting a wall plane
 
+    // --- Flip reset (wheels touching something that isn't the ground) ---
+    wheelContactDeg: 30,  // the car's underside must face the object within this angle
+    halfWidth: 0.9,       // car body box, for contact tests: half width (x)...
+    halfLength: 1.5,      // ...half length (z)...
+                          // ...and it spans from car.pos.y (wheels) up to carHeight (roof)
+    footprintHalfWidth: 1.0,  // contact point must lie inside the wheels' footprint:
+    footprintHalfLength: 1.1, // wheel centres are at x ±0.95, z +1.0 / -1.05
+
     // --- Bots ---
     aiSecondJumpDelay: 0.12, // bots press the second jump this long after leaving the ground
   };
@@ -283,10 +291,13 @@
       this.flipping = false;   // true for the whole 0.6 s of a dodge flip: modes may treat contact as a hard hit
       this.flipDir = new THREE.Vector3(); // world-space horizontal unit vector the flip is throwing the car along
       this.flipProgress = 0;   // 0..1 through the current flip
+      this.flipT = 0;          // seconds into the current flip
+      this.flipStarted = false;// true only on the step a flip began (a one-step "event")
+      this.onFlip = null;      // optional callback(car) called the moment a flip starts
+      this.airResets = 0;      // how many flip resets this airtime (resetAirMoves calls)
       this.tumbling = false;   // recovering from a bad landing (no control until upright)
       this.lastLanding = null; // { clean: bool, speed } for the most recent touchdown (handy for sounds/fx)
       this.hitCeiling = false; // true on a step where the roof touched world.ceilingHeight
-      this._flipT = 0;
       this._flipQ0 = new THREE.Quaternion();
       this._flipAxis = new THREE.Vector3();
       this._tumbleT = 0;
@@ -310,6 +321,33 @@
     // Unit vector out of the roof in 3D (rocket moveset).
     roof() {
       return new THREE.Vector3(0, 1, 0).applyQuaternion(this.quat);
+    }
+
+    // Convenience: in the air (the opposite of onGround).
+    get airborne() { return !this.onGround; }
+    set airborne(v) { this.onGround = !v; }
+
+    /* Rocket moveset: is the second jump / flip available right now?
+       (In the air, not spent yet, inside the window, not tumbling.) */
+    get canAirJump() {
+      return !this.onGround && !this.tumbling && !this.airJumpUsed && this.airTime <= ROCKET_MOVES.airJumpWindow;
+    }
+
+    /* Flip reset. Call this when the car's wheels touch something that
+       isn't the ground (for example the ball; see TP.Car.sphereContact,
+       which tells you whether a touch was "all four wheels"). The car gets
+       its air move back with a fresh window, exactly as if it had just
+       driven off a ledge: one second jump, used as a double jump or a
+       flip. Does nothing on the ground or while tumbling. A flip already
+       in progress carries on. */
+    resetAirMoves() {
+      if (this.onGround || this.tumbling) return false;
+      this.airTime = 0;
+      this.airJumpUsed = false;
+      this.doubleJumped = false;
+      this.jumped = false;
+      this.airResets++;
+      return true;
     }
 
     placeAt(x, z, heading, y = 0) {
@@ -477,6 +515,7 @@
       const R = ROCKET_MOVES;
       this._rocket = true;
       this.hitCeiling = false;
+      this.flipStarted = false;
       // "Jump went down this step". The classic step uses the same rule
       // (_jumpHeld), so a held button never triggers two jumps.
       const jumpEdge = !!ctrl.jump && !this._jumpHeld;
@@ -515,6 +554,7 @@
       this.jumped = byJump;
       this.airJumpUsed = false;
       this.doubleJumped = false;
+      this.airResets = 0;
     }
 
     /* ---------- AIRBORNE step ---------- */
@@ -558,8 +598,8 @@
         // and a flip done straight off the ground (second press ~0.2 s
         // after take-off) is all but finished when the wheels come back
         // down, so it lands clean instead of tumbling.
-        this._flipT += dt;
-        const k = Math.min(1, this._flipT / R.flipDuration);
+        this.flipT += dt;
+        const k = Math.min(1, this.flipT / R.flipDuration);
         this.flipProgress = k;
         const spin = 1 - (1 - k) * (1 - k); // ease-out
         _q1.setFromAxisAngle(this._flipAxis, spin * Math.PI * 2);
@@ -630,7 +670,7 @@
       const R = ROCKET_MOVES;
       this.flipping = true;
       this.flipProgress = 0;
-      this._flipT = 0;
+      this.flipT = 0;
       this._flipQ0.copy(this.quat);
       // Spin axis in the car's own frame. A front flip tips the nose down,
       // which is a rotation about +X (the car's left); a right side flip
@@ -649,6 +689,9 @@
       this.vel.z += dz;
       const len = Math.hypot(dx, dz) || 1;
       this.flipDir.set(dx / len, 0, dz / len);
+      // Let the mode know right away (a flip into the ball can count as a strike).
+      this.flipStarted = true;
+      if (typeof this.onFlip === "function") this.onFlip(this);
     }
 
     /* Ground contact, shared by the air and tumble steps. Same landing
@@ -834,6 +877,70 @@
        Returns a list of hits so minigames can react (e.g. Coin Rush
        knocks coins loose on big hits).
        ===================================================================== */
+    /* =====================================================================
+       Flip-reset helpers (rocket moveset).
+
+       isWheelContact(car, normal, point?)
+         normal  world-space unit vector pointing FROM the car TO the thing
+                 it touched (e.g. toward the ball's centre).
+         point   optional world-space contact point.
+         True when the touch is "all four wheels": the car's underside
+         faces the object (its down vector within wheelContactDeg of the
+         normal) AND, if a point is given, the point lies inside the
+         wheelbase footprint (not on the nose, tail or a corner).
+
+       sphereContact(car, center, radius)
+         Treats the car as a box (halfWidth × carHeight × halfLength, turning
+         with the body) and the object as a sphere. Returns null when they
+         don't touch, else { point, normal, depth, wheels }:
+           point   the closest point of the car's box to the sphere (world)
+           normal  unit vector from the car toward the sphere (world)
+           depth   how far they overlap
+           wheels  isWheelContact() for this touch
+         It doesn't push anything apart: the mode owns ball physics. Typical
+         use in a mode's ball code:
+           const hit = TP.Car.sphereContact(car, ball.pos, ball.radius);
+           if (hit && hit.wheels) car.resetAirMoves();
+       ===================================================================== */
+    static isWheelContact(car, normal, point) {
+      const R = ROCKET_MOVES;
+      const down = _v1.copy(AXIS_Y).applyQuaternion(car.quat).negate();
+      const len = Math.hypot(normal.x, normal.y, normal.z) || 1;
+      const cos = (down.x * normal.x + down.y * normal.y + down.z * normal.z) / len;
+      if (cos < Math.cos(R.wheelContactDeg * Math.PI / 180)) return false;
+      if (!point) return true;
+      // Contact point in the car's own frame (relative to the body pivot).
+      _v2.set(point.x - car.pos.x, point.y - car.pos.y - BODY_PIVOT.y, point.z - car.pos.z);
+      _v2.applyQuaternion(_q1.copy(car.quat).invert());
+      return Math.abs(_v2.x) <= R.footprintHalfWidth && Math.abs(_v2.z) <= R.footprintHalfLength;
+    }
+
+    static sphereContact(car, center, radius) {
+      const R = ROCKET_MOVES;
+      // Sphere centre in the car's own frame, measured from the body pivot
+      // (the body turns around the pivot, so the box does too).
+      const inv = _q1.copy(car.quat).invert();
+      const local = new THREE.Vector3(center.x - car.pos.x, center.y - car.pos.y - BODY_PIVOT.y, center.z - car.pos.z)
+        .applyQuaternion(inv);
+      const yLo = -BODY_PIVOT.y, yHi = R.carHeight - BODY_PIVOT.y;
+      const closest = new THREE.Vector3(
+        clamp(local.x, -R.halfWidth, R.halfWidth),
+        clamp(local.y, yLo, yHi),
+        clamp(local.z, -R.halfLength, R.halfLength)
+      );
+      const d = local.clone().sub(closest);
+      let dist = d.length();
+      if (dist >= radius) return null;
+      if (dist < 1e-6) {
+        // Centre inside the box (deep overlap): push out along local "toward the centre".
+        d.copy(local.lengthSq() > 1e-12 ? local : new THREE.Vector3(0, -1, 0));
+        dist = 0;
+      }
+      const normal = d.normalize().applyQuaternion(car.quat);
+      const point = closest.applyQuaternion(car.quat).add(new THREE.Vector3(car.pos.x, car.pos.y + BODY_PIVOT.y, car.pos.z));
+      return { point, normal, depth: radius - dist, wheels: Car.isWheelContact(car, normal, point) };
+    }
+
     static collideAll(cars, tuning) {
       const T = tuning || DEFAULT_TUNING;
       const events = [];

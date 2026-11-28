@@ -131,11 +131,21 @@ turns it on**. With it off, the car is bit-for-bit the classic car (checked by
     worse is a 0.8 s **tumble** that costs speed and gives no control.
 - **State modes can read:**
   - `car.flipping`: true during a flip. Treat a flip contact as a hard hit.
+  - `car.flipStarted`: true only on the step a flip begins. You can also set a `car.onFlip = (car) => ...` callback.
+  - `car.flipT`: seconds into the flip.
+  - `car.airborne`, and `car.canAirJump` (the second jump or flip is available right now).
   - `car.flipDir`: world-space unit push direction.
   - `car.flipProgress`.
   - `car.quat`, `car.nose()`, `car.roof()`, `car.angVel`.
   - `car.airTime`, `car.airJumpUsed`, `car.doubleJumped`.
   - `car.tumbling`, `car.lastLanding` `{clean, speed}`, `car.hitCeiling`.
+- **Flip reset (Reece's decision):** when a car's wheels touch something that isn't the ground,
+  such as the ball, it gets its air move back with a fresh 1.25 s window. That's one second jump,
+  used as a double jump or a flip. In the mode's ball code:
+  `const hit = TP.Car.sphereContact(car, ball.pos, ball.radius); if (hit && hit.wheels) car.resetAirMoves();`
+  - "Wheels" means the underside faces the ball within 30° and the touch is inside the wheelbase,
+    not the nose, tail or a corner.
+  - `TP.Car.isWheelContact(car, normal, point)` does the same test for any other contact.
 - **World extras (optional):**
   - `world.ceilingHeight`.
   - `world.wallPlanes: [{nx, nz, d}]`. The normal points into the arena, and inside is
