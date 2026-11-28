@@ -182,11 +182,12 @@ window.TP = window.TP || {};
         thrown: null,
         wantJump: false,
         prev: { hit: false, heavy: false, boost: false, jump: false, up: false, down: false },
-        buf: {},
+        buf: {},                // buffered presses (used up when a move takes them)
+        pressAt: {},            // when each button was last pressed (never used up)
         inp: { held: {}, sx: 0, toward: false, away: false },
         ctrl: NEUTRAL,
       };
-      for (const b of BUTTONS) f.buf[b] = -9999;
+      for (const b of BUTTONS) { f.buf[b] = -9999; f.pressAt[b] = -9999; }
       if (controller === "bot") {
         f.bot = TP.FightBot.create({
           level: p.bot || "normal",
@@ -230,7 +231,7 @@ window.TP = window.TP || {};
         f.throwImmune = 0;
         f.thrown = null;
         f.wantJump = false;
-        for (const b of BUTTONS) f.buf[b] = -9999;
+        for (const b of BUTTONS) { f.buf[b] = -9999; f.pressAt[b] = -9999; }
         // super meter carries over between rounds (DESIGN §7)
       }
       state.timer = roundTime;
@@ -262,7 +263,7 @@ window.TP = window.TP || {};
         up: held.up && !f.prev.up,
         down: held.down && !f.prev.down,
       };
-      if (buffer) for (const b of BUTTONS) if (pressed[b]) f.buf[b] = activeFrame;
+      if (buffer) for (const b of BUTTONS) if (pressed[b]) { f.buf[b] = activeFrame; f.pressAt[b] = activeFrame; }
       f.prev = held;
 
       const sx = (c.steer || 0) > 0.3 ? 1 : (c.steer || 0) < -0.3 ? -1 : 0;
@@ -285,8 +286,16 @@ window.TP = window.TP || {};
 
       if (inAir) return heavyB ? "drop_slam" : "flip_kick";
 
-      // Hit + Heavy pressed together = Tow Hook (throw).
-      if (hitB && heavyB && Math.abs(f.buf.hit - f.buf.heavy) <= RULES.throwPairFrames) return "tow_hook";
+      // Hit + Heavy pressed together = Tow Hook (throw), but only when the
+      // other car is close enough to grab. Out of range, the pair just does
+      // whichever attack was pressed first (Jab on a tie).
+      if (hitB && heavyB && Math.abs(f.buf.hit - f.buf.heavy) <= RULES.throwPairFrames && inThrowRange(f)) return "tow_hook";
+      if (hitB && heavyB && from === null && f.buf.heavy < f.buf.hit) {
+        consume(f, "hit");             // the later Hit is part of the failed pair, not a new Jab
+      } else if (hitB && heavyB && from === null) {
+        consume(f, "heavy");
+        return chooseLight(from);
+      }
 
       const boostOn = f.inp.held.boost || buffered(f, "boost");
       const sig = f.moves.signature;
@@ -294,10 +303,22 @@ window.TP = window.TP || {};
       if (hitB && boostOn && f.car.boost >= f.moves.dash_strike.cost.boost) return "dash_strike";
 
       if (heavyB) return f.inp.toward ? "corkscrew" : f.inp.away ? "tailwhip" : "ram";
-      // Light chain: Jab → Swipe → Spinout.
+      return chooseLight(from);
+    }
+
+    // Light chain: Jab → Swipe → Spinout.
+    function chooseLight(from) {
       if (from === "jab") return "swipe";
       if (from === "swipe") return "spinout";
       return "jab";
+    }
+
+    // Is the other car close enough for Tow Hook to grab it?
+    function inThrowRange(f) {
+      const o = fighters[1 - f.index];
+      const m = f.moves.tow_hook;
+      const pa = f.car.pos, pv = o.car.pos;
+      return Math.abs(pv.x - pa.x) <= m.range && Math.abs(pv.y - pa.y) <= 0.8 && Math.abs(pv.z - pa.z) <= 1.6;
     }
 
     function startMove(f, id) {
@@ -357,8 +378,12 @@ window.TP = window.TP || {};
         const m = f.moves[f.move];
         // Kara-throw: a throw pressed a frame or two late still comes out,
         // turning the Jab/Ram that started on the first button into Tow Hook.
-        if ((f.move === "jab" || f.move === "ram") && f.moveFrame <= 2 && buffered(f, "hit") && buffered(f, "heavy") &&
-            Math.abs(f.buf.hit - f.buf.heavy) <= RULES.throwPairFrames) {
+        // The first button was already used up starting the Jab/Ram, so this
+        // looks at when each button was PRESSED (f.pressAt), not the buffer.
+        // Out of throw range it stays a Jab/Ram.
+        if ((f.move === "jab" || f.move === "ram") && f.moveFrame <= RULES.throwPairFrames &&
+            activeFrame - f.pressAt.hit <= RULES.throwPairFrames && activeFrame - f.pressAt.heavy <= RULES.throwPairFrames &&
+            Math.abs(f.pressAt.hit - f.pressAt.heavy) <= RULES.throwPairFrames && inThrowRange(f)) {
           startMove(f, "tow_hook");
           return;
         }
