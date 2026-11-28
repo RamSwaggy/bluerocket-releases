@@ -19,21 +19,24 @@
      - a "[Rocket Rumble] ... Ignored" warning (a mode tried to change
        part of the shared car feel)
      - car tuning that differs from TP.CAR_TUNING outside TP.MODE_TUNABLE
-     - a round longer than 120 s of game time
-     - a stuck car: alive, round in play, and no forward progress for
-       more than 3 s of game time
-     - a soft-lock: game time stops moving, or 0-1 cars left and no
-       round end within 2 s of game time
+     - a round whose race time goes past 120 s
+     - a stuck car: alive, racing, and no forward progress for more than
+       3 s of race time
+     - a soft-lock: the game clock stops moving, or 0-1 cars left and no
+       round end within 2 s of race time
      - a NaN or infinite car position or velocity
      - no match end within the time limit
 
-   PRINTS the KO order of every round (time, car, cause, chunk), the
-   final wins, and PASS/FAIL. Exit code 0 = PASS, 1 = FAIL.
+   PRINTS the KO order of every round (race time, car, cause, chunk), the
+   winner, the final wins, a repro command, then PASS/FAIL.
+   Exit code 0 = PASS, 1 = FAIL.
 
-   STATUS: written against the DESIGN.md section 8 hook shapes and
-   tested only against a throwaway mock page. The field names it reads
-   live in the READ helpers inside installWatcher(); they get updated
-   to match js/README.md once Gameplay ships js/br.js and sim.html.
+   Field names come from Gameplay's games/boost-runner/js/README.md
+   (game.state "countdown" / "race" / "round_end" / "match_end",
+   game.roundNumber, game.raceTime, game.cars, game.wins, game.course,
+   BR.events with ko {seat, cause, x, y}, round_end, match_end ...).
+   They are all read in the READ helpers inside installWatcher(), so a
+   change to that contract only needs editing there.
 
    Needs Playwright (pre-installed in cloud sessions).
    ===================================================================== */
@@ -47,10 +50,10 @@ const seed = process.argv[5] || "1";
 const pageName = process.argv[6] || "sim.html";
 
 // Limits from DESIGN.md section 5 and the boss's job description.
-const MAX_ROUND_SECONDS = 120; // the hard backstop; a round past this is a bug
+const MAX_ROUND_SECONDS = 120; // race time; sudden death starts here, so a round past this is a bug
 const STUCK_SECONDS = 3; // alive with no forward progress for this long = stuck
 const PROGRESS_UNITS = 0.5; // how far forward (world units) counts as progress
-const NO_END_SECONDS = 2; // 0-1 cars left but no round end for this long = soft-lock
+const NO_END_SECONDS = 2; // 0-1 cars left but still racing for this long = soft-lock
 const FROZEN_REAL_SECONDS = 10; // game clock not moving for this long (real time) = soft-lock
 
 /* ---------------------------------------------------------------------
@@ -58,127 +61,155 @@ const FROZEN_REAL_SECONDS = 10; // game clock not moving for this long (real tim
    about 60 times a second (real time), keeps its own records in
    window.__qc, and never changes the game's state.
 
-   All the field names it reads from window.BR sit in the READ helpers
-   at the top, so when Gameplay publishes js/README.md only that part
-   needs adjusting.
+   It also reads BR.events as they arrive and builds the per-round KO
+   list itself: the README's ko event carries seat, cause, x and y, so
+   the watcher adds the round number (from the latest round_start) and
+   the chunk (course.chunkAt(x), looked up while that round's course is
+   still live).
    --------------------------------------------------------------------- */
 function installWatcher(limits) {
   // ----- READ helpers: the only place that knows BR's field names -----
   const R = {
     ready: () => !!(window.BR && window.BR.game),
     game: () => window.BR.game,
-    roundNo: (g) => g.round,
-    roundState: (g) => g.state, // "countdown" | "play" | "over" | "match_over"
-    time: (g) => g.time, // seconds of game time in this round
+    roundNo: (g) => g.roundNumber,
+    state: (g) => g.state, // "countdown" | "race" | "round_end" | "match_end"
+    racing: (g) => g.state === "race",
+    matchOver: (g) => g.state === "match_end",
+    clock: (g) => g.time, // seconds since this round's countdown began (always moves)
+    raceTime: (g) => g.raceTime, // seconds since GO; KO and event times use this
     cars: (g) => g.cars || [],
-    carId: (c) => (c.name || c.id),
+    carName: (c) => c.name || `seat ${c.seat}`,
     carAlive: (c) => c.alive,
     carX: (c) => c.x,
     carY: (c) => c.y,
-    carVX: (c) => (c.vx !== undefined ? c.vx : c.vel && c.vel.x),
-    carVY: (c) => (c.vy !== undefined ? c.vy : c.vel && c.vel.y),
-    carChunk: (c) => c.chunk,
-    carWins: (c) => c.wins,
-    carTuning: (c) => c.tuning || (c.car && c.car.tuning) || (c.car && c.car.t),
-    // BR.events may be an array, or an object holding one.
-    events: () => {
-      const e = window.BR.events;
-      if (Array.isArray(e)) return e;
-      return (e && (e.log || e.list || e.all)) || [];
+    carVX: (c) => c.vx,
+    carVY: (c) => c.vy,
+    // car.chunkIndex points into course.chunks; print the chunk's id.
+    carChunk: (g, c) => {
+      const ch = g.course && g.course.chunks && g.course.chunks[c.chunkIndex];
+      return ch ? ch.id : c.chunkIndex;
     },
-    matchOver: (g) => g.state === "match_over" || g.matchOver === true || !!g.winner,
+    wins: (g) => g.wins || [],
+    // The tuning object the cars run on. Not in README.md yet (the shared
+    // car takes tuning as an update() argument), so try the likely spots.
+    tuning: (g) => g.tuning || (g.cars && g.cars[0] && g.cars[0].tuning) || null,
+    chunkAtX: (g, x) => {
+      const ch = g.course && g.course.chunkAt && g.course.chunkAt(x);
+      return ch ? ch.id : "?";
+    },
+    events: () => (Array.isArray(window.BR.events) ? window.BR.events : []),
   };
 
   const qc = (window.__qc = {
     failures: [], // strings; any entry = FAIL
-    samples: 0,
-    lastGameClock: null, // for the "frozen" soft-lock check (read from Node)
+    notes: [], // things worth printing that aren't failures
+    lastClock: null, // for the "frozen" soft-lock check (read from Node)
     matchOver: false,
     tuningChecked: false,
+    rounds: {}, // round number -> { kos: [...], end: {...} }
+    matchEnd: null,
   });
   const fail = (msg) => { if (qc.failures.length < 50) qc.failures.push(msg); };
+  const seatName = (g, s) => (s === null || s === undefined ? "draw" : R.carName(R.cars(g)[s] || { seat: s }));
 
-  // Per-round memory: best x reached by each car and when.
+  // Per-round memory, reset at each new round.
   let roundKey = null;
-  let best = {}; // carId -> { x, t }
+  let best = {}; // seat -> { x, t }: furthest x so far and when it was reached
   let stuckReported = {};
-  let nanReported = {}; // carId -> true once a bad value has been reported this round
+  let nanReported = {};
   let fewLeftSince = null;
-  let roundTooLongReported = false;
+  let tooLongReported = false;
+  let eventsSeen = 0; // how many BR.events we've already processed
+  let eventRound = 0; // round number from the latest round_start event
+
+  // Read any new events since the last sample, in order.
+  function readEvents(g) {
+    const ev = R.events();
+    for (; eventsSeen < ev.length; eventsSeen++) {
+      const e = ev[eventsSeen];
+      if (e.type === "round_start") eventRound = e.round;
+      const r = (qc.rounds[eventRound] = qc.rounds[eventRound] || { kos: [], end: null });
+      if (e.type === "ko") {
+        r.kos.push({ t: e.t, car: seatName(g, e.seat), cause: e.cause, chunk: e.chunk !== undefined ? e.chunk : R.chunkAtX(g, e.x) });
+      } else if (e.type === "round_end") {
+        r.end = { t: e.t, winner: seatName(g, e.winner), wins: e.wins };
+      } else if (e.type === "match_end") {
+        qc.matchEnd = { winner: seatName(g, e.winner), wins: e.wins };
+      }
+    }
+  }
 
   function sample() {
     if (!R.ready()) return;
     const g = R.game();
-    qc.samples++;
-    const state = R.roundState(g);
-    const t = R.time(g);
+    readEvents(g);
     const cars = R.cars(g);
-    qc.lastGameClock = `${R.roundNo(g)}:${state}:${t}`;
+    qc.lastClock = `${R.roundNo(g)}:${R.state(g)}:${R.clock(g)}`;
     if (R.matchOver(g)) { qc.matchOver = true; return; }
 
     // New round: reset the per-round memory.
-    const key = R.roundNo(g);
-    if (key !== roundKey) {
-      roundKey = key;
+    if (R.roundNo(g) !== roundKey) {
+      roundKey = R.roundNo(g);
       best = {};
       stuckReported = {};
       nanReported = {};
       fewLeftSince = null;
-      roundTooLongReported = false;
+      tooLongReported = false;
     }
+    const key = roundKey;
+    const t = R.raceTime(g);
 
-    // Shared car feel: tuning may only differ in TP.MODE_TUNABLE keys.
-    // Checked once, on the first sample that has cars.
+    // Shared car feel: tuning may only differ from TP.CAR_TUNING in
+    // TP.MODE_TUNABLE keys. Checked once, on the first sample with cars.
     if (!qc.tuningChecked && cars.length && window.TP && TP.CAR_TUNING && TP.MODE_TUNABLE) {
       qc.tuningChecked = true;
-      cars.forEach((c) => {
-        const tun = R.carTuning(c);
-        if (!tun) { fail(`can't find the tuning object on car ${R.carId(c)} (update the READ helpers)`); return; }
+      const tun = R.tuning(g);
+      if (!tun) qc.notes.push("tuning check skipped: no game.tuning (or car.tuning) to read. Ask Gameplay to expose it.");
+      else {
         for (const k of new Set([...Object.keys(TP.CAR_TUNING), ...Object.keys(tun)])) {
           if (TP.MODE_TUNABLE.includes(k)) continue;
-          if (tun[k] !== TP.CAR_TUNING[k]) {
-            fail(`car ${R.carId(c)} tuning "${k}" is ${tun[k]}, shared value is ${TP.CAR_TUNING[k]} (not in MODE_TUNABLE)`);
-          }
+          if (tun[k] !== TP.CAR_TUNING[k]) fail(`tuning "${k}" is ${tun[k]}, shared value is ${TP.CAR_TUNING[k]} (not in MODE_TUNABLE)`);
         }
-      });
-    }
-
-    // NaN / infinity in any car's position or velocity.
-    for (const c of cars) {
-      const vals = [R.carX(c), R.carY(c), R.carVX(c), R.carVY(c)];
-      // Report the first bad sample per car per round, so one bug doesn't flood the report.
-      if (vals.some((v) => typeof v !== "number" || !isFinite(v)) && !nanReported[R.carId(c)]) {
-        nanReported[R.carId(c)] = true;
-        fail(`round ${key} t=${Number(t).toFixed(2)}: car ${R.carId(c)} has a bad position/velocity [x, y, vx, vy] = [${vals.join(", ")}]`);
       }
     }
 
-    if (state !== "play") return;
+    // NaN / infinity in any car's position or velocity (once per car per round).
+    for (const c of cars) {
+      const vals = [R.carX(c), R.carY(c), R.carVX(c), R.carVY(c)];
+      if (vals.some((v) => typeof v !== "number" || !isFinite(v)) && !nanReported[c.seat]) {
+        nanReported[c.seat] = true;
+        fail(`round ${key} t=${Number(t).toFixed(2)}: ${R.carName(c)} has a bad position/velocity [x, y, vx, vy] = [${vals.join(", ")}]`);
+      }
+    }
 
-    // Round too long: the 120 s backstop should have ended it.
-    if (t > limits.MAX_ROUND_SECONDS && !roundTooLongReported) {
-      roundTooLongReported = true;
-      fail(`round ${key} is still going at ${t.toFixed(1)} s (limit ${limits.MAX_ROUND_SECONDS} s)`);
+    // The rest only makes sense while racing (cars are frozen in the countdown).
+    if (!R.racing(g)) return;
+
+    // Round too long: the 120 s backstop should already have ended it.
+    if (t > limits.MAX_ROUND_SECONDS && !tooLongReported) {
+      tooLongReported = true;
+      fail(`round ${key} is still racing at ${t.toFixed(1)} s (limit ${limits.MAX_ROUND_SECONDS} s)`);
     }
 
     // Stuck cars: alive but no forward progress for STUCK_SECONDS.
     for (const c of cars) {
-      const id = R.carId(c);
       if (!R.carAlive(c)) continue;
       const x = R.carX(c);
-      if (!best[id] || x > best[id].x + limits.PROGRESS_UNITS) best[id] = { x, t };
-      else if (t - best[id].t > limits.STUCK_SECONDS && !stuckReported[id]) {
-        stuckReported[id] = true;
-        fail(`round ${key} t=${t.toFixed(2)}: car ${id} stuck at x=${x.toFixed(1)} y=${R.carY(c).toFixed(1)} in chunk ${R.carChunk(c)} (no progress for ${limits.STUCK_SECONDS} s)`);
+      const b = best[c.seat];
+      if (!b || x > b.x + limits.PROGRESS_UNITS) best[c.seat] = { x, t };
+      else if (t - b.t > limits.STUCK_SECONDS && !stuckReported[c.seat]) {
+        stuckReported[c.seat] = true;
+        fail(`round ${key} t=${t.toFixed(2)}: ${R.carName(c)} stuck at x=${x.toFixed(1)} y=${R.carY(c).toFixed(1)} in chunk ${R.carChunk(g, c)} (no progress for ${limits.STUCK_SECONDS} s)`);
       }
     }
 
-    // Soft-lock: 0 or 1 cars left but the round doesn't end.
+    // Soft-lock: 0 or 1 cars left but the round keeps racing.
     const alive = cars.filter(R.carAlive).length;
     if (alive <= 1) {
       if (fewLeftSince === null) fewLeftSince = t;
       else if (t - fewLeftSince > limits.NO_END_SECONDS) {
-        fail(`round ${key}: ${alive} car(s) left since t=${fewLeftSince.toFixed(2)} but the round hasn't ended`);
+        fail(`round ${key}: ${alive} car(s) left since t=${fewLeftSince.toFixed(2)} but the round is still racing`);
         fewLeftSince = Infinity; // report once
       }
     } else fewLeftSince = null;
@@ -186,16 +217,15 @@ function installWatcher(limits) {
 
   // setInterval keeps running in a headless page even without rendering.
   setInterval(sample, 16);
-  // Expose the READ helpers so Node can use the same field names.
   window.__qcRead = R;
 }
 
 /* ---------------------------------------------------------------------
-   Node side: open the page, watch the console, poll a status line every
-   3 seconds, then print the KO order and the result.
+   Node side: open the page, watch the console, print a status line
+   every 3 seconds, then print the KO order and the result.
    --------------------------------------------------------------------- */
 (async () => {
-  // SwiftShader = software WebGL, so this works on machines with no GPU.
+  // SwiftShader = software WebGL, so index.html works on machines with no GPU.
   const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--mute-audio"] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
@@ -222,26 +252,28 @@ function installWatcher(limits) {
     await page.waitForTimeout(3000);
     status = await page.evaluate(() => {
       const R = window.__qcRead;
-      if (!R || !R.ready()) return { ready: false, clock: null, failures: (window.__qc || {}).failures || [] };
+      const qc = window.__qc || {};
+      if (!R || !R.ready()) return { ready: false, failures: qc.failures || [] };
       const g = R.game();
+      const w = R.wins(g);
       return {
         ready: true,
         round: R.roundNo(g),
-        state: R.roundState(g),
-        time: R.time(g),
-        cars: R.cars(g).map((c) => `${R.carId(c)} ${R.carAlive(c) ? "alive" : "KO"} w${R.carWins(c)}`).join(" | "),
-        clock: window.__qc.lastGameClock,
-        matchOver: window.__qc.matchOver,
-        failures: window.__qc.failures,
+        state: R.state(g),
+        raceTime: R.raceTime(g),
+        cars: R.cars(g).map((c) => `${R.carName(c)} ${R.carAlive(c) ? "alive" : "KO"} ${w[c.seat] || 0}w`).join(" | "),
+        clock: qc.lastClock,
+        matchOver: qc.matchOver,
+        failures: qc.failures,
       };
     });
     if (!status.ready) {
       console.log(`${String(t + 3).padStart(4)}s  waiting for window.BR.game ...`);
       continue;
     }
-    console.log(`${String(t + 3).padStart(4)}s  round ${status.round} ${String(status.state).padEnd(10)} t=${Number(status.time).toFixed(1).padStart(6)}  ${status.cars}`);
+    console.log(`${String(t + 3).padStart(4)}s  round ${status.round} ${String(status.state).padEnd(10)} race ${Number(status.raceTime).toFixed(1).padStart(6)}s  ${status.cars}`);
 
-    // Frozen game clock = soft-lock (unless the match has ended).
+    // Game clock not moving = soft-lock (unless the match has ended).
     if (status.clock === lastClock && !status.matchOver) frozenFor += 3;
     else frozenFor = 0;
     lastClock = status.clock;
@@ -252,40 +284,22 @@ function installWatcher(limits) {
     if (status.matchOver) finished = true;
   }
 
-  // KO order per round, from BR.events, plus final wins.
-  const summary = await page.evaluate(() => {
-    const R = window.__qcRead;
-    if (!R || !R.ready()) return null;
-    const ev = R.events();
-    const byRound = {};
-    for (const e of ev) {
-      if (e.type !== "ko" && e.type !== "round_end") continue;
-      const r = e.round !== undefined ? e.round : "?";
-      (byRound[r] = byRound[r] || []).push(e);
-    }
-    return {
-      rounds: byRound,
-      wins: R.cars(R.game()).map((c) => `${R.carId(c)} ${R.carWins(c)}`).join(", "),
-      eventCount: ev.length,
-    };
-  });
+  // Give the watcher one more sample so the last events are read.
+  await page.waitForTimeout(100);
+  const qc = await page.evaluate(() => window.__qc || null);
 
-  const watcherFailures = (status && status.failures) || [];
-  if (summary) {
-    for (const [r, list] of Object.entries(summary.rounds)) {
+  if (qc) {
+    for (const [r, info] of Object.entries(qc.rounds)) {
+      if (r === "0" && !info.kos.length && !info.end) continue;
       console.log(`\nRound ${r}:`);
-      for (const e of list) {
-        if (e.type === "ko") {
-          console.log(`  KO  t=${Number(e.t).toFixed(2).padStart(6)}  ${e.car ?? e.id ?? e.seat}  cause=${e.cause}  chunk=${e.chunk}`);
-        } else {
-          console.log(`  END t=${Number(e.t).toFixed(2).padStart(6)}  winner=${e.winner ?? "draw"}`);
-        }
-      }
+      for (const k of info.kos) console.log(`  KO   t=${Number(k.t).toFixed(2).padStart(6)}  ${String(k.car).padEnd(8)} cause=${String(k.cause).padEnd(7)} chunk=${k.chunk}`);
+      if (info.end) console.log(`  END  t=${Number(info.end.t).toFixed(2).padStart(6)}  winner=${info.end.winner}  wins=${JSON.stringify(info.end.wins)}`);
     }
-    console.log(`\nFinal wins: ${summary.wins}   (${summary.eventCount} events logged)`);
+    if (qc.matchEnd) console.log(`\nMatch winner: ${qc.matchEnd.winner}   final wins: ${JSON.stringify(qc.matchEnd.wins)}`);
+    qc.notes.forEach((n) => console.log("NOTE: " + n));
   }
 
-  const problems = [...errors, ...watcherFailures.map((f) => "CHECK: " + f)];
+  const problems = [...errors, ...((qc && qc.failures) || []).map((f) => "CHECK: " + f)];
   if (!finished) problems.push(`NO MATCH END within ${timeoutSec} s real time`);
   console.log(problems.length ? "\nPROBLEMS:\n" + problems.map((p) => "  - " + p).join("\n") : "\nNo problems found.");
   console.log(`Repro: node tools/boost-runner-smoke.js ${rounds} ${speed} ${timeoutSec} ${seed} ${pageName}`);
