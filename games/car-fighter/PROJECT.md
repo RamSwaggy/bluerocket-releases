@@ -84,8 +84,13 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 - Art's rebuild is merged (`fec85cf`). **The menu works:** with no query string it shows the
   menu, no fight runs until Fight!, then keyboard 1 plays the bot (holding D moves P1 right).
   Smoke test: PASS. Boss checked it with Playwright, no errors.
-- **M1 is code-complete.** Waiting on QC's full real-page run (JOB 2) before telling the
-  Director to switch the hub card to Play.
+- **M1 is code-complete.** The shared update `5f17ab7` is merged (speed-cap fix, `TP.MenuNav`,
+  `assets.js`). Boss re-ran everything on the real page on 2026-11-28, and all pass:
+  - smoke on seeds 12345 and 777
+  - sim 200 (P1 45%, average round 26 s)
+  - frames 11/11
+- Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
+  Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
 ## Decisions (from Reece)
 
