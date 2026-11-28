@@ -176,13 +176,18 @@
   .m5-stats th:first-child, .m5-stats td:first-child { text-align: left; }
   .m5-card .foot { margin-top: 14px; color: #9aa6c8; font-size: 14px; text-align: center; }
   .m5-card .foot b { white-space: nowrap; }   /* never split "Blue 0" across lines */
-  .m5-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+  /* The buttons stay pinned to the bottom of the card even when the card
+     has to scroll on a small screen, so "what next" is always reachable. */
+  .m5-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: nowrap; margin-top: 14px;
+    position: sticky; bottom: calc(-1 * clamp(14px, 2.4vw, 24px)); padding: 10px 0 clamp(14px, 2.4vw, 24px);
+    margin-bottom: calc(-1 * clamp(14px, 2.4vw, 24px)); background: linear-gradient(0deg, rgba(12,15,36,1) 70%, rgba(12,15,36,0)); }
+  .m5-actions .m5-act { white-space: nowrap; }
   .m5-act { font: inherit; font-weight: 900; font-style: italic; font-size: 16px; cursor: pointer; border-radius: 12px;
     padding: 10px 18px; min-height: 44px; border: 2px solid var(--m5-line); background: #1a2042; color: #f2f5ff;
     text-decoration: none; display: inline-flex; align-items: center; }
   .m5-act.primary { border: none; color: #1a0610; background: linear-gradient(90deg, #ffd23f, #ff3d9a); padding: 10px 26px; }
   .m5-act:focus-visible, .m5-act.rr-nav-focus { outline: 2px solid #ffd23f; outline-offset: 2px; }
-  @media (max-height: 500px) { .m5-actions { margin-top: 8px; } .m5-act { min-height: 36px; padding: 6px 14px; font-size: 14px; } }
+  @media (max-height: 500px), (max-width: 420px) { .m5-actions { margin-top: 8px; } .m5-act { min-height: 38px; padding: 6px 12px; font-size: 14px; } .m5-act.primary { padding: 6px 18px; } }
   .m5-card .why { margin: -6px 0 12px; color: #c8d0ea; font-size: 14px; }
 
   @media (prefers-reduced-motion: reduce) {
