@@ -70,7 +70,8 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
 
 ## Current state (as of 2026-11-27)
 
-- **Design signed off** (`DESIGN.md`). First build jobs sent to all three roles. No game code yet.
+- **Game logic merged** (Gameplay JOB 1): a full 4-bot match runs headless in `sim.html?demo&seed=N`,
+  deterministic, every chunk clearable, fair seats. Art and UI is wiring the look onto it; QC's smoke test is being finalised.
 
 ## Decisions (from Reece)
 
@@ -91,3 +92,8 @@ change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-sm
   bad-landing tumble and 2D bumps.
 - 2026-11-27: Reece: "Approved, and the Director speaks for me." From now on, the Director's
   sign-offs count as Reece's.
+- 2026-11-28 (Director, for Reece): the **Hit-dash costs 20 boost meter** (`CAR_RULES.dashBoostCost`), so it's a
+  tool, not free speed (dash spam measured 16.8 vs 17 on gas).
+- 2026-11-28 (Director, for Reece): **bumps keep `bumpScale` 1.3 (strong shove), but each bump is clamped so
+  the pair's combined forward speed can't increase.** The victim is shoved hard and the hitter pays for it.
+  This keeps "strong bumps" without pushing cars past the shared speed ceiling.
