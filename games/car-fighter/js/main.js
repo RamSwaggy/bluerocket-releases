@@ -52,6 +52,9 @@
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage blocked: fine */ }
   }
 
+  // "Reduce flashing" applies everywhere, demos included.
+  TP.FightView.settings.reduceFlashing = !!loadPrefs().calm;
+
   const isBot = (id) => id === "bot" || id === "off";
   const winsFor = (rounds) => Math.ceil((rounds || 3) / 2);
 
@@ -66,8 +69,10 @@
     if (nav) { nav.detach(); nav = null; }
     const card = UI.card(html);
     card.className = "card" + (cls ? " " + cls : "");
-    // The select screen keeps the middle of the stage clear for the preview.
+    // The select screen keeps the middle of the stage clear for the preview;
+    // the results card sits low so the winner is on show above it.
     document.getElementById("overlay").classList.toggle("select-mode", cls === "select");
+    document.getElementById("overlay").classList.toggle("results-mode", cls === "results");
     if (TP.MenuNav) nav = TP.MenuNav.attach(card, onBack ? { onBack } : {});
     return card;
   }
@@ -151,6 +156,7 @@
         <tr><td>Fighting</td><td>Hold <b>away</b> to guard · Hit Hit Hit combo · Toward + Heavy launches · Hit + Heavy up close throws · Boost + Heavy: signature move (1 super bar)</td></tr>
       </table>
       <div class="actions">
+        <label class="toggle"><input type="checkbox" id="calm" ${TP.FightView.settings.reduceFlashing ? "checked" : ""}> Reduce flashing</label>
         <span class="muted" id="padinfo"></span>
         <span class="muted">Press <kbd>M</kbd> to mute</span>
         <button class="btn" id="next" data-nav-primary>Choose cars →</button>
@@ -162,6 +168,13 @@
         card.querySelector("#diff" + i).hidden = !isBot(e.target.value);
       });
     }
+
+    // Reduce flashing: no floodlight blackout, no screen shake, softer
+    // hit flash. Saved straight away, so it holds for every later fight.
+    card.querySelector("#calm").addEventListener("change", (e) => {
+      TP.FightView.settings.reduceFlashing = e.target.checked;
+      savePrefs(Object.assign(loadPrefs(), { calm: e.target.checked }));
+    });
 
     // Gamepads only show up after a button press, so tell people that.
     const padInfo = card.querySelector("#padinfo");
@@ -270,7 +283,7 @@
     // Save back to the hub: only seats 1 and 2 change; 3 and 4 are kept.
     const slots = pick.setup.slots.map((s, i) => (i < 2 ? { name: seats[i].name, controller: seats[i].controller } : s));
     TP.Rumble.saveSetup(slots);
-    savePrefs({ bot: [seats[0].bot, seats[1].bot], cars: pick.cars.slice() });
+    savePrefs(Object.assign(loadPrefs(), { bot: [seats[0].bot, seats[1].bot], cars: pick.cars.slice() }));
 
     const rounds = Number(params.get("rounds")) || 3;
     const roundTime = Number(params.get("roundTime")) || 60;
@@ -326,7 +339,7 @@
         <a class="back" href="${TP.Rumble.HUB_URL}">← All modes</a>
         <button class="btn ghost" id="menu">Menu</button>
         <button class="btn" id="rematch" data-nav-primary>${demo ? "Watch again" : "Rematch"}</button>
-      </div>`);
+      </div>`, "results");
     card.querySelector("#rematch").addEventListener("click", () => {
       // A demo was started from the URL, so the simplest clean rerun is a reload.
       if (demo || !lastConfig) { location.reload(); return; }

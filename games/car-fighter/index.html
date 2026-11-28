@@ -251,6 +251,40 @@
     .side.p2 .combo { transform-origin: right center; }
     @keyframes pop { from { transform: scale(1.5); } to { transform: scale(1); } }
 
+    /* ---------- SUPER READY tag and the "bar just filled" pulse ---------- */
+    .ready {
+      font-size: 12px; font-weight: 900; letter-spacing: .14em; color: var(--super);
+      text-shadow: 0 0 10px var(--super); opacity: 0; height: 0; overflow: hidden;
+    }
+    .ready.show { opacity: 1; height: auto; animation: glow 1.1s ease-in-out infinite alternate; }
+    @keyframes glow { from { opacity: .65; } to { opacity: 1; } }
+    .seg.fill { animation: fill .5s ease-out; }
+    @keyframes fill { 0% { transform: scale(1.6); box-shadow: 0 0 22px var(--super); } 100% { transform: scale(1); } }
+
+    /* ---------- Round-intro name plates, low on each side ---------- */
+    #plates { left: 12px; right: 12px; bottom: 70px; display: flex; justify-content: space-between; opacity: 0; transition: opacity .3s; }
+    #plates.show { opacity: 1; }
+    .plate {
+      display: flex; flex-direction: column; padding: 6px 16px; background: rgba(5,8,20,.8);
+      border-left: 6px solid var(--seat); max-width: 46%;
+    }
+    .plate.p2 { border-left: 0; border-right: 6px solid var(--seat); text-align: right; }
+    .plate .pn { font-size: clamp(18px, 3.6vw, 30px); font-weight: 900; font-style: italic; color: var(--seat); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .plate .pc { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    #plates.show .p1 { animation: sigL .35s cubic-bezier(.2, 1.2, .4, 1); }
+    #plates.show .p2 { animation: sigR .35s cubic-bezier(.2, 1.2, .4, 1); }
+
+    /* ---------- Results: card along the bottom, winner on show above ---------- */
+    #overlay.results-mode {
+      align-items: flex-end;
+      background: linear-gradient(180deg, transparent 35%, rgba(7,11,26,.75));
+    }
+    #overlay.results-mode .card { margin: auto auto 0; }
+
+    /* ---------- "Reduce flashing" toggle on the menu ---------- */
+    .toggle { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+    .toggle input { width: 18px; height: 18px; accent-color: var(--mode); }
+
     /* ---------- Signature move banner ----------
        A dark band across the screen with the move's name in the
        attacker's colour, sliding in from the attacker's side. */
@@ -361,6 +395,7 @@
   </div>
   <div id="call" class="layer"></div>
   <div id="sig" class="layer"></div>
+  <div id="plates" class="layer"></div>
   <div id="hint" class="layer"></div>
   <div id="overlay" class="layer"><div class="card" id="card"></div></div>
 

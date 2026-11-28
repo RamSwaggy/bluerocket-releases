@@ -42,6 +42,11 @@
   let renderer = null;
   let aspect = 1;
 
+  // Player options that change how the fight looks (main.js sets them
+  // from the menu). reduceFlashing: no floodlight blackout, no screen
+  // shake, and a much softer white hit flash.
+  const settings = { reduceFlashing: false };
+
   // Current match (null between matches).
   let M = null;
   // Menu backdrop (null once a fight starts).
@@ -198,8 +203,15 @@
     const tyreGeo = new THREE.TorusGeometry(0.75, 0.36, 10, 20);
     const tyreMat = new THREE.MeshStandardMaterial({ color: 0x17181c, roughness: 0.9 });
     const strapMat = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.6 });
+    const walls = {};     // side (-1 / 1) → { group, t } for the hit wobble
     for (const side of [-1, 1]) {
       const x = side * (halfWidth + 1.4);
+      // Each wall is its own group, pivoting at its foot, so a car slamming
+      // into it can make the whole stack rock.
+      const wall = new THREE.Group();
+      wall.position.set(x, 0, 0);
+      root.add(wall);
+      walls[side] = { group: wall, t: 9 };
       for (const z of [-3.4, -1.7, 0, 1.7, 3.4]) {
         const tall = z === 0 ? 4 : 3;
         for (let k = 0; k < tall; k++) {
@@ -207,9 +219,9 @@
           // wall reads as a wall from far away.
           const tyre = new THREE.Mesh(tyreGeo, k === 1 ? strapMat : tyreMat);
           tyre.rotation.x = Math.PI / 2;              // lie flat
-          tyre.position.set(x + (rnd() - 0.5) * 0.15, 0.36 + k * 0.72, z);
+          tyre.position.set((rnd() - 0.5) * 0.15, 0.36 + k * 0.72, z);
           tyre.castShadow = tyre.receiveShadow = true;
-          root.add(tyre);
+          wall.add(tyre);
         }
       }
     }
@@ -351,10 +363,21 @@
       update(dt) {
         t += dt;
         spin.rotation.y += dt * 0.05;      // the turntable plate turns, very slowly
+        // Tyre walls rock after a car slams into them: a quick damped wobble
+        // away from the centre, then still.
+        for (const side of [-1, 1]) {
+          const w = walls[side];
+          w.t += dt;
+          const a = w.t < 1.2 ? Math.sin(w.t * 22) * Math.exp(-w.t * 4) * 0.09 : 0;
+          w.group.rotation.z = -side * a;
+        }
         // Chaser bulbs: a warm light running along the top of the board.
         const head = Math.floor(t * 9) % chasers.length;
         chasers.forEach((m, i) => m.color.setHex(((i - head + chasers.length) % 7) === 0 ? 0xffe9a8 : 0x3a3020));
       },
+      // Rock the tyre wall on this side (-1 left, +1 right).
+      wobble(side) { walls[side < 0 ? -1 : 1].t = 0; },
+      halfWidth,
       /* Floodlights at fraction k of full power (1 = normal). Used to
          black the stage out around a signature move. The lamp panels and
          beams dim with them, so it reads as the floodlights cutting out. */
@@ -424,7 +447,16 @@
     marker.visible = false;
     mesh.add(B.body, marker);
     mesh.userData = { body: B.body, flame: B.flame, marker, cfPivot: true };
+    // Every lit material on the body, with its normal glow, for the hit flash.
+    const mats = [];
+    B.body.traverse((o) => {
+      if (o.isMesh && o.material && o.material.emissive && !mats.includes(o.material)) mats.push(o.material);
+    });
     return {
+      mats,
+      baseGlow: mats.map((m) => m.emissive.clone()),
+      flash: null,          // { t, dur, color, strength } while a hit/block flash is showing
+      prevVx: 0,
       car,
       build: B,
       body: B.body,
@@ -784,7 +816,12 @@
         koT: 0, koVictim: -1,   // KO camera swing
         combo: [0, 0],          // hits in each attacker's current combo (for the hit sound's pitch)
         sig: null,              // the signature flash in progress: { who, t }
+        sawWallEvents: false,   // fight.js sends wall_bounce events (else we watch state)
+        sawDownEvents: false,   // ... and knockdown events
+        intro: { round: 0, t: 0 },  // round-intro camera pan
+        victory: null,          // { t } once the match is over
       };
+      if (TP.Match && TP.Match.setTimeScale) TP.Match.setTimeScale(1);
       if (TP.FightSfx) TP.FightSfx.music(true);
 
       // Effects, sounds and camera kicks come from fight events.
@@ -793,6 +830,12 @@
           if (!M || M.fight !== fight) return;
           M.fx.onEvent(ev);
           playEventSound(ev, fight.state);
+          const victim = ev.victim != null ? ev.victim : ev.attacker === 0 ? 1 : 0;
+          if (ev.type === "hit" || ev.type === "throw") startFlash(victim, 0xffffff, 0.09, settings.reduceFlashing ? 0.3 : 1);
+          else if (ev.type === "block") startFlash(victim, 0x5ab8ff, 0.16, 0.75);
+          else if (ev.type === "wall_bounce") { M.sawWallEvents = true; impact("wall", victim, ev); }
+          else if (ev.type === "knockdown") { M.sawDownEvents = true; impact("down", victim, ev); }
+          else if (ev.type === "ko") slowMo();
           if (ev.type === "ko") { M.koT = 0; M.koVictim = ev.victim != null ? ev.victim : ev.attacker === 0 ? 1 : 0; }
         });
       }
@@ -819,8 +862,11 @@
         poseCar(P, s, dt, frozen, victimShake);
         updateDamage(P, s, dt, frozen, state.round || 1);
         watchMoves(P, s, i);
+        watchImpacts(P, s, i);
+        updateFlash(P, dt);
       });
       updateSignature(dt);
+      updateVictory(state, dt);
       updateMusic(state);
 
       M.stage.update(dt);
@@ -846,6 +892,17 @@
       M.scene.remove(M.stage.root);
       TP.disposeScene(M.stage.root);
       M = null;
+    },
+
+    settings,
+
+    /* For tests and screenshots only: hold a hit ("hit") or block ("block")
+       flash on car i for `seconds`, so a slow headless browser can catch it. */
+    flashTest(i, kind, seconds = 2) {
+      if (!M) return;
+      if (kind === "block") startFlash(i, 0x5ab8ff, seconds, 0.75);
+      else startFlash(i, 0xffffff, seconds, settings.reduceFlashing ? 0.3 : 1);
+      if (M.cars[i].flash) M.cars[i].flash.hold = true;
     },
 
     // For tests and debugging: the live camera and the current match.
@@ -883,9 +940,137 @@
     const height = dist * 0.2;
     M.camera.position.set(cx + Math.sin(ang) * dist, M.cam.lookY + height, cz + Math.cos(ang) * dist);
     M.camera.lookAt(cx, M.cam.lookY, cz);
-    // Shake is applied after aiming, as a small sideways/up jolt.
-    const sh = M.fx.shakeOffset();
-    M.camera.position.add(sh);
+
+    // Round intro: a quick low pan from P1's car across to P2's, easing
+    // into the normal fight shot by the time the 3-2-1 is under way.
+    const I = M.intro;
+    const round = state.round || 1;
+    if (state.phase === "intro" && I.round !== round) { I.round = round; I.t = 0; }
+    if (I.round === round && I.t < INTRO_PAN && (state.phase === "intro" || state.phase === "countdown")) {
+      I.t += dt;
+      const p = Math.min(1, I.t / INTRO_PAN);
+      const e = p * p * (3 - 2 * p);                          // smoothstep
+      const ax = (cs[0].x || 0) - 1.5, bx = (cs[1].x || 0) + 1.5;
+      const px = ax + (bx - ax) * e;
+      // Low and close, angled slightly along the line (further back on a
+      // tall phone screen, where the width is scarce).
+      const pan = aspect < 1 ? new THREE.Vector3(px - 2, 2.6, 18) : new THREE.Vector3(px - 2.5, 1.8, 9.5);
+      const look = new THREE.Vector3(px, 1.0, 0);
+      const blend = p < 0.65 ? 0 : (p - 0.65) / 0.35;          // hand over to the normal shot at the end
+      const b = blend * blend * (3 - 2 * blend);
+      M.camera.position.lerpVectors(pan, M.camera.position.clone(), b);
+      const normalLook = new THREE.Vector3(cx, M.cam.lookY, cz);
+      M.camera.lookAt(look.lerp(normalLook, b));
+    }
+
+    // Match over: a slow orbit round the winner, framed high so the
+    // results card along the bottom doesn't cover it.
+    if (M.victory && M.victory.who >= 0) {
+      const car = M.cars[M.victory.who].car;
+      // Swing back and forth across the front (never round the back, where
+      // the junk piles would block the view).
+      const a = Math.sin(M.victory.t * 0.4) * 0.8;
+      const vd = aspect < 1 ? 24 : 15;
+      M.camera.position.set(car.pos.x + Math.sin(a) * vd, 5.5, car.pos.z + Math.cos(a) * vd);
+      // Aim below the car so it sits in the top half, above the card.
+      M.camera.lookAt(car.pos.x, aspect < 1 ? -3.4 : -1.9, car.pos.z);
+      return; // no shake on the victory shot
+    }
+    // Shake is applied after aiming, as a small sideways/up jolt
+    // (none at all with "reduce flashing").
+    if (!settings.reduceFlashing) M.camera.position.add(M.fx.shakeOffset());
+  }
+
+  const INTRO_PAN = 1.8;   // seconds of round-intro pan
+
+  /* =====================================================================
+     HIT FLASH
+     A clean hit makes the victim's whole body flash white for a few
+     frames; a blocked hit gives a cooler blue pulse. So you can tell a hit
+     from a block at a glance, even mid-combo.
+     ===================================================================== */
+  function startFlash(i, color, dur, strength) {
+    const P = M.cars[i];
+    if (P) P.flash = { t: 0, dur, color: new THREE.Color(color), strength };
+  }
+  const _c = new THREE.Color();
+  function updateFlash(P, dt) {
+    if (!P.flash) return;
+    const F = P.flash;
+    F.t += dt;
+    const k = (F.hold ? 1 : Math.max(0, 1 - F.t / F.dur)) * F.strength;
+    P.mats.forEach((m, j) => m.emissive.copy(P.baseGlow[j]).lerp(_c.copy(F.color), k));
+    if (F.t >= F.dur) {
+      P.mats.forEach((m, j) => m.emissive.copy(P.baseGlow[j]));
+      P.flash = null;
+    }
+  }
+
+  /* =====================================================================
+     WALL BOUNCES and KNOCKDOWNS
+     A car slammed into the tyre wall: a dust cloud, the wall rocks, a
+     camera kick and a heavy thump. A knockdown: a puff of dust where it
+     lands. fight.js may send wall_bounce / knockdown events; until it
+     does (or as well), we spot them from the car's state: a knockdown is
+     the switch into the "knockdown" state, and a wall bounce is a car in
+     hit-stun whose speed along the line flips near a wall.
+     ===================================================================== */
+  function impact(kind, i, ev) {
+    const P = M.cars[i];
+    if (!P) return;
+    const pos = new THREE.Vector3(ev && ev.x != null ? ev.x : P.car.pos.x, 0.2, ev && ev.z != null ? ev.z : P.car.pos.z);
+    if (kind === "wall") {
+      const side = pos.x < 0 ? -1 : 1;
+      M.stage.wobble(side);
+      M.fx.dust(new THREE.Vector3(side * M.stage.halfWidth, 0.4, pos.z), 10, -side);
+      M.fx.addShake(0.6);
+      M.fx.kick = Math.max(M.fx.kick, 0.6);
+      if (TP.FightSfx) { TP.FightSfx.thump(); TP.FightSfx.hit(1, 1); }
+    } else {
+      M.fx.dust(pos, 7, 0);
+      M.fx.addShake(0.25);
+      if (TP.FightSfx) TP.FightSfx.thump();
+    }
+  }
+
+  function watchImpacts(P, s, i) {
+    const st = s.state || "";
+    if (!M.sawDownEvents && st === "knockdown" && P.lastImpactState !== "knockdown") impact("down", i, null);
+    const vx = Number(s.vx) || 0;
+    const nearWall = Math.abs(s.x || 0) > M.stage.halfWidth - 2.2;
+    if (!M.sawWallEvents && nearWall && (st === "hitstun" || st === "juggle") &&
+        Math.abs(P.prevVx) > 6 && Math.sign(vx) !== Math.sign(P.prevVx) && Math.sign(P.prevVx) === Math.sign(s.x || 0)) {
+      impact("wall", i, null);
+    }
+    P.prevVx = vx;
+    P.lastImpactState = st;
+  }
+
+  /* KO slow motion: the real-time speed of the fight drops to a quarter
+     for a moment (TP.Match.setTimeScale, visual only: the fight's own
+     frames are unchanged). Skipped if match.js doesn't offer it. */
+  function slowMo() {
+    if (!TP.Match || typeof TP.Match.setTimeScale !== "function") return;
+    TP.Match.setTimeScale(0.25);
+    clearTimeout(M.slowTimer);
+    M.slowTimer = setTimeout(() => { if (TP.Match.setTimeScale) TP.Match.setTimeScale(1); }, 650);
+  }
+
+  /* =====================================================================
+     VICTORY: when the match ends the winner gets the stage. The
+     floodlights drop, a spotlight in the winner's colour picks it out,
+     and the camera circles it (damage and all). The loser stays where it
+     fell.
+     ===================================================================== */
+  function updateVictory(state, dt) {
+    if (state.phase !== "matchEnd") return;
+    const w = state.winner === 0 || state.winner === 1 ? state.winner : -1;
+    if (!M.victory) M.victory = { t: 0, who: w };
+    M.victory.t += dt;
+    if (w < 0) return;
+    const car = M.cars[w].car;
+    M.stage.dim(0.4);
+    M.stage.spot(car.pos.x, car.pos.z, M.colors[w], 6);
   }
 
   /* =====================================================================
@@ -956,7 +1141,8 @@
     S.t += dt;
     const t = S.t;
     // Lights: down fast (0.12 s), hold, back up over 0.35 s.
-    const k = t < 0.12 ? 1 - (t / 0.12) * 0.85 : t < 0.8 ? 0.15 : Math.min(1, 0.15 + ((t - 0.8) / 0.35) * 0.85);
+    let k = t < 0.12 ? 1 - (t / 0.12) * 0.85 : t < 0.8 ? 0.15 : Math.min(1, 0.15 + ((t - 0.8) / 0.35) * 0.85);
+    if (settings.reduceFlashing) k = 1;     // keep the banner, skip the blackout
     M.stage.dim(k);
     const car = M.cars[S.who].car;
     M.stage.spot(car.pos.x, car.pos.z, M.colors[S.who], (1 - k) * 7);

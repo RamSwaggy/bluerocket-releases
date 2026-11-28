@@ -162,6 +162,21 @@
         vel: new THREE.Vector3(rand(-0.4, 0.4), rand(1.4, 2.2), rand(-0.3, 0.1)), grow: 1.2 + dark });
     }
 
+    /* Dust: low, tan puffs that roll outward along the floor (a car
+       slamming into a wall or landing on its side). dir pushes them
+       away from a wall: -1 / +1 along X, or 0 for all round. */
+    dust(pos, count = 8, dir = 0) {
+      for (let k = 0; k < count; k++) {
+        this.smoke(pos, 0);
+        const p = this.puffs[this.puffs.length - 1];
+        p.mesh.material.color.setRGB(0.55, 0.48, 0.38);
+        p.mesh.material.opacity = 0.6;
+        p.vel.set((dir || rand(-1, 1)) * rand(1.5, 4), rand(0.3, 1.2), rand(-1.5, 1.5));
+        p.life = rand(0.6, 1.0);
+        p.grow = 1.4;
+      }
+    }
+
     clearSmoke() {
       for (const p of this.puffs) { this.scene.remove(p.mesh); this.puffPool.push(p.mesh); }
       this.puffs.length = 0;

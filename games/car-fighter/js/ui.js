@@ -43,6 +43,7 @@
       shown: [1, 1],             // health fraction last frame
       cache: {},                 // last values written to the DOM (skip no-op writes)
       rounds: [],                // our own round log for the results card
+      full: [-1, -1],            // full super bars last frame (-1 = not seen yet)
       combo: [0, 0],             // combo count last shown per side
       comboHold: [0, 0],         // seconds the finished combo stays up
       lastRound: 0,
@@ -76,6 +77,7 @@
           <div class="super">${[0, 1, 2].map(() => `<div class="seg"><i></i></div>`).join("")}</div>
           <div class="boostbar" title="Boost"><i></i></div>
         </div>
+        <div class="ready">SUPER READY</div>
         <div class="combo" aria-live="polite"></div>`;
     }
     $("pips").innerHTML = [0, 1].map((i) =>
@@ -92,6 +94,20 @@
     const d = TP.FIGHTERS && TP.FIGHTERS[id];
     if (d) return d.displayName || d.name || id;
     return id ? id.charAt(0).toUpperCase() + id.slice(1) : "Rivet";
+  }
+
+  /* Name plates for the round intro: each player's name and car, low on
+     their own side, while the camera pans across. */
+  function showPlates(on) {
+    const el = $("plates");
+    if (!el) return;
+    if (on) {
+      el.innerHTML = players.map((p, i) => `
+        <div class="plate p${i + 1}" style="--seat:${TP.PLAYER_CSS[i]}">
+          <span class="pn">${esc(p.name)}</span><span class="pc">${esc(p.fighter || "")}</span>
+        </div>`).join("");
+    }
+    el.classList.toggle("show", !!on);
   }
 
   /* Show a big centre call until fight frame `until`. */
@@ -147,8 +163,10 @@
       call(sudden ? "SUDDEN DEATH" : last ? "FINAL ROUND" : `ROUND ${round}`, "", "#f2f5ff", f + 600, "intro" + round);
       T.lastRound = round;
       snd("roundSting");
+      showPlates(true);
     } else if (phase === "fight" && prev === "countdown") {
       call("FIGHT!", "", "#ffcc33", f + 45, "fight" + round);
+      showPlates(false);
       snd("fightSting");
       $("hint").classList.add("dim");
     } else if (phase === "roundEnd") {
@@ -245,6 +263,20 @@
           setStyle(seg.firstElementChild, `s${i}${k}`, "width", (part * 100).toFixed(0) + "%");
           setClass(seg, `sf${i}${k}`, "full", part >= 1);
         });
+        // SUPER READY: a tag under the bar while at least one bar is full,
+        // and a chime + pulse the moment another bar fills.
+        const full = Math.floor(sup / 100 + 1e-6);
+        if (T.full[i] >= 0 && full > T.full[i]) {
+          snd("chime");
+          const seg = side.querySelectorAll(".seg")[Math.min(2, full - 1)];
+          if (seg) { seg.classList.remove("fill"); void seg.offsetWidth; seg.classList.add("fill"); }
+        }
+        T.full[i] = full;
+        const ready = side.querySelector(".ready");
+        const label = full >= 2 ? `SUPER READY ×${full}` : "SUPER READY";
+        if (T.cache["rt" + i] !== label) { T.cache["rt" + i] = label; ready.textContent = label; }
+        setClass(ready, "rd" + i, "show", full >= 1);
+
         const boost = Math.max(0, Math.min(100, Number(c.boost ?? 100)));
         setStyle(side.querySelector(".boostbar i"), "b" + i, "width", boost.toFixed(0) + "%");
 
@@ -260,7 +292,7 @@
           el.classList.add("pop", "show");
           T.comboHold[i] = 1.1;
         }
-        if (n >= 2) T.comboHold[i] = Math.max(T.comboHold[i], 0.4);
+        if (n >= 2 && phase === "fight") T.comboHold[i] = Math.max(T.comboHold[i], 0.4);
         T.combo[i] = n;
         T.comboHold[i] -= dt;
         if (phase !== "fight") T.comboHold[i] = Math.min(T.comboHold[i], 0.3);   // don't carry into the next round
@@ -333,6 +365,7 @@
     },
 
     hideHud() {
+      showPlates(false);
       $("hud").classList.remove("show");
       $("hint").innerHTML = "";
       $("call").classList.remove("show");

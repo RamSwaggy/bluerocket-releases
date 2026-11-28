@@ -17,6 +17,7 @@
      .koSting()      a KO
      .winSting()     match won
      .sigSting()     a signature move starting
+     .chime()        a super bar just filled
      .music(on)      the Car Fighter fight track (defined below)
      .intensity(k)   0 normal, 1 hurry (last 10 s), 2 match point too:
                      the track speeds up
@@ -133,6 +134,12 @@ window.TP = window.TP || {};
     thump() {
       const a = ac(); if (!a) return;
       osc(a, "sine", 75, 32, 0.22, 0.7);
+    },
+    // A super bar just filled: a bright two-note chime.
+    chime() {
+      const a = ac(); if (!a) return;
+      osc(a, "triangle", 1319, 1319, 0.14, 0.12);
+      osc(a, "triangle", 1976, 1976, 0.3, 0.1, 0.08);
     },
     count() {
       const a = ac(); if (!a) return;
