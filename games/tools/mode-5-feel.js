@@ -5,12 +5,13 @@
 
    Usage (from the games folder):
      node tools/mode-5-feel.js [bot] [loopsPerSize] [sizes]
-     node tools/mode-5-feel.js hard 3 8,14,20,28
+     node tools/mode-5-feel.js hard 4 8,14,20,28
 
    What it does, in one real-time match (?demo&human=1, 240 s round):
      1. Loops: for each size S, drive a rectangle out of the home pad
-        (12 units forward × S units to the side) and back, loopsPerSize
-        times. Per loop it records: seconds out, trail cells, the fill
+        (12 units deep × S units wide) and back, loopsPerSize times,
+        rotating through the four quadrants around home (clamped 4 units
+        inside the walls). Per loop it records: seconds out, trail cells, the fill
         (cells and %), score change, and whether a bot popped us (who,
         how many trail cells, minor or a real stun).
      2. Dry timer: drive out ~1.5 s, park, and time how long until the
@@ -23,7 +24,7 @@
 const { launch, pageUrl, collectErrors, instrumentScript, readStateInPage } = require("./mode-5-lib");
 
 const bot = process.argv[2] || "hard";
-const perSize = Number(process.argv[3] || 3);
+const perSize = Number(process.argv[3] || 4);
 const SIZES = (process.argv[4] || "8,14,20,28").split(",").map(Number);
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
@@ -52,7 +53,11 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
   if (hi < 0) { console.log("FAIL  no seat on kb1: not a human game"); await browser.close(); process.exit(1); }
   const home = { x: s.players[hi].x, z: s.players[hi].z, h: s.players[hi].heading };
   const f = { x: Math.sin(home.h), z: Math.cos(home.h) }, r = { x: -f.z, z: f.x };
-  const pt = (a, b) => ({ x: home.x + f.x * a + r.x * b, z: home.z + f.z * a + r.z * b });
+  // A point `a` units ahead of the spawn heading and `b` units to its
+  // right, kept 4 units inside the walls.
+  const half = await page.evaluate(() => TP.M5.match.arena.half);
+  const clampIn = (v) => Math.max(-half + 4, Math.min(half - 4, v));
+  const pt = (a, b) => ({ x: clampIn(home.x + f.x * a + r.x * b), z: clampIn(home.z + f.z * a + r.z * b) });
   const logLen = () => page.evaluate(() => window.__m5log.length);
   const logFrom = (n) => page.evaluate((n) => window.__m5log.slice(n), n);
   const ex = () => page.evaluate((hi) => { const m = TP.M5.match; return { wet: m.grid.wetCount ? m.grid.wetCount[hi] : null, stun: m.cars[hi].stun || 0, phase: m.phase }; }, hi);
@@ -84,7 +89,11 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
     for (let k = 0; k < perSize; k++) {
       const n0 = await logLen();
       const pct0 = (await state()).scores[hi];
-      const d = await drive([pt(12, 0), pt(12, S), pt(0, S), pt(0, 0), pt(-2, 0)], 30000);
+      // Rotate the rectangle through the four quadrants around home
+      // (ahead/right, ahead/left, behind/right, behind/left), so loops
+      // don't keep closing early on the turf the last loop made.
+      const [sa, sb] = [[1, 1], [1, -1], [-1, 1], [-1, -1]][k % 4];
+      const d = await drive([pt(sa * 12, 0), pt(sa * 12, sb * S), pt(0, sb * S), pt(0, 0), pt(-sa * 2, 0)], 30000);
       await page.waitForTimeout(400);
       const ev = await logFrom(n0);
       const pct1 = (await state()).scores[hi];
