@@ -41,6 +41,14 @@
      cancel      moves (or "jump") this one can cancel into, but only
                  after it hit or was blocked. A miss never chains.
      cost        optional { boost } or { super } paid when it starts
+     hits        optional: a multi-hit move (see the signature row)
+     impulses    optional [{ at, vx, vy }]: speeds set on given move frames
+     shock       optional { frames, box }: a shockwave box that comes out
+                 for `frames` frames from the moment the car LANDS
+     invuln      optional [from, to): move frames the car can't be hit
+     passThrough optional [from, to): move frames the cars don't push apart
+     crossup     optional { delay }: once the car is through the opponent
+                 it turns round, and the box arms `delay` frames later
      flags       launcher / knockdown / overhead / throw / armour (hits
                  absorbed) / hang (air move hovers during its startup)
    ===================================================================== */
@@ -165,20 +173,30 @@ window.TP = window.TP || {};
     },
 
     /* ---------- Signature move (Boost + Heavy, 1 super bar) ----------
-       Each fighter replaces this row with its own (fighters.js).
-       This default is Rivet's M1 stub: a big Ram. */
+       Each fighter can replace this row with its own (fighters.js). This
+       base row is Rivet's "Grinder": a 3-hit spinning sweep, hitting on
+       move frames 11, 17 and 23 (counting the press as frame 1). The last
+       hit knocks down.
+       `hits` makes it multi-hit: each entry { frame, active, ...numbers }
+       is its own hit, opening on move frame `frame` (0-based, like
+       startup) for `active` frames, with its own numbers merged over the
+       row's. The row's damage/hitstun/blockstun are the FIRST hit's. */
     signature: {
-      name: "Signature", input: "boost+heavy", button: "heavy", usesBoost: true,
-      startup: 10, active: 8, recovery: 24,
-      damage: 220, hitstun: 30, blockstun: 16,
-      push: 16, launch: 0, airLaunch: 8, hitstop: 10, meter: 0,
-      box: { x0: 0.8, x1: 3.0, y0: 0.0, y1: 1.6, z: 1.3 },
-      drive: { from: 6, to: 22, speed: 13 },
+      name: "Grinder", input: "boost+heavy", button: "heavy", usesBoost: true,
+      startup: 10, active: 15, recovery: 28,
+      damage: 70, hitstun: 18, blockstun: 12,
+      push: 2, launch: 0, airLaunch: 5, hitstop: 6, meter: 0,
+      box: { x0: -1.2, x1: 3.0, y0: 0.0, y1: 1.5, z: 1.5 },
+      drive: { from: 6, to: 25, speed: 4 },
+      hits: [
+        { frame: 10, active: 3 },
+        { frame: 16, active: 3 },
+        { frame: 22, active: 3, damage: 90, push: 12, blockstun: 16, hitstop: 10, flags: { knockdown: true } },
+      ],
       cost: { super: 100 },
       cancel: [],
-      flags: { signature: true },
+      flags: { signature: true, multiHit: true },
     },
-
   };
 
   /* =====================================================================
