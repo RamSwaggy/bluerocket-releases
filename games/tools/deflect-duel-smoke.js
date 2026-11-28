@@ -38,8 +38,10 @@
    Prints a status line every 3 s, then the final result.
    Exit code 0 = PASS, 1 = FAIL (including "the game isn't built yet").
 
-   Test hook: set DEFLECT_DUEL_INDEX=/path/to/index.html to point the
-   test at a different copy of the game (used to test this script itself).
+   Test hooks (used to test this script itself):
+     DEFLECT_DUEL_INDEX=/path/to/index.html  test a different copy of the
+       game, e.g. the QC mock in tools/fixtures/deflect-duel-mock/
+     DEFLECT_DUEL_QUERY=mockbug=nocap        extra URL parameters to add
 
    Needs Playwright (pre-installed in cloud sessions; on Windows run
    `npm i -g playwright` then `npx playwright install chromium` once).
@@ -72,7 +74,9 @@ if (!Number.isInteger(lives) || lives < 1) usageFail(`lives must be a whole numb
 // Say so plainly instead of reporting a wall of "file not found" errors.
 const indexFile = path.resolve(process.env.DEFLECT_DUEL_INDEX || path.join(__dirname, "../deflect-duel/index.html"));
 const gameDir = path.dirname(indexFile);
-const missing = ["index.html", "js/duel.js", "js/main.js"].filter((f) => !fs.existsSync(path.join(gameDir, f)));
+// (A test copy pointed to with DEFLECT_DUEL_INDEX only needs its index.html.)
+const needed = process.env.DEFLECT_DUEL_INDEX ? [path.basename(indexFile)] : ["index.html", "js/duel.js", "js/main.js"];
+const missing = needed.filter((f) => !fs.existsSync(path.join(gameDir, f)));
 if (missing.length) {
   console.log(`Deflect Duel isn't playable yet: missing ${missing.map((f) => "deflect-duel/" + f).join(", ")}.`);
   console.log("RESULT: FAIL (game files missing; nothing to test)");
@@ -234,7 +238,7 @@ function snapshot() {
       else if (m.type() === "warning" && text.includes("[Rocket Rumble]")) errors.push("CAR-FEEL WARNING: " + text);
     });
 
-    const url = "file:///" + indexFile.replace(/\\/g, "/") + `?demo&players=${players}&lives=${lives}&speed=${speed}`;
+    const url = "file:///" + indexFile.replace(/\\/g, "/") + `?demo&players=${players}&lives=${lives}&speed=${speed}` + (process.env.DEFLECT_DUEL_QUERY ? "&" + process.env.DEFLECT_DUEL_QUERY : "");
     console.log(`Deflect Duel smoke: ${players} bots, ${lives} lives, speed ×${speed}, limit ${timeoutSec}s`);
     await page.goto(url);
 
