@@ -23,7 +23,7 @@ TP.M5 = TP.M5 || {};
     /* ---------- Car feel ----------
        Only the settings in TP.MODE_TUNABLE may change (shared car rule).
        Pivot is a little higher than usual so tight loops feel good. */
-    tuning: { bumpScale: 1.15, grip: 11, maxSpeed: 17, boostMax: 26, pivot: 0.35 },
+    tuning: { bumpScale: 1.15, grip: 12, maxSpeed: 17, boostMax: 26, pivot: 0.45 },
 
     /* ---------- Painting (radii are in cells) ---------- */
     paintR: 1.1,            // normal stripe under a driving car
@@ -37,8 +37,9 @@ TP.M5 = TP.M5 || {};
 
     /* ---------- Trails ---------- */
     trailDry: 6,            // a wet trail dries by itself after this long
-    stunTime: 1.0,          // how long a popped car spins out
-    popGrace: 2.0,          // after the spin-out, this long before you can be popped again
+    stunTime: 0.85,         // how long a popped car spins out
+    popGrace: 2.0,          // after the spin-out, this long before you can be popped again (stops stun-lock)
+    clipReach: 1.0,         // the car's front corners can close a loop (units ahead of centre)
     minFill: 8,             // fills smaller than this many cells are "small" (silent)
     minPop: 6,              // trails shorter than this pop without a stun ("minor")
     hardBump: 9,            // bump impact needed for a splat + pop
