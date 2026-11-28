@@ -106,6 +106,12 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
   - The bigger art ideas (arena backdrops, board clutter, car models) wait until jobs 1–5 are
     merged.
 
+- 2026-11-28 (Director, for Reece): **Speed-cap fix in shared car.js.** Holding the gas now tops out at
+  maxSpeed (17), boost reaches 27, and head-on rams carry extra knockback that bleeds off. The car is
+  a bit slower and boost matters. Turbo Party minigames need re-checking at the new speeds.
+- 2026-11-28 (Director): **Bonus-trophy ties** are broken on coins; if still tied, nobody gets it.
+- 2026-11-28 (Director): use the shared `TP.MenuNav.attach(card)` for gamepad/arrow menus.
+
 ## Current jobs (round 1)
 
 | # | Job | Who | Status |
@@ -119,6 +125,8 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 4c | Bugs found by job 3 | Gameplay / Art and UI | after job 3 |
 | 5a | Head-on knockback + Sumo retune (rounds 20–35 s; fix early pile-ups and frequent 45 s shared-win rounds) | Gameplay → Director | Sumo retune **merged** (13702b1); car.js change sent to the Director |
 | 5b | King of the Hill crowding, Goal Frenzy posts | Gameplay | **merged** (1342ade) |
+| 7 | Re-measure Sumo + KotH at the new car speeds, retune if needed; bonus-tie tiebreak | Gameplay | sent |
+| 8 | Controller/arrow navigation on the menu and cards with TP.MenuNav | Art and UI | sent |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
 
 ## Art backlog (after jobs 1–5; the Director sets the order)
