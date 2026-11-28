@@ -176,6 +176,7 @@
       jumpLead: rand(0.3, 0.42),   // jump this long before impact (peak height ≈ 0.37 s)
       fumble: 0.12,                // chance it misreads a slow shot...
       fumbleFast: 0.4,             // ...plus this much more at max speed
+      fumbleRally: 0.03,           // ...plus this much per strike in the current rally
       planFor: -1, plan: "",       // decision for the current shot
     };
   }
@@ -429,6 +430,7 @@
       // Stalemates since the last KO. Bots get bolder as this grows (and
       // in a 1-v-1 endgame), so a match can't stall forever.
       this.stalemateStreak = 0;
+      this.lastKOt = this.time;          // match time of the last KO (bots use it)
       this.result = null;
       this.lastStrike = null;      // { i, t, before } — the last strike, for clash detection
       this._pred = null;           // cached ball prediction for the bots
@@ -978,6 +980,7 @@
       this.koLog.push({ t: +this.time.toFixed(2), victim: i, owner: ownerIdx, speed: +this.ball.speed.toFixed(1) });
       this._log("ko", ownerIdx, { victim: i, speed: +this.ball.speed.toFixed(1) });
       this.stalemateStreak = 0;
+      this.lastKOt = this.time;          // match time of the last KO (bots use it)
 
       const ownerCar = owner ? this.cars[ownerIdx] : null;
       this.hooks.onKO(car, ownerCar);
@@ -1088,11 +1091,12 @@
       const reach = this._reach(car);
       const mine = b.owner === i;
       const dangerous = b.mode !== "neutral" && !mine && b.owner !== null;
-      // Boldness: after each stalemate since the last KO, and in a 1-v-1
-      // endgame, bots return faster balls and misread fewer. That stops a
-      // cautious owner and a cautious dodger stalling a match forever.
+      // Boldness: after each stalemate since the last KO, bots return
+      // faster balls and misread fewer, so a cautious owner and a cautious
+      // dodger can't stall a match forever. In a 1-v-1 endgame the owner
+      // also chases its own ball (see 3 below).
       const alive = this.players.filter((q) => !q.out).length;
-      const bold = this.stalemateStreak + (alive === 2 ? 1 : 0);
+      const bold = this.stalemateStreak;
       const maxReturn = S.maxReturn + 6 * bold;
       const handle = !dangerous || b.speed <= maxReturn;
 
@@ -1118,7 +1122,7 @@
       // 3) My own straight-flying ball: stay out of its way... unless
       //    things have stalled, then go after it and strike it again.
       if (mine) {
-        if (bold > 0) {
+        if ((bold > 0 || alive === 2) && b.speed < 32) {
           const ctrl = TP.ai.driveTo(car, ...this._inside(b.pos.x, b.pos.z), { boostDist: 10 });
           ctrl.hit = false;
           return ctrl;
@@ -1152,7 +1156,13 @@
         S.planFor = b.hitId;
         const frac = clamp((b.speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
         S.lead = S.swingLead + rand(-S.leadErr, S.leadErr * 2); // early or late this time
-        if (Math.random() < (S.fumble + S.fumbleFast * frac) * Math.pow(0.6, bold)) S.plan = "fumble";
+        // Long rallies tire bots out: each strike since the serve adds a
+        // little to the misread chance, so rallies end (median aim 4–12).
+        const rally = S.fumbleRally * b.hits;
+        // And the longer nobody has been KO'd (after 20 s), the more
+        // likely a misread, so a match always ends.
+        const drought = 0.015 * Math.max(0, this.time - this.lastKOt - 20);
+        if (Math.random() < (S.fumble + S.fumbleFast * frac + rally) * Math.pow(0.6, bold) + drought) S.plan = "fumble";
         else if (b.speed <= maxReturn) S.plan = "return";
         else S.plan = "dodge";
       }
@@ -1194,7 +1204,8 @@
         d.boost = true;
         return d;
       }
-      return this._botIdle(i); // fumble: carries on as if nothing's coming
+      // Fumble: it misread the shot and just sits there.
+      return ctrl;
     }
 
     /* ---------- Meeting a gravity ball ----------
@@ -1210,7 +1221,19 @@
         const tCar = dist2D(car.pos.x, car.pos.z, q.x, q.z) / 14 + 0.15;
         if (q.y <= reachTop + 1.6 && tCar <= q.t) { target = q; break; }
       }
-      const ctrl = TP.ai.driveTo(car, ...this._inside(target.x, target.z), { boostDist: 9 });
+      // Line up: approach the meeting spot from the far side of my target,
+      // so that when I strike, I'm already facing the target (a strike
+      // goes the way the car faces, bent by at most aimBendDeg).
+      let gx = target.x, gz = target.z;
+      const foe = this._nearestFoe(i);
+      if (foe) {
+        const tx = foe.pos.x - target.x, tz = foe.pos.z - target.z;
+        const tl = Math.hypot(tx, tz) || 1;
+        const bx = target.x - (tx / tl) * 3, bz = target.z - (tz / tl) * 3;
+        // Far from the line-up spot: go there first. Close: drive through the ball.
+        if (dist2D(car.pos.x, car.pos.z, bx, bz) > 2.5 && dist2D(car.pos.x, car.pos.z, target.x, target.z) > 2.5) { gx = bx; gz = bz; }
+      }
+      const ctrl = TP.ai.driveTo(car, ...this._inside(gx, gz), { boostDist: 9 });
       ctrl.hit = false;
       // Ball above my reach and close: jump to meet it.
       const near = dist2D(car.pos.x, car.pos.z, b.pos.x, b.pos.z) < 4;
@@ -1243,6 +1266,18 @@
       return path;
     }
 
+    // The nearest opponent still on the field (their car), or null.
+    _nearestFoe(i) {
+      const car = this.cars[i];
+      let target = null, best = Infinity;
+      this.players.forEach((q, j) => {
+        if (j === i || q.out || q.dead > 0) return;
+        const d = dist2D(car.pos.x, car.pos.z, this.cars[j].pos.x, this.cars[j].pos.z);
+        if (d < best) { best = d; target = this.cars[j]; }
+      });
+      return target;
+    }
+
     // Aim a strike at the nearest opponent: steering for the sideways
     // bend, throttle for up / straight / down. Plus a little sloppiness.
     _botAim(i) {
@@ -1269,9 +1304,11 @@
     }
 
     // Wander to a spot away from the ball (and out of its line), staying
-    // off the walls.
+    // off the walls. During a long KO drought bots stop running away and
+    // just hold their ground, so somebody gets caught.
     _botIdle(i) {
       const car = this.cars[i], b = this.ball;
+      if (this.time - this.lastKOt > 40) return { throttle: 0, steer: 0, boost: false, jump: false, hit: false };
       let dx = car.pos.x - b.pos.x, dz = car.pos.z - b.pos.z;
       const d = Math.hypot(dx, dz) || 1;
       dx /= d; dz /= d;
