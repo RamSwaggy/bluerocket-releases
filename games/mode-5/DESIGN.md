@@ -41,6 +41,10 @@ and the lead can swing in one big loop-close in the last seconds.
 - Trails dry on their own after **6 seconds** outside your turf (they become normal turf, no fill).
   Stops a car from being punished forever and keeps the loop window tight.
 
+**Rule refinement (M1, approved by boss):** all paint a car lays on cells that are not its own dry
+turf is wet; the loop closes when the car's centre is on one of its own dry cells (the stripe reaches
+ahead of the car, so "paint dry while at home" never let it leave home).
+
 ### Bumping
 - Shared car bump physics (`bumpScale` 1.15). A hard hit (impact > 9) on a rival **splats** the
   victim's colour off: a blob in the **attacker's** colour where the victim was, and the victim's
