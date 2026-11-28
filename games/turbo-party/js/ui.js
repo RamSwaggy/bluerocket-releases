@@ -116,7 +116,8 @@
        Cards that contain buttons, links or dropdowns (the setup menu, the
        final standings) get controller navigation from the shared
        TP.MenuNav helper: D-pad / stick / arrow keys move a highlight, A or
-       Enter presses it, B or Escape presses the [data-nav-back] link, and
+       Enter presses it (MenuNav handles Enter itself), B or Escape presses
+       the [data-nav-back] link, and
        Start presses [data-nav-primary].
        Cards with no buttons (minigame intro and results) don't attach it,
        so during a match only the game's own input code reads controllers
@@ -128,21 +129,6 @@
       const card = $("card");
       if (TP.MenuNav && card.querySelector("button, a[href], select")) {
         UI._nav = TP.MenuNav.attach(card);
-        // Enter / Space press the highlighted button or link. MenuNav leaves
-        // Enter to the browser's own "press the focused button", but the
-        // shared input.js blocks Enter and Space on the page (so they can't
-        // scroll during a match), which also blocks that. So we press it here.
-        UI._onKey = (e) => {
-          if (e.code !== "Enter" && e.code !== "NumpadEnter" && e.code !== "Space") return;
-          if (!$("overlay").classList.contains("show")) return;
-          const el = document.activeElement;
-          if (!el || !card.contains(el) || !(el.tagName === "BUTTON" || (el.tagName === "A" && el.href))) return;
-          e.preventDefault();
-          if (e.repeat) return; // holding the key down mustn't click again and again
-          if (TP.sfx) TP.sfx.play("coin");
-          el.click();
-        };
-        window.addEventListener("keydown", UI._onKey);
       }
       return card;
     },
@@ -156,7 +142,6 @@
     _nav: null,
     _detachNav() {
       if (UI._nav) { UI._nav.detach(); UI._nav = null; }
-      if (UI._onKey) { window.removeEventListener("keydown", UI._onKey); UI._onKey = null; }
     },
 
     /* Clear everything transient (used between phases). */
