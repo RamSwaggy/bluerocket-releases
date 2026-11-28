@@ -123,3 +123,13 @@ From the `games` folder:
   wheels), the ball pops up gently and slows, the toucher keeps or takes ownership, there's no
   hit-freeze, and the car gets its jump and flip back. Hit in the air with no direction is a
   normal straight strike. `DESIGN.md` is updated.
+- 2026-11-28 (Reece, via the Director):
+  - **Keep the neutral-bump rule:** bumping a neutral ball makes you its owner at base speed.
+  - **Speeds should escalate the way the genre does.** Each strike multiplies the speed (about
+    ×1.12) plus a small step, up to a top speed around 200+. Hit-freeze grows up to about 1–1.5 s,
+    with a camera punch-in and a speed readout that climbs. Freeze time doesn't count toward the
+    stalemate timer. The ball's collision is swept, so it can't tunnel. Bots get speed-aware
+    reactions.
+  - **The bar is "just get them to a good playable level".** v2 replaces v1 on the hub only once
+    it's genuinely good to play (moveset, aerials, flip-strikes, bots using them, escalation, no
+    stalls). The Director verifies, then swaps it in.
