@@ -72,6 +72,8 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: "Rocket Rumble",
+    // The Rocket Rumble logo, shown in the window corner and on the taskbar.
+    icon: path.join(__dirname, "build", "icon.png"),
     backgroundColor: "#070b1a", // matches the hub, so there's no white flash
     autoHideMenuBar: true,
     show: false,
