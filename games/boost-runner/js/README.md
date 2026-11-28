@@ -80,8 +80,10 @@ game.dispose();                  // removes car meshes from the scene
 | `game.cars` | array of `RunnerCar`, one per seat, same order as `seats` |
 | `game.wins` | array of round wins per seat |
 | `game.winsToTake` | N in "first to N" |
+| `game.tuning` | the tuning object the cars run on this round (`TP.modeTuning({ bumpScale: 1.3 })`); QC compares it with `TP.CAR_TUNING` |
 | `game.lastResult` | after a round: `{ winner: seat or null (draw), koOrder: [seat, ...], time }` |
 | `game.matchWinner` | seat index once `state === "match_end"`, else `null` |
+| (rules) | sudden death starts at race time 120 s and always ends the round by 135 s (backstop: the leader wins) |
 | `game.snapshot()` | a plain JSON copy of all of the above (used by QC) |
 
 ## A car (`RunnerCar`, extends `TP.Car`)

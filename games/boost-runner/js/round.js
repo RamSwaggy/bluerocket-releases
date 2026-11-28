@@ -28,7 +28,7 @@ TP.BR = TP.BR || {};
     catchUp: 0.25,       // the last car gets +25% boost regen, the leader +0%
     spawnGap: 5,         // spacing of the starting grid (units)
     lookAhead: 150,      // build the course at least this far past the right edge
-    maxRoundTime: 200,   // absolute backstop (sudden death ends rounds long before this)
+    maxRoundTime: 135,   // absolute backstop: sudden death (from 120 s) ends rounds within a few seconds
   };
   TP.BR.ROUND_RULES = ROUND_RULES;
 
@@ -361,6 +361,8 @@ TP.BR = TP.BR || {};
     get raceTime() { return this.round.raceTime; }
     get countdown() { return this.round.countdown; }
     get view() { return this.round.view; }
+    // The tuning object the cars run on this round (TP.modeTuning({bumpScale: 1.3})).
+    get tuning() { return this.round.T; }
     get course() { return this.round.course; }
 
     snapshot() {
