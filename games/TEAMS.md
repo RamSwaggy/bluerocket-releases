@@ -212,6 +212,9 @@ Everything that ships in Rocket Rumble, and every tool used to make it, must be 
 - anything without a clear licence
 - Quixel Megascans and other assets whose free licence is tied to a specific engine
 
+**Check it with `node tools/credits-check.js <mode>` (from `games/`) before every merge.** It must
+print `RESULT: PASS`. (Written by Boost Runner QC.)
+
 **Every third-party asset gets a line in `games/CREDITS.md`:** the file path in the repo, the
 source URL, the author, the licence, and the credit text if the licence requires one. No line,
 no merge. Bosses check this before merging. Our own code-generated models, sounds and music

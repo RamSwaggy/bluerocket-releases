@@ -11,7 +11,7 @@ once, then pick a mode. No install or internet needed. Keep the whole `games` fo
 | [Turbo Party](turbo-party/) | Party board game with minigames | ✅ Playable |
 | [Boost Runner](boost-runner/) | Side-scrolling race where you're knocked out if you fall off-screen | Planned (design stage) |
 | [Deflect Duel](deflect-duel/) | Arena ball-deflection: the ball speeds up with every hit | 🚧 Work in progress (not playable yet) |
-| [Car Fighter](car-fighter/) | 1v1 car combat with health bars and special moves | Planned (design stage) |
+| [Car Fighter](car-fighter/) | 1v1 car combat with health bars and special moves | ✅ Playable (first version; more cars coming) |
 
 Each mode is worked on by a team of Claude sessions (boss, Gameplay, Art and UI, QC), under
 the Rocket Rumble Director. See [TEAMS.md](TEAMS.md) for how that works, and each mode's
