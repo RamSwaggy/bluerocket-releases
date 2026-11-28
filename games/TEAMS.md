@@ -128,6 +128,14 @@ needs every seat filled plays it as a bot.
 | `js/fx.js` | Particles: sparks, confetti, explosions |
 | `js/sfx.js` | Synthesised sound effects and background music |
 | `js/rumble.js` | Rocket Rumble glue: the mode list for the hub, shared player setup, hub link |
+| `js/assets.js` | `TP.Assets`: loads models (glTF/GLB), textures, JSON and audio files behind a shared loading screen (`TP.Loading`). Includes `cloneModel()` and `warmUp(renderer, scene, camera)` to compile shaders before play |
+| `vendor/three-addons.min.js` | Three.js `GLTFLoader` + `SkeletonUtils` as a plain script (rebuild with `tools/build-three-addons.sh`). Load it right after `three.min.js` in any mode that uses real model files |
+
+**Real asset files need the desktop app** (`desktop/`, see its README): browsers can't load files
+from a double-clicked `index.html`. Modes that only use code-made visuals still work by
+double-click. To test a mode in the desktop app headless (cloud sessions), launch it with
+Playwright's `_electron` under `xvfb-run`, using `--start=<mode>/index.html` and `--no-sandbox`.
+`tools/fixtures/asset-test.html` is a working example of the whole loading flow.
 
 ## Test tools (`games/tools/`)
 
