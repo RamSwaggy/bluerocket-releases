@@ -163,8 +163,20 @@
   }
 
   /* ---------- Results ---------- */
-  UI.onMatchEnd = (state, rounds) => {
+  UI.onMatchEnd = (state, ourLog) => {
     const players = UI.players;
+    // Prefer the fight core's own round log (state.roundResults: winner is
+    // 0, 1 or null for a draw; reason is "KO", "time-out", "draw" or
+    // "double-KO"). Our HUD's log is the fallback; it only knows about
+    // rounds it actually saw rendered.
+    const HOW = { "KO": "KO", "time-out": "Time", "draw": "Time · draw", "double-KO": "Double KO" };
+    const rounds = Array.isArray(state.roundResults) && state.roundResults.length
+      ? state.roundResults.map((r, i) => ({
+          round: r.round || i + 1,
+          winner: r.winner === 0 || r.winner === 1 ? r.winner : -1,
+          how: HOW[r.reason] || String(r.reason || ""),
+        }))
+      : ourLog;
     const w = state.winner;
     const won = w === 0 || w === 1;
     const title = won ? `${players[w].name} wins!` : "It's a draw";
