@@ -37,11 +37,13 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 - QC: waiting on Gameplay's bug-1 fix (wet trail never starts when driving forward), then re-probe + batch.
 
 ## Decisions log
+- Big fills: bots play tight by default, go big when safe / with Mega Roller / in Overdrive; hard bots seek chord loops. 10%+ fills mostly a human skill reward.
 - 2026-11-27 (Director, standing rule): free assets and tools only; every third-party asset gets a neutral line in `games/CREDITS.md` (no spoilers) or it isn't merged. Our plan is all code-made (exempt).
 - 2026-11-27: Concept chosen by the boss (Reece's instruction: the team decides everything and he
   gives no input). Paint-territory arena with loop fill; see DESIGN.md.
 
 ## Merge log
+- Gameplay 405253b + b14b4bc: spawn angles, pause freeze, sudden death (tie-break round), bot retune for real risk, roundEndTime 7 s. Smoke 3 rounds @16× PASS 8/8, 72 pops.
 - Gameplay c8d2f61: BUG 1 fixed (wet trail always; close only on out→home), min fill/pop sizes.
 - Art efe8e96: M2b framing, scaled FILL text, round-end reveal + side/bottom card, how-to panel, short labels, wet-trail hazard shader, MenuNav, sudden-death banner, team chips. Boss review: Split Level decks + Rings circle not drawn yet (sent).
 - Gameplay ff5a73d: bot rewrite, Split Level + Rings arenas, teams 2v2, hints, asserts. Smoke on merge 3 rounds PASS 8/8 (fps 17.6 swiftshader — watch perf). Bug 1 still open.
