@@ -275,7 +275,7 @@
         const ready = side.querySelector(".ready");
         const label = full >= 2 ? `SUPER READY ×${full}` : "SUPER READY";
         if (T.cache["rt" + i] !== label) { T.cache["rt" + i] = label; ready.textContent = label; }
-        setClass(ready, "rd" + i, "show", full >= 1);
+        setClass(ready, "rd" + i, "show", full >= 1 && phase !== "matchEnd");   // not on the results screen
 
         const boost = Math.max(0, Math.min(100, Number(c.boost ?? 100)));
         setStyle(side.querySelector(".boostbar i"), "b" + i, "width", boost.toFixed(0) + "%");
