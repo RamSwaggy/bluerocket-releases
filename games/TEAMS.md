@@ -250,3 +250,7 @@ This rule applies to **every** session, the Director included:
   - Broadcast camera and a ceiling.
   - The car's rocket moveset (double jump, flips, aerials) is built **once in shared** by the new Core
     session. It's opt-in per mode, so no mode's feel changes until its team tunes for it.
+- **2026-11-28, Deflect Duel bunt (Reece):** "Bunting should be a flip reset (touching with 4 wheels)."
+  - A bunt is a wheels-first touch on the ball. It pops the ball up gently and gives the car its jump and flip back.
+  - It's not a button action.
+  - Core provides `car.resetAirMoves()` and a wheels-contact check in the shared moveset.
