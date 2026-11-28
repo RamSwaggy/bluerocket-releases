@@ -33,9 +33,13 @@
        gravity ball (it doesn't fly straight). Bumps never change an
        owned ball: an owned ball either passes through you (yours) or
        KOs you (anyone else's).
-     • BUNT: Hit while in the air with no direction held pops the ball
-       straight up, slowly. It becomes yours, and it remembers buntKeep
-       of its speed tier for your next strike.
+     • BUNT (a "flip reset"): touching the ball with the car's UNDERSIDE
+       (its wheels, usually landing on it from above) pops the ball gently
+       up and slows it (buntKeep of its speed tier). The toucher keeps or
+       takes ownership, there's no hit-freeze, and the car gets its jump
+       and flip back (car.resetAirMoves(), when the shared car has it).
+       It isn't a button: Hit in the air with no direction held is just a
+       normal straight strike.
      • CLASH: two different cars striking the ball within clashWindow of
        each other. Both strikers bounce away, the ball stops where it is,
        and its owner goes back to whoever had it before.
@@ -115,11 +119,12 @@
     aimDeadzone: 0.5,    // stick/keys past this count as "held" for up/down aim
     flipBonus: 4,        // extra speed for a flip strike (Stage B, when the shared car can flip)
 
-    /* ---------- Bunt (Hit in the air, no direction held) ---------- */
+    /* ---------- Bunt (wheels touch the ball: a flip reset) ---------- */
     buntKeep: 0.6,       // share of the speed tier the ball remembers
-    buntUp: 8,           // how high the bunt pops the ball
+    buntUp: 6,           // how high the bunt pops the ball
     buntHold: 2.5,       // how long a bunted ball stays yours before it goes neutral
-    buntDeadzone: 0.3,   // inputs smaller than this count as "no direction"
+    buntCooldown: 0.6,   // the same car can't bunt again for this long
+    buntWheelbase: 0.95, // contact must be within this share of the car's underside (on the wheels)
 
     /* ---------- Clash ---------- */
     clashWindow: 0.1,    // two strikes this close together (game seconds) clash
@@ -164,8 +169,6 @@
     return {
       reaction: rand(0.08, 0.2),   // seconds before reacting to a new strike
       maxReturn: rand(28, 42),     // fastest ball it will try to strike back
-      maxBunt: rand(40, 56),       // fastest ball it will try to bunt
-      buntChance: 0.45,            // chance it bunts a ball too fast to return
       leadErr: 0.2,                // how far off its swing timing can be, per shot (seconds)
       lead: 0.08,                  // this shot's swing timing (re-rolled per shot)
       aimNoise: rand(4, 14),       // degrees of sloppiness in its aim
@@ -358,6 +361,9 @@
           prevHit: false,        // hit button state last step (edge detection)
           lastSteer: 0,          // steering this step (aim: bend)
           lastThrottle: 0,       // throttle this step (aim: up / down)
+          buntReady: 0,          // match time from which this car can bunt again
+          // Counted per-player events (for QC's fun checks).
+          stats: { swings: 0, strikes: 0, strikesAir: 0, strikesUp: 0, strikesDown: 0, strikesFlip: 0, smashes: 0, clashes: 0, bunts: 0, bumps: 0 },
         });
         // Each player also exposes its TP.Car as .car (hidden from
         // JSON.stringify, since a car holds 3D meshes).
@@ -417,6 +423,12 @@
       this.koLog = [];             // { t, victim, owner, speed } per KO (player indexes)
       this.outOrder = [];          // player indexes in the order they were eliminated
       this.stats = { strikes: 0, aerialStrikes: 0, bunts: 0, clashes: 0, bumps: 0, stalemates: 0, swings: 0 };
+      // Every counted event, in order: { t, type, player, ...details }.
+      // Types: swing, strike, clash, bunt, bump, ko, stalemate.
+      this.events = [];
+      // Stalemates since the last KO. Bots get bolder as this grows (and
+      // in a 1-v-1 endgame), so a match can't stall forever.
+      this.stalemateStreak = 0;
       this.result = null;
       this.lastStrike = null;      // { i, t, before } — the last strike, for clash detection
       this._pred = null;           // cached ball prediction for the bots
@@ -508,6 +520,8 @@
           p.swingT = C.swingTime;
           p.swingHit = false;
           this.stats.swings++;
+          p.stats.swings++;
+          this._log("swing", i, { airborne: !car.onGround });
           this.hooks.onSwing(car);
           this.onEvent("swing", { player: p });
         }
@@ -603,6 +617,8 @@
       this.noHitTime += dt;
       if (this.noHitTime >= C.stalemateTime) {
         this.stats.stalemates++;
+        this.stalemateStreak++;
+        this._log("stalemate", null, { streak: this.stalemateStreak });
         this.onEvent("stalemate");
         this._serve();
         return;
@@ -703,7 +719,6 @@
       const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i];
       const before = this._ballBefore();
       const aerial = !car.onGround;
-      const noDir = Math.abs(p.lastSteer) < C.buntDeadzone && Math.abs(p.lastThrottle) < C.buntDeadzone;
 
       p.swingHit = true;
       p.swingT = 0;
@@ -717,28 +732,13 @@
       this.stats.strikes++;
       if (aerial) this.stats.aerialStrikes++;
 
-      /* ---------- BUNT: in the air, no direction held ---------- */
-      if (aerial && noDir) {
-        const kept = Math.max(b.tier, b.speed) * C.buntKeep;
-        b.vel.set(0, Math.sqrt(2 * C.gravity * C.buntUp), 0); // straight up, to about buntUp high
-        b.owner = i;
-        b.neutral = false;
-        b.tier = kept;
-        b.ownT = 0;
-        b.safeUntil = this.time + C.bumpGrace;
-        this._startCooling(1, C.buntHold); // a gravity ball that stays yours for a while
-        p.bunts++;
-        this.stats.bunts++;
-        this.freezeLeft = C.freezeMin;
-        this.hooks.onBunt(car, b);
-        this.onEvent("bunt", { player: p });
-        return;
-      }
-
-      /* ---------- STRIKE: next speed tier, straight-line flight ---------- */
-      let speed = b.mode === "neutral" || b.tier <= 0 ? C.baseSpeed : Math.min(C.maxSpeed, b.tier + C.speedStep);
+      /* ---------- Next speed tier, straight-line flight ---------- */
+      const fromNeutral = b.mode === "neutral" || b.tier <= 0;
+      let speed = fromNeutral ? C.baseSpeed : Math.min(C.maxSpeed, b.tier + C.speedStep);
       // Smash: striking while boosting, with enough boost to pay for it.
-      const smash = car.boosting && car.boost >= C.smashBoostCost;
+      // Not on the first touch of a neutral ball: off a serve it would
+      // leave faster than a car can chase.
+      const smash = !fromNeutral && car.boosting && car.boost >= C.smashBoostCost;
       if (smash) {
         speed = Math.min(C.maxSpeed, speed + C.smashBonus);
         car.boost -= C.smashBoostCost;
@@ -767,6 +767,12 @@
       this.freezeLeft = lerp(C.freezeMin, C.freezeMax, frac);
 
       const info = { kind: "strike", angle, bend: +bend.toFixed(1), aerial };
+      p.stats.strikes++;
+      if (aerial) p.stats.strikesAir++;
+      if (angle === "up") p.stats.strikesUp++;
+      if (angle === "down") p.stats.strikesDown++;
+      if (smash) p.stats.smashes++;
+      this._log("strike", i, { speed: +speed.toFixed(1), angle, aerial, flip: false, smash });
       this.hooks.onHit(car, b, frac, smash, info);
       this.onEvent("hit", { player: p, speed, frac, smash, info });
     }
@@ -805,7 +811,9 @@
         p.swingHit = true;
         p.cooldown = C.hitCooldown;
         p.clashes++;
+        p.stats.clashes++;
       }
+      this._log("clash", i, { other: j });
       // Anyone else mid-swipe at this ball is part of the scrum: their
       // swipe is used up (no stacking a third strike on top).
       this.players.forEach((q, k) => {
@@ -819,12 +827,83 @@
       this.onEvent("clash", { a: this.players[i], b: this.players[j] });
     }
 
+    /* ---------- Bunt: the car's wheels touch the ball ----------
+       The "underside" is the car's down direction: -car.roof() when the
+       shared car has full 3D orientation, otherwise straight down. The
+       touch counts when the ball sphere meets the car's body box on that
+       underside, inside the wheelbase. */
+    _wheelsTouch(car) {
+      const C = this.cfg, b = this.ball;
+      const box = this._carBox(car, b.pos.x, b.pos.y, b.pos.z);
+      if (box.d >= C.ballR) return false;
+      // Which way is "down" for this car?
+      let ux = 0, uy = -1, uz = 0;
+      if (typeof car.roof === "function") {
+        const r = car.roof();
+        ux = -r.x; uy = -r.y; uz = -r.z;
+      }
+      // Direction from the car's middle to the ball.
+      const mx = car.pos.x + Math.sin(car.heading) * C.carOffZ, my = car.pos.y + C.carH / 2, mz = car.pos.z + Math.cos(car.heading) * C.carOffZ;
+      const dx = b.pos.x - mx, dy = b.pos.y - my, dz = b.pos.z - mz;
+      const dl = Math.hypot(dx, dy, dz) || 1;
+      if ((dx * ux + dy * uy + dz * uz) / dl < 0.6) return false; // not underneath
+      // The contact must be on the underside itself (not a nose or side
+      // corner) and within the wheelbase.
+      if (box.ny > -0.7 && typeof car.roof !== "function") return false;
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+      const lx = (box.cx - car.pos.x) * -fz + (box.cz - car.pos.z) * fx;
+      const lz = (box.cx - car.pos.x) * fx + (box.cz - car.pos.z) * fz - C.carOffZ;
+      return Math.abs(lx) <= C.carHalfW * C.buntWheelbase && Math.abs(lz) <= C.carHalfL * C.buntWheelbase;
+    }
+
+    _tryBunt() {
+      const now = this.time;
+      for (let i = 0; i < this.players.length; i++) {
+        const p = this.players[i];
+        if (p.out || p.dead > 0 || now < p.buntReady) continue;
+        if (this._wheelsTouch(this.cars[i])) { this._bunt(i); return true; }
+      }
+      return false;
+    }
+
+    // Pop the ball gently up, slow it, make it (stay) the toucher's, and
+    // give the car its air moves back. No hit-freeze.
+    _bunt(i) {
+      const C = this.cfg, b = this.ball, p = this.players[i], car = this.cars[i];
+      const kept = Math.max(b.tier, b.speed) * C.buntKeep;
+      // Up to about buntUp high, drifting along with the car a little.
+      b.vel.set(car.vel.x * 0.4, Math.sqrt(2 * C.gravity * C.buntUp), car.vel.z * 0.4);
+      b.owner = i;
+      b.neutral = false;
+      b.tier = kept;
+      b.ownT = 0;
+      b.hitId++;
+      b.lastHitT = this.time;
+      b.safeUntil = this.time + C.bumpGrace;
+      this._startCooling(1, C.buntHold); // a gravity ball that stays yours for a while
+      this.noHitTime = 0;
+      this.lastStrike = null;
+      p.buntReady = this.time + C.buntCooldown;
+      p.bunts++;
+      p.stats.bunts++;
+      this.stats.bunts++;
+      // The flip reset (when the shared car supports it).
+      if (typeof car.resetAirMoves === "function") car.resetAirMoves();
+      this._log("bunt", i, { kept: +kept.toFixed(1) });
+      this.hooks.onBunt(car, b);
+      this.onEvent("bunt", { player: p });
+    }
+
     /* ---------- KOs ---------- */
 
     // Does an owned (or cooling) ball touch anyone who isn't its owner?
     _checkKOs() {
       const C = this.cfg, b = this.ball;
-      if (b.mode === "neutral" || b.owner === null || this.time < b.safeUntil) return false;
+      if (b.mode === "neutral" || b.owner === null) return false;
+      // Wheels on the ball beat everything: that's a bunt, not a KO
+      // (and it works on your own ball too).
+      if (this._tryBunt()) return false;
+      if (this.time < b.safeUntil) return false;
       const victims = [];
       this.players.forEach((p, i) => {
         if (p.out || p.dead > 0 || i === b.owner || p.invuln > 0) return;
@@ -856,6 +935,7 @@
       // Owned or cooling balls never get pushed: they pass through their
       // owner and KO (or pass through invulnerable) everyone else.
       if (b.mode !== "neutral") return;
+      if (this._tryBunt()) return;
       this.players.forEach((p, i) => {
         if (p.out || p.dead > 0 || b.mode !== "neutral") return;
         const car = this.cars[i];
@@ -875,6 +955,8 @@
         b.vel.z += car.vel.z * C.bumpCarry;
         b.vel.y += C.bumpLift * Math.max(0.2, ny);
         this.stats.bumps++;
+        p.stats.bumps++;
+        this._log("bump", i, { impact: +impact.toFixed(1), took: impact >= C.bumpOwnMin });
         // A hard bump on a neutral ball makes you its owner at baseSpeed,
         // but it stays a gravity ball (it doesn't fly straight).
         if (impact >= C.bumpOwnMin) {
@@ -894,6 +976,8 @@
       p.lives = Math.max(0, p.lives - 1);
       if (owner) owner.kos++;
       this.koLog.push({ t: +this.time.toFixed(2), victim: i, owner: ownerIdx, speed: +this.ball.speed.toFixed(1) });
+      this._log("ko", ownerIdx, { victim: i, speed: +this.ball.speed.toFixed(1) });
+      this.stalemateStreak = 0;
 
       const ownerCar = owner ? this.cars[ownerIdx] : null;
       this.hooks.onKO(car, ownerCar);
@@ -1004,7 +1088,13 @@
       const reach = this._reach(car);
       const mine = b.owner === i;
       const dangerous = b.mode !== "neutral" && !mine && b.owner !== null;
-      const handle = !dangerous || b.speed <= S.maxReturn;
+      // Boldness: after each stalemate since the last KO, and in a 1-v-1
+      // endgame, bots return faster balls and misread fewer. That stops a
+      // cautious owner and a cautious dodger stalling a match forever.
+      const alive = this.players.filter((q) => !q.out).length;
+      const bold = this.stalemateStreak + (alive === 2 ? 1 : 0);
+      const maxReturn = S.maxReturn + 6 * bold;
+      const handle = !dangerous || b.speed <= maxReturn;
 
       // 1) In reach and harmless to me (neutral, or my own): hit it on.
       //    Enemy balls go through the plan below instead, so the bot's
@@ -1025,8 +1115,16 @@
       // 2) A gravity ball that can't hurt me: go and meet it.
       if (b.mode === "neutral" || (mine && b.mode === "cooling")) return this._botMeet(i);
 
-      // 3) My own straight-flying ball: stay out of its way.
-      if (mine) return this._botIdle(i);
+      // 3) My own straight-flying ball: stay out of its way... unless
+      //    things have stalled, then go after it and strike it again.
+      if (mine) {
+        if (bold > 0) {
+          const ctrl = TP.ai.driveTo(car, ...this._inside(b.pos.x, b.pos.z), { boostDist: 10 });
+          ctrl.hit = false;
+          return ctrl;
+        }
+        return this._botIdle(i);
+      }
 
       // 4) An enemy ball. Straight-line guess (owned balls fly straight):
       //    when is it closest to my car, how close, and how high then?
@@ -1041,7 +1139,7 @@
 
       if (!threat || !reacted || p.invuln > 0.3) {
         // 5) Not coming at me (yet). Chase it down if I can handle it.
-        if (handle && b.speed < S.maxReturn * 0.8 && p.invuln <= 0) {
+        if (handle && b.speed < maxReturn * 0.8 && p.invuln <= 0) {
           const ctrl = TP.ai.driveTo(car, ...this._inside(b.pos.x, b.pos.z), { boostDist: 10 });
           ctrl.hit = false;
           return ctrl;
@@ -1054,9 +1152,8 @@
         S.planFor = b.hitId;
         const frac = clamp((b.speed - C.baseSpeed) / (C.maxSpeed - C.baseSpeed), 0, 1);
         S.lead = S.swingLead + rand(-S.leadErr, S.leadErr * 2); // early or late this time
-        if (Math.random() < S.fumble + S.fumbleFast * frac) S.plan = "fumble";
-        else if (b.speed <= S.maxReturn) S.plan = "return";
-        else if (b.speed <= S.maxBunt && Math.random() < S.buntChance) S.plan = "bunt";
+        if (Math.random() < (S.fumble + S.fumbleFast * frac) * Math.pow(0.6, bold)) S.plan = "fumble";
+        else if (b.speed <= maxReturn) S.plan = "return";
         else S.plan = "dodge";
       }
 
@@ -1077,12 +1174,6 @@
           ctrl.steer = aim.steer;
           ctrl.throttle = aim.throttle;
         }
-        return ctrl;
-      }
-      if (S.plan === "bunt") {
-        // Jump to meet it, then swipe with no direction held.
-        ctrl.jump = car.onGround && tImpact <= 0.32;
-        if (!car.onGround && canSwing && reach < C.hitRange * 0.9) ctrl.hit = true;
         return ctrl;
       }
       if (S.plan === "dodge") {
@@ -1243,6 +1334,11 @@
       this.lastStrike = null;
       this.noHitTime = 0;
       if (this.state === "serve") { this.state = "play"; this.serveTimer = 0; }
+    }
+
+    // Record a counted event (see this.events).
+    _log(type, player, extra) {
+      this.events.push(Object.assign({ t: +this.time.toFixed(2), type, player }, extra));
     }
 
     /* =====================================================================
