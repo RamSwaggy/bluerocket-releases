@@ -25,6 +25,7 @@
   <script src="../shared/js/car.js"></script>
   <script src="../shared/js/fx.js"></script>
   <script src="../shared/js/sfx.js"></script>
+  <script src="../shared/js/rumble.js"></script>
   <script>
     /* ---------- Stand-in for Gameplay's events.js (preview only) ---------- */
     TP.M5 = TP.M5 || {};
@@ -38,6 +39,7 @@
   <script src="js/vfx.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/hud.js"></script>
+  <script src="js/menu.js"></script>
   <script>
   /* =====================================================================
      Fake match: a paint grid, four "cars" that drive loops out of their
@@ -46,6 +48,7 @@
        ?warp=40   fast-forward the fake match 40 s before showing it
        ?od        start in overdrive        ?card=round | match   show a card
        ?shot      hide the key list (for screenshots)
+       ?menu      open the title menu      ?pause   open the pause overlay
      ===================================================================== */
   (function () {
     "use strict";
@@ -295,6 +298,20 @@
     if (q.get("card") === "match") TP.M5.emit("matchEnd", { standings: [3, 0, 1, 2], roundWins: [1, 0, 0, 2],
       stats: [0, 1, 2, 3].map((i) => ({ bestFill: 6 + i * 2.5, pops: i, painted: 20 + i * 3, distance: 1500 + i * 210 })) });
     if (q.has("banner")) TP.M5.emit("overdrive");
+    // Menu + pause wiring, the way Gameplay's main.js will do it.
+    TP.M5.on("menuOpen", () => { paused = true; });
+    TP.M5.on("menuStart", (e) => {
+      console.log("menuStart", JSON.stringify(e));
+      timeLeft = (e.options && e.options.roundLength) || 120;
+      overdrive = false;
+      TP.M5.emit("roundCountdown", { round: 1, arena });
+      setTimeout(() => { paused = false; TP.M5.emit("roundStart"); }, 3000);
+    });
+    TP.M5.on("pause", () => { paused = true; });
+    TP.M5.on("resume", () => { paused = false; });
+    TP.M5.on("restart", () => { timeLeft = 120; paused = false; });
+    if (q.has("menu")) TP.M5.Menu.open();
+    if (q.has("pause")) { TP.M5.Pause.enabled = true; TP.M5.Pause.open(); }
     TP.M5.preview = { world, vfx, hud, grid, cars };
   })();
   </script>

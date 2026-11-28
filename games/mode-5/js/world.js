@@ -539,24 +539,26 @@
 
       // Roller drum on two arms in front of the car.
       const roller = new THREE.Group();
-      roller.position.set(0, 0.3, 2.3);
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1.9, 16),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7, roughness: 0.6 }));
+      // Big and bright on purpose: from the overhead camera the roller is one
+      // of the main ways you spot your own car.
+      roller.position.set(0, 0.38, 2.4);
+      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 2.15, 18),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, roughness: 0.5 }));
       drum.rotation.z = Math.PI / 2;
       // Darker end caps + a stripe so you can see it spin.
       const capMat = new THREE.MeshStandardMaterial({ color: 0x20253f, metalness: 0.6, roughness: 0.3 });
       for (const sx of [-1, 1]) {
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.08, 16), capMat);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.08, 16), capMat);
         cap.rotation.z = Math.PI / 2;
-        cap.position.x = sx * 0.98;
+        cap.position.x = sx * 1.1;
         roller.add(cap);
         const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.85), capMat);
-        arm.position.set(sx * 0.98, 0.18, -0.38);
+        arm.position.set(sx * 1.1, 0.18, -0.4);
         arm.rotation.x = -0.4;
         roller.add(arm);
       }
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.07, 0.07), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      stripe.position.y = 0.29;
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.17, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      stripe.position.y = 0.37;
       // The drum and its stripe spin together; the arms and caps stay put.
       const spinner = new THREE.Group();
       spinner.add(drum, stripe);
@@ -564,14 +566,42 @@
       body.add(roller);
 
       // Underglow: a flat additive glow on the ground under the car.
-      const glow = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 6.4), new THREE.MeshBasicMaterial({
-        map: glowTex(), color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 9), new THREE.MeshBasicMaterial({
+        map: glowTex(), color, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.06;
       mesh.add(glow);
 
-      mesh.userData.m5 = { roller, spinner, glow };
+      // A bright ring on the floor around the car (white core, coloured edge)
+      // so each car has a clear "here I am" outline even on its own paint.
+      const ring = new THREE.Group();
+      const ringOuter = new THREE.Mesh(new THREE.RingGeometry(2.75, 3.15, 40), new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      const ringInner = new THREE.Mesh(new THREE.RingGeometry(2.62, 2.75, 40), new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      ring.add(ringOuter, ringInner);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.08;
+      mesh.add(ring);
+
+      // The shared floating marker: taller, bigger, with a glow halo.
+      const marker = mesh.userData.marker;
+      let beacon = null;
+      if (marker) {
+        marker.scale.setScalar(1.9);
+        marker.position.y = 3.8;
+        beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: glowTex(), color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        beacon.scale.setScalar(3.4);
+        beacon.position.y = 3.9;
+        mesh.add(beacon);
+      }
+
+      mesh.userData.m5 = { roller, spinner, glow, ring, marker, beacon, t: i * 1.3 };
     }
 
     /* ---------------------------------------------------------------
@@ -679,9 +709,10 @@
         cx = (minX + maxX) / 2; cz = (minZ + maxZ) / 2;
         rx = (maxX - minX) / 2 + margin; rz = (maxZ - minZ) / 2 + margin;
         // Never zoom in so far that the play feels claustrophobic.
-        rx = Math.max(rx, 20); rz = Math.max(rz, 16);
-        // Lean the look-point toward the arena centre: steadier, shows more floor.
-        cx *= 0.6; cz *= 0.6;
+        rx = Math.max(rx, 18); rz = Math.max(rz, 14);
+        // Lean the look-point a little toward the arena centre (steadier), but
+        // mostly frame the cars themselves.
+        cx *= 0.85; cz *= 0.85;
       }
 
       // Find the distance at which all four corners of the box (cx±rx, cz±rz)
@@ -702,17 +733,22 @@
       const cam = this._fitCam || (this._fitCam = this.camera.clone());
       cam.fov = this.camera.fov;
       cam.aspect = this.aspect;
+      cam.clearViewOffset();   // the HUD shift is handled by yLim below, not twice
       cam.updateProjectionMatrix();
       const v = this._fitV || (this._fitV = new THREE.Vector3());
       const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+      // The HUD covers part of the top (and on phones, the bottom) of the
+      // screen. placeCamera() shifts the picture so its centre sits in the
+      // free space between them; here the box only has to fit that space.
+      const sa = this.safeArea();
+      const yLim = Math.max(0.3, 1 - sa.top - sa.bottom) * 0.97;
       const fits = (d) => {
         cam.position.set(cx, Math.sin(pitch) * d, cz + Math.cos(pitch) * d);
         cam.lookAt(cx, 0, cz);
         cam.updateMatrixWorld();
         for (const [sx, sz] of corners) {
           v.set(cx + sx * rx, 0, cz + sz * rz).project(cam);
-          // Leave room at the top for the HUD (score bar) — 0.80 instead of 0.94.
-          if (Math.abs(v.x) > 0.96 || v.y > 0.80 || v.y < -0.96 || v.z > 1) return false;
+          if (Math.abs(v.x) > 0.96 || Math.abs(v.y) > yLim || v.z > 1) return false;
         }
         return true;
       };
@@ -724,7 +760,18 @@
       return hi;
     }
 
+    // Fractions of the screen height the HUD covers at the top and bottom.
+    // The HUD publishes them as TP.M5.safeArea; sensible default otherwise.
+    safeArea() {
+      const s = TP.M5.safeArea;
+      return { top: s ? s.top : 0.12, bottom: s ? s.bottom : 0 };
+    }
+
     placeCamera(snap, dt = 0) {
+      // Shift the projection so the picture centres in the HUD-free space.
+      const sa = this.safeArea();
+      const H = 1000, W = H * this.aspect;
+      this.camera.setViewOffset(W, H, 0, -((sa.top - sa.bottom) / 2) * H, W, H);
       const p = this.camPitch, d = this.camDist, t = this.camTarget;
       this.camera.position.set(t.x, Math.sin(p) * d, t.z + Math.cos(p) * d);
       if (this.shakeAmt > 0.001) {
@@ -751,8 +798,17 @@
       m.spinner.rotation.x += (fwd * v * dt) / 0.3;
       const air = car.onGround === false ? 1 : 0;
       m.glow.material.opacity += ((car.out ? 0 : air ? 0.15 : car.boosting ? 0.85 : 0.55) - m.glow.material.opacity) * Math.min(1, dt * 10);
-      // Underglow stays on the floor even when the car jumps.
-      m.glow.position.y = 0.06 - (car.mesh.position.y || 0);
+      // Underglow and ring stay on the floor even when the car jumps.
+      const lift = car.mesh.position.y || 0;
+      m.glow.position.y = 0.06 - lift;
+      m.ring.position.y = 0.08 - lift;
+      m.ring.visible = !car.out;
+      // Marker bobs gently so the eye catches it.
+      m.t += dt;
+      if (m.marker) {
+        m.marker.position.y = 3.8 + Math.sin(m.t * 3) * 0.25;
+        if (m.beacon) { m.beacon.position.y = m.marker.position.y + 0.1; m.beacon.visible = !car.out; }
+      }
     }
 
     /* ---------------------------------------------------------------
