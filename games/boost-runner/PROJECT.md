@@ -80,10 +80,48 @@ In the browser: `sim.html?demo&seed=N` (logic only, no rendering). URL flags: `d
 
 Any change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
-## Current state (as of 2026-11-27)
+## Current state (as of 2026-11-28)
 
-- **Game logic merged** (Gameplay JOB 1): a full 4-bot match runs headless in `sim.html?demo&seed=N`,
-  deterministic, every chunk clearable, fair seats. Art and UI is wiring the look onto it; QC's smoke test is being finalised.
+**PAUSED 2026-11-28** (Reece's call via the Director, to save usage). See the resume notes below.
+
+- **Merged and passing on `team/boost-runner`:**
+  - **Game logic (Gameplay):** runner car, course chunks and seeded chainer, view/edge maths, rounds and match,
+    bots, `window.BR` hooks, `sim.html`. A full 4-bot match is deterministic by seed. The Hit-dash costs 20 boost
+    meter, and the bump clamp is in.
+  - **Look (Art and UI):** `index.html` with the Night-shift test range scene, camera, HUD, cards, effects, music,
+    and a menu using the hub setup and `TP.MenuNav`. `index.html?demo` plays a full match on the real logic.
+  - **Tests (QC):** `credits-check.js`, `boost-runner-smoke.js` (with the stuck rule: a pile-up is a warning,
+    a trap is a fail), `boost-runner-balance.js`.
+- **Checks on the merged tip:** smoke PASS on `sim.html` and `index.html` (seed 1), credits-check PASS,
+  car-feel tuning check PASS.
+- **Balance today (500 seeds):** fair seats (23-28% each), rounds 78-87 s, but **79% of KOs are "behind"**:
+  the camera squeeze decides most rounds, because bots clear about 97% of chunks. The step chunk is the deadliest (5%).
+
+## Paused 2026-11-28: resume notes
+
+**Unfinished, not merged:**
+- `team/boost-runner-gameplay` @ `1d0a5bb` (**WIP**, JOB 3 bot/squeeze retune). Done: bot skill spread
+  (easy/normal/hard), bots boost only with a reason, back off and re-jump after a bump at a step face, squeeze
+  min speed 22 by 90 s. **Not tuned:** median round 117 s, 46% of rounds reach sudden death, step KO 6.3%,
+  3 stuck cars (seeds 92, 241). It over-corrected: the squeeze is now too soft for the weaker bots.
+  JOB 3 targets (30 seeds, 4 normal bots): round p50 60-75 s, p90 at or under 90 s, under 5% sudden death,
+  at least 35% "fell" KOs, median pack vx at or under 19, seats within ±10%, every chunk ≥80% cleared by normal
+  and ≥95% by hard.
+
+**Known small issues (Art and UI):**
+- The HUD panels of cars KO'd last round stay grey during the next round's countdown.
+- The round-win card hasn't been checked at speed 1 on the real logic (at speed 4 it only flashes).
+- The sky gradient and the "P1" edge arrow on the round-win card were flagged on the stub; recheck on the real logic.
+- Commit `375636f` on the art branch has a wrong message (it's the stub-to-real-logic swap, not a sky fix).
+
+**Next steps to playable for Reece:**
+1. Gameplay finishes JOB 3 from `1d0a5bb` to the targets above. QC checks it independently with
+   `node tools/boost-runner-balance.js 500 1`, plus smoke seeds 1, 2, 7, 34, 42, 92, 241.
+2. Art and UI fixes the grey-panel carry-over, checks the round-win card at speed 1, and sends screenshots
+   (outside the repo).
+3. QC runs the smoke on `index.html` with a scripted human seat (keyboard 1) to cover a human path.
+4. Boss merges, then asks the Director to move the hub card off "Coming soon", and Reece plays
+   `boost-runner/index.html` (1 human + 3 bots).
 
 ## Decisions (from Reece)
 
