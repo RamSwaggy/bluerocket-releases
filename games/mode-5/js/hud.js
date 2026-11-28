@@ -74,6 +74,24 @@
   @media (max-width: 520px) { .m5-chip .nm { display: none; } .m5-chip { padding: 2px 7px 2px 4px; gap: 4px; }
     .m5-chip .pct { min-width: 2.4em; } .m5-chip .pips { gap: 2px; } .m5-chip .pip { width: 6px; height: 6px; } }
 
+  /* ----- Portrait phones: chips move to the bottom edge. The floor is
+     square, so on a tall screen there's spare height below it anyway; this
+     keeps the top light and puts the scores where thumbs aren't. ----- */
+  @media (max-aspect-ratio: 3/4) {
+    .m5-chips { position: fixed; left: 0; right: 0; margin: 0 auto; bottom: max(12px, env(safe-area-inset-bottom)); }
+    .m5-chip { font-size: 14px; padding: 5px 10px 5px 6px; }
+    .m5-hint { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 48px); }
+  }
+
+  /* ----- Short landscape screens (phones on their side): one slim row.
+     The bar already shows each colour's %, so the chips go. ----- */
+  @media (max-height: 500px) and (min-aspect-ratio: 1/1) {
+    .m5-top { flex-direction: row; justify-content: center; gap: 10px; top: max(6px, env(safe-area-inset-top)); }
+    .m5-timer { font-size: 20px; padding: 3px 10px; }
+    .m5-bar { width: min(70vw, 620px); height: 16px; }
+    .m5-chips { display: none; }
+  }
+
   /* ----- Big centre banner ----- */
   .m5-banner { position: absolute; left: 0; right: 0; top: 34%; text-align: center; transform: translateY(-50%); }
   .m5-banner .big { display: inline-block; font-weight: 900; font-style: italic; line-height: .95;
@@ -124,6 +142,7 @@
   .m5-row .track { height: 18px; border-radius: 999px; background: #1a2042; overflow: hidden; }
   .m5-row .fill { display: block; height: 100%; width: 0; border-radius: 999px; transition: width 1.1s cubic-bezier(.2,.8,.2,1);
     box-shadow: 0 0 14px currentColor; background: currentColor; }
+  .m5-row.head { margin: 0 0 -2px; font-size: 12px; color: #9aa6c8; letter-spacing: .08em; text-transform: uppercase; }
   .m5-row .val { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
   .m5-row.win .nm::after { content: " ★"; color: var(--m5-gold); }
   .m5-stats { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
@@ -191,8 +210,19 @@
     }
 
     setCamera(camera) { this.camera = camera; }
+
+    // New match: clear anything left over from the last one.
+    reset() {
+      this.hideCard();
+      this.clearBanner();
+      clearTimeout(this.cardTimer);
+      this.overdrive = false;
+      this.countdownLeft = 0;
+      this.floatLayer.innerHTML = "";
+      this.timerEl.classList.remove("warn", "od");
+    }
     setPlayers(players) { this.players = players; this.buildBar(); }
-    show(on) { this.root.style.display = on ? "" : "none"; }
+    show(on) { this.root.style.display = on ? "" : "none"; this.measureSafeArea(); }
     showTop(on) { this.root.querySelector(".m5-top").style.visibility = on ? "" : "hidden"; }
 
     // One segment + one chip per player. Built once; update() only resizes.
@@ -254,6 +284,11 @@
         });
       }
 
+      // Tell the camera how much of the screen the HUD covers (top / bottom),
+      // so the arena is framed in the free space. Measured a few times a second.
+      this.safeTimer = (this.safeTimer || 0) - dt;
+      if (this.safeTimer <= 0) { this.safeTimer = 0.25; this.measureSafeArea(); }
+
       // Countdown: 3, 2, 1 on game time, with a beep for each number.
       if (this.countdownLeft > 0) {
         this.countdownLeft -= dt;
@@ -273,6 +308,21 @@
         this.hintTimer -= dt;
         if (this.hintTimer <= 0) this.hintEl.classList.remove("show");
       }
+    }
+
+    measureSafeArea() {
+      const H = innerHeight || 1;
+      let top = 0, bottom = 0;
+      if (this.root.style.display !== "none") {
+        for (const e of [this.timerEl, this.barEl, this.chipsEl]) {
+          const r = e.getBoundingClientRect();
+          if (!r.height) continue;
+          if (r.top + r.height / 2 < H / 2) top = Math.max(top, r.bottom / H);
+          else bottom = Math.max(bottom, (H - r.top) / H);
+        }
+      }
+      // A little breathing room past the HUD edge.
+      TP.M5.safeArea = { top: top ? top + 0.01 : 0, bottom: bottom ? bottom + 0.01 : 0 };
     }
 
     /* ---------- Big centre banner ----------
@@ -351,20 +401,32 @@
     matchCard(e = {}) {
       const ps = this.players || [];
       const nameOf = (i) => { const p = ps.find((q, k) => (q.index ?? k) === i); return p ? p.name : `P${i + 1}`; };
-      const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.index));
+      const order = (e.standings || ps.map((p, k) => p.index ?? k)).map((s) => (typeof s === "number" ? s : s.player ?? s.index));
       const champ = order[0];
+      const draw = e.winner === -1;
       const stats = e.stats || [];
-      const LABELS = { bestFill: "Best fill", pops: "Pops", painted: "Painted", distance: "Distance", fills: "Fills", rounds: "Rounds" };
-      const keys = Object.keys(stats[champ] || stats[0] || {});
+      const LABELS = { bestFill: "Best fill", fills: "Fills", pops: "Pops", distance: "Distance" };
+      // Show the stats we know how to label, in this order, if present.
+      const first = stats[champ] || stats[0] || {};
+      const keys = Object.keys(LABELS).filter((k) => typeof first[k] === "number");
+      // painted is a cell count from Gameplay; turn it into % of the floor if we can.
+      const grid = TP.M5.match && TP.M5.match.grid;
       const fmt = (k, v) => (v == null ? "–" : k === "distance" ? Math.round(v) + " m" :
-        k === "bestFill" || k === "painted" ? Math.round(v) + "%" : Math.round(v * 10) / 10);
+        k === "bestFill" ? (Math.round(v * 10) / 10) + "%" :
+        k === "painted" ? (grid && grid.paintable ? Math.round((v / grid.paintable) * 100) + "%" : Math.round(v)) : Math.round(v * 10) / 10);
       this.openCard(`
         <div class="kicker">Match over</div>
-        <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${esc(nameOf(champ))} wins!</h2>
-        ${order.map((i, rank) => `<div class="m5-row ${rank === 0 ? "win" : ""}" style="color:${CSS()[i % 4]}">
+        <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${draw ? "It's a draw!" : esc(nameOf(champ)) + " wins!"}</h2>
+        <div class="m5-row head"><span>Player</span><span>Rounds won</span><span style="text-align:right">Wins</span></div>
+        ${order.map((i, rank) => {
+          // Bar = rounds won, as a share of the most anyone won.
+          const wins = e.roundWins ? e.roundWins[i] || 0 : 0;
+          const most = e.roundWins ? Math.max(1, ...e.roundWins) : 1;
+          return `<div class="m5-row ${rank === 0 ? "win" : ""}" style="color:${CSS()[i % 4]}">
           <span class="nm" style="color:#f2f5ff">${rank + 1}. ${esc(nameOf(i))}</span>
-          <span class="track"><span class="fill" data-w="${100 - rank * 22}"></span></span>
-          <span class="val" style="color:#f2f5ff">${e.roundWins ? e.roundWins[i] || 0 : ""}</span></div>`).join("")}
+          <span class="track"><span class="fill" data-w="${e.roundWins ? (wins / most) * 100 : 100 - rank * 22}"></span></span>
+          <span class="val" style="color:#f2f5ff">${e.roundWins ? wins : ""}</span></div>`;
+        }).join("")}
         ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
           ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
             ${keys.map((k) => `<td>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
@@ -386,12 +448,27 @@
       this.listening = true;
       const on = TP.M5.on;
       const colorOf = (p) => CSS()[TP.M5.pi(p) % 4];
+      // Hidden behind the title menu, back for the first countdown.
+      on("menuOpen", () => { this.hideCard(); this.clearBanner(); this.show(false); });
+      on("quit", () => this.show(false));
       on("roundCountdown", (e = {}) => {
+        // (Not while the title menu is up: a backdrop match plays behind it.)
+        if (!(TP.M5.Menu && TP.M5.Menu.isOpen)) this.show(true);
         this.hideCard();
         this.overdrive = false;
         const round = e.round || 1;
-        const arenaName = e.arena && (e.arena.name || (typeof e.arena === "string" ? e.arena : ""));
-        this.countdown(e.seconds || 3, `Round ${round}${arenaName ? " · " + arenaName : ""}`);
+        const arenaName = e.arenaName || (e.arena && e.arena.name) || "";
+        this.countSub = `Round ${round}${arenaName ? " · " + arenaName : ""}`;
+        // Gameplay sends "countdown" {n} each second; until the first one
+        // arrives, show the round title.
+        this.gotCount = false;
+        this.banner(`ROUND ${round}`, { sub: arenaName, color: "#ffffff", glow: "#7dd3fc", hold: 1.0 });
+      });
+      on("countdown", (e) => {
+        this.gotCount = true;
+        if (!e.n) return; // 0 = GO, handled by roundStart
+        this.banner(String(e.n), { sub: this.countSub, color: "#ffffff", glow: "#7dd3fc", hold: 0.9 });
+        if (TP.M5.Audio) TP.M5.Audio.play("count");
       });
       on("roundStart", () => {
         this.countdownLeft = 0;
@@ -403,6 +480,9 @@
       });
       on("fill", (e) => {
         const pct = e.pct || 0;
+        // Tiny fills (closing a loop around a sliver) happen constantly;
+        // only real ones earn a number on screen.
+        if (pct < 0.5) return;
         // Big fills get a bigger number.
         const size = pct >= 10 ? 1.5 : pct >= 4 ? 1.15 : 0.85;
         this.floater(`FILL +${pct >= 1 ? Math.round(pct) : pct.toFixed(1)}%`, e.cx || 0, e.cz || 0, colorOf(e.player), size);
@@ -432,4 +512,6 @@
   }
 
   TP.M5.Hud = Hud;
+  // main.js looks for TP.M5.HUD (capitals) to know the real HUD is here.
+  TP.M5.HUD = Hud;
 })();

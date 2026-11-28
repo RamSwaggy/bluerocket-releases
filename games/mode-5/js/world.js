@@ -98,12 +98,12 @@
      World
      ===================================================================== */
   class World {
-    constructor(scene, arena, grid) {
+    constructor(scene, arena, grid, camera) {
       this.scene = scene;
       this.arena = arena;
       this.grid = grid;
       this.size = arena.size || 96;
-      this.n = grid.n || grid.size || 72;
+      this.n = grid.N || grid.n || 72;
       this.cell = this.size / this.n;    // world units per cell
       this.time = 0;
       this.group = new THREE.Group();    // everything we add lives here (easy dispose)
@@ -122,7 +122,10 @@
       this.buildSurroundings();
 
       /* ---------- Camera ---------- */
-      this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, this.size * 6);
+      // A camera can be handed in so it survives an arena change.
+      this.camera = camera || new THREE.PerspectiveCamera(42, 1, 0.5, this.size * 6);
+      this.camera.fov = 42;
+      this.camera.far = this.size * 6;
       this.camTarget = new THREE.Vector3(0, 0, 0);  // smoothed look-at point
       this.camDist = this.size * 1.0;               // smoothed distance from target
       this.camPitch = 0.98;                         // radians down from horizontal (~56°)
@@ -143,23 +146,32 @@
 
       const key = new THREE.DirectionalLight(0xdfe8ff, 1.15);
       key.position.set(S * 0.25, S * 0.9, S * 0.45);
-      key.castShadow = true;
-      key.shadow.mapSize.set(2048, 2048);
+      // No real-time shadows: from the overhead camera each car's underglow
+      // and floor ring already ground it, and shadows were one of the
+      // biggest per-frame costs on weak GPUs.
+      key.castShadow = false;
+      key.shadow.mapSize.set(1024, 1024);   // plenty for blocky cars; much cheaper
       const s = S * 0.62;
       Object.assign(key.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: S * 3 });
       key.shadow.bias = -0.0006;
       this.group.add(key);
       this.group.add(key.target);
 
-      // Rim lights sit just outside each corner, low, pointing in.
-      // r160 uses physical light units, so point lights need large intensities.
+      // Corner colour: instead of four real point lights (expensive on
+      // phones: every lit pixel pays for each one) each corner gets a soft
+      // glow painted onto the floor in that player's colour. Looks the same
+      // from the overhead camera for a fraction of the cost.
       this.rims = [];
       const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
       corners.forEach(([cx, cz], i) => {
-        const light = new THREE.PointLight(NEON[i], S * S * 0.09, S * 1.6, 1.6);
-        light.position.set(cx * S * 0.52, 7, cz * S * 0.52);
-        this.group.add(light);
-        this.rims.push(light);
+        const pool = new THREE.Mesh(new THREE.PlaneGeometry(S * 0.55, S * 0.55), new THREE.MeshBasicMaterial({
+          map: glowTex(), color: NEON[i], transparent: true, opacity: 0.32,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set(cx * S * 0.5, 0.03, cz * S * 0.5);
+        this.group.add(pool);
+        this.rims.push(pool);
       });
     }
 
@@ -398,6 +410,26 @@
         band.position.set(o.x, 0.6, o.z);
         this.group.add(band);
       }
+      // Round pillars: a dark column with glowing rings near the base and top
+      // and a glowing disc on top (it's what you see from the camera).
+      for (const p of this.arena.pillars || []) {
+        const h = p.h || 8;
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r * 1.04, h, 40), bodyMat);
+        col.position.set(p.x, h / 2, p.z);
+        col.castShadow = true;
+        col.receiveShadow = true;
+        this.group.add(col);
+        for (const y of [0.6, h - 0.5]) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(p.r * 1.03, 0.1, 6, 48), bandMat);
+          ring.rotation.x = Math.PI / 2;
+          ring.position.set(p.x, y, p.z);
+          this.group.add(ring);
+        }
+        const top = new THREE.Mesh(new THREE.CircleGeometry(p.r * 0.8, 40), capMat);
+        top.rotation.x = -Math.PI / 2;
+        top.position.set(p.x, h + 0.02, p.z);
+        this.group.add(top);
+      }
     }
 
     /* ---------------------------------------------------------------
@@ -484,11 +516,23 @@
       });
       apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
       apronTex.repeat.set(S * 4 / 8, S * 4 / 8);
-      const apron = new THREE.Mesh(new THREE.PlaneGeometry(S * 4, S * 4),
-        new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9 }));
-      apron.rotation.x = -Math.PI / 2;
-      apron.position.y = -0.05;
-      apron.receiveShadow = true;
+      // Scenery is UNLIT (basic materials, no shadows): it covers a lot of
+      // the screen, and lighting it costs a lot on phones for no visible gain.
+      // Built as a square FRAME around the arena (four strips), not one big
+      // plane under it, so no pixel is drawn twice under the paint floor.
+      const apron = new THREE.Group();
+      const W = S * 4, inner = S + 1.2, strip = (W - inner) / 2;
+      for (const [w, d, x, z] of [[W, strip, 0, -(inner + strip) / 2], [W, strip, 0, (inner + strip) / 2],
+                                  [strip, inner, -(inner + strip) / 2, 0], [strip, inner, (inner + strip) / 2, 0]]) {
+        // Each strip repeats the grid tile once per 8 units, like one big plane would.
+        const tex = apronTex.clone();
+        tex.repeat.set(w / 8, d / 8);
+        tex.needsUpdate = true;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: tex }));
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(x, -0.05, z);
+        apron.add(m);
+      }
       this.group.add(apron);
 
       // City blocks: one window texture shared by all buildings (random lit squares).
@@ -499,9 +543,7 @@
           if (Math.random() < 0.32) { g.fillStyle = tints[(Math.random() * tints.length) | 0]; g.fillRect(x, y, 4, 5); }
         }
       });
-      const buildMat = new THREE.MeshStandardMaterial({
-        color: 0x0d1122, map: winTex, emissiveMap: winTex, emissive: 0xffffff, emissiveIntensity: 0.8, roughness: 0.8,
-      });
+      const buildMat = new THREE.MeshBasicMaterial({ map: winTex, color: 0xb8c0e0 });
       const rng = mulberry(7);
       for (let k = 0; k < 46; k++) {
         const a = (k / 46) * Math.PI * 2 + rng() * 0.08;
@@ -539,24 +581,26 @@
 
       // Roller drum on two arms in front of the car.
       const roller = new THREE.Group();
-      roller.position.set(0, 0.3, 2.3);
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1.9, 16),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7, roughness: 0.6 }));
+      // Big and bright on purpose: from the overhead camera the roller is one
+      // of the main ways you spot your own car.
+      roller.position.set(0, 0.38, 2.4);
+      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 2.15, 18),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, roughness: 0.5 }));
       drum.rotation.z = Math.PI / 2;
       // Darker end caps + a stripe so you can see it spin.
       const capMat = new THREE.MeshStandardMaterial({ color: 0x20253f, metalness: 0.6, roughness: 0.3 });
       for (const sx of [-1, 1]) {
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.08, 16), capMat);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.08, 16), capMat);
         cap.rotation.z = Math.PI / 2;
-        cap.position.x = sx * 0.98;
+        cap.position.x = sx * 1.1;
         roller.add(cap);
         const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.85), capMat);
-        arm.position.set(sx * 0.98, 0.18, -0.38);
+        arm.position.set(sx * 1.1, 0.18, -0.4);
         arm.rotation.x = -0.4;
         roller.add(arm);
       }
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.07, 0.07), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      stripe.position.y = 0.29;
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.17, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      stripe.position.y = 0.37;
       // The drum and its stripe spin together; the arms and caps stay put.
       const spinner = new THREE.Group();
       spinner.add(drum, stripe);
@@ -564,14 +608,42 @@
       body.add(roller);
 
       // Underglow: a flat additive glow on the ground under the car.
-      const glow = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 6.4), new THREE.MeshBasicMaterial({
-        map: glowTex(), color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 9), new THREE.MeshBasicMaterial({
+        map: glowTex(), color, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.06;
       mesh.add(glow);
 
-      mesh.userData.m5 = { roller, spinner, glow };
+      // A bright ring on the floor around the car (white core, coloured edge)
+      // so each car has a clear "here I am" outline even on its own paint.
+      const ring = new THREE.Group();
+      const ringOuter = new THREE.Mesh(new THREE.RingGeometry(2.75, 3.15, 40), new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      const ringInner = new THREE.Mesh(new THREE.RingGeometry(2.62, 2.75, 40), new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      ring.add(ringOuter, ringInner);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.08;
+      mesh.add(ring);
+
+      // The shared floating marker: taller, bigger, with a glow halo.
+      const marker = mesh.userData.marker;
+      let beacon = null;
+      if (marker) {
+        marker.scale.setScalar(1.9);
+        marker.position.y = 3.8;
+        beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: glowTex(), color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        beacon.scale.setScalar(3.4);
+        beacon.position.y = 3.9;
+        mesh.add(beacon);
+      }
+
+      mesh.userData.m5 = { roller, spinner, glow, ring, marker, beacon, t: i * 1.3 };
     }
 
     /* ---------------------------------------------------------------
@@ -679,9 +751,10 @@
         cx = (minX + maxX) / 2; cz = (minZ + maxZ) / 2;
         rx = (maxX - minX) / 2 + margin; rz = (maxZ - minZ) / 2 + margin;
         // Never zoom in so far that the play feels claustrophobic.
-        rx = Math.max(rx, 20); rz = Math.max(rz, 16);
-        // Lean the look-point toward the arena centre: steadier, shows more floor.
-        cx *= 0.6; cz *= 0.6;
+        rx = Math.max(rx, 18); rz = Math.max(rz, 14);
+        // Lean the look-point a little toward the arena centre (steadier), but
+        // mostly frame the cars themselves.
+        cx *= 0.85; cz *= 0.85;
       }
 
       // Find the distance at which all four corners of the box (cx±rx, cz±rz)
@@ -702,17 +775,22 @@
       const cam = this._fitCam || (this._fitCam = this.camera.clone());
       cam.fov = this.camera.fov;
       cam.aspect = this.aspect;
+      cam.clearViewOffset();   // the HUD shift is handled by yLim below, not twice
       cam.updateProjectionMatrix();
       const v = this._fitV || (this._fitV = new THREE.Vector3());
       const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+      // The HUD covers part of the top (and on phones, the bottom) of the
+      // screen. placeCamera() shifts the picture so its centre sits in the
+      // free space between them; here the box only has to fit that space.
+      const sa = this.safeArea();
+      const yLim = Math.max(0.3, 1 - sa.top - sa.bottom) * 0.97;
       const fits = (d) => {
         cam.position.set(cx, Math.sin(pitch) * d, cz + Math.cos(pitch) * d);
         cam.lookAt(cx, 0, cz);
         cam.updateMatrixWorld();
         for (const [sx, sz] of corners) {
           v.set(cx + sx * rx, 0, cz + sz * rz).project(cam);
-          // Leave room at the top for the HUD (score bar) — 0.80 instead of 0.94.
-          if (Math.abs(v.x) > 0.96 || v.y > 0.80 || v.y < -0.96 || v.z > 1) return false;
+          if (Math.abs(v.x) > 0.96 || Math.abs(v.y) > yLim || v.z > 1) return false;
         }
         return true;
       };
@@ -724,7 +802,18 @@
       return hi;
     }
 
+    // Fractions of the screen height the HUD covers at the top and bottom.
+    // The HUD publishes them as TP.M5.safeArea; sensible default otherwise.
+    safeArea() {
+      const s = TP.M5.safeArea;
+      return { top: s ? s.top : 0.12, bottom: s ? s.bottom : 0 };
+    }
+
     placeCamera(snap, dt = 0) {
+      // Shift the projection so the picture centres in the HUD-free space.
+      const sa = this.safeArea();
+      const H = 1000, W = H * this.aspect;
+      this.camera.setViewOffset(W, H, 0, -((sa.top - sa.bottom) / 2) * H, W, H);
       const p = this.camPitch, d = this.camDist, t = this.camTarget;
       this.camera.position.set(t.x, Math.sin(p) * d, t.z + Math.cos(p) * d);
       if (this.shakeAmt > 0.001) {
@@ -751,8 +840,17 @@
       m.spinner.rotation.x += (fwd * v * dt) / 0.3;
       const air = car.onGround === false ? 1 : 0;
       m.glow.material.opacity += ((car.out ? 0 : air ? 0.15 : car.boosting ? 0.85 : 0.55) - m.glow.material.opacity) * Math.min(1, dt * 10);
-      // Underglow stays on the floor even when the car jumps.
-      m.glow.position.y = 0.06 - (car.mesh.position.y || 0);
+      // Underglow and ring stay on the floor even when the car jumps.
+      const lift = car.mesh.position.y || 0;
+      m.glow.position.y = 0.06 - lift;
+      m.ring.position.y = 0.08 - lift;
+      m.ring.visible = !car.out;
+      // Marker bobs gently so the eye catches it.
+      m.t += dt;
+      if (m.marker) {
+        m.marker.position.y = 3.8 + Math.sin(m.t * 3) * 0.25;
+        if (m.beacon) { m.beacon.position.y = m.marker.position.y + 0.1; m.beacon.visible = !car.out; }
+      }
     }
 
     /* ---------------------------------------------------------------
@@ -764,7 +862,10 @@
       this.floorUniforms.uTime.value = this.time;
       const g = this.grid;
 
-      if (g.dirty) {
+      // Did the paint change? Gameplay's grid bumps `version`; the preview
+      // grid sets `dirty`.
+      const changed = g.version !== undefined ? g.version !== this._ver : g.dirty;
+      if (changed) {
         // A fill was announced without a cell list: every cell that is about
         // to change to that player's colour is part of the fill.
         if (this.fillQueue.length) {
@@ -779,11 +880,16 @@
           this.fillQueue.length = 0;
         }
         // Small change, no animation running → redraw only the rows Gameplay says changed.
-        const j0 = g.dirtyMin ?? 0, j1 = g.dirtyMax ?? this.n - 1;
-        if (this.time < this.animUntil) this.uploadAll(); else this.writeRows(Math.max(0, j0), Math.min(this.n - 1, j1));
+        let j0 = 0, j1 = this.n - 1;
+        if (g.dirtyRows) {
+          j0 = g.dirtyRows.indexOf(1);
+          j1 = g.dirtyRows.lastIndexOf(1);
+          if (j0 < 0) { j0 = 0; j1 = this.n - 1; }
+        }
+        if (this.time < this.animUntil) this.uploadAll(); else this.writeRows(j0, j1);
         this.animUntil = Math.max(this.animUntil, this.time + LOOK.flashTime);
-        g.dirty = false;
-        if ("dirtyMin" in g) { g.dirtyMin = this.n; g.dirtyMax = -1; }
+        this._ver = g.version;
+        if (g.clearDirty) g.clearDirty(); else g.dirty = false;
       } else if (this.time < this.animUntil) {
         this.uploadAll();   // sweep or flashes still playing
       }
@@ -812,16 +918,28 @@
     listen() {
       if (!TP.M5.on || this.listening) return;
       this.listening = true;
-      TP.M5.on("fill", (e) => this.queueFill(e.player, e.cx, e.cz, e.cellsList));
-      TP.M5.on("overdrive", () => this.setOverdrive(true));
-      TP.M5.on("roundCountdown", () => { this.setOverdrive(false); this.overview(false); });
-      TP.M5.on("roundEnd", () => this.overview(true));
-      TP.M5.on("bump", (e) => { if (e.impact > 9) this.shake(0.5); });
-      TP.M5.on("pop", () => this.shake(0.35));
-      TP.M5.on("land", (e) => { if (e.airtime > 0.8) this.shake(0.25); });
+      // Keep the "stop listening" handles so dispose() can unhook us.
+      this.offs = [];
+      const on = (n, fn) => { const off = TP.M5.on(n, fn); if (typeof off === "function") this.offs.push(off); };
+      on("fill", (e) => this.queueFill(e.player, e.cx, e.cz, e.cellsList));
+      on("overdrive", () => this.setOverdrive(true));
+      on("roundCountdown", () => { this.setOverdrive(false); this.overview(false); this.resetPaint(); });
+      on("roundEnd", () => this.overview(true));
+      on("bump", (e) => { if (e.hard || e.impact > 9) this.shake(0.5); });
+      on("pop", () => this.shake(0.35));
+      on("land", (e) => { if (e.airtime > 0.8) this.shake(0.25); });
+    }
+
+    // New round: forget any fill sweep still in progress from the last one.
+    resetPaint() {
+      this.revealAt.fill(0);
+      this.fillQueue.length = 0;
+      this.animUntil = this.time + 0.1;
     }
 
     dispose() {
+      (this.offs || []).forEach((off) => off());
+      this.offs = [];
       this.scene.remove(this.group);
       this.group.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
@@ -841,9 +959,112 @@
     };
   }
 
-  // Wire up event listening automatically after construction.
-  TP.M5.World = class extends World {
-    constructor(scene, arena, grid) { super(scene, arena, grid); this.listen(); }
+  /* =====================================================================
+     Stage = the look of one arena (floor, walls, lights, camera rig),
+     listening to events. art-preview.html uses it directly.
+     ===================================================================== */
+  class Stage extends World {
+    constructor(scene, arena, grid, camera) { super(scene, arena, grid, camera); this.listen(); }
+  }
+  TP.M5.Stage = Stage;
+
+  // Gameplay's arena data → the shape the Stage draws.
+  //   ramps { x, z, fx, fz, L, W, h } → { x, z, w: W, d: L, h, dir }
+  //   (dir = heading the ramp climbs toward; heading 0 faces +Z, so
+  //    dir = atan2(fx, fz))
+  function lookArena(a) {
+    return {
+      name: a.name,
+      size: a.size || a.half * 2,
+      obstacles: a.obstacles || [],
+      pillars: a.pillars || [],
+      ramps: (a.ramps || []).map((r) => ({ x: r.x, z: r.z, w: r.W, d: r.L, h: r.h, dir: Math.atan2(r.fx, r.fz) })),
+      pads: a.spawns || a.pads || [],
+    };
+  }
+  TP.M5.lookArena = lookArena;
+
+  /* =====================================================================
+     TP.M5.World — the hand-off main.js expects:
+       new TP.M5.World(match, renderer) → { scene, camera, update(dt), resize(w, h), dispose() }
+     It owns the scene (adds match.root, the cars), builds the Stage for the
+     current arena (rebuilt if the arena changes between rounds), and drives
+     the effects, pickups, HUD and audio every frame.
+     ===================================================================== */
+  TP.M5.World = class MatchWorld {
+    constructor(match, renderer) {
+      this.match = match;
+      this.renderer = renderer;
+      TP.M5.__world = this;   // handy in the browser console and for perf probes
+      this.scene = new THREE.Scene();
+      this.scene.add(match.root);
+      this.aspect = innerWidth / Math.max(1, innerHeight);
+      this.camera = new THREE.PerspectiveCamera(42, this.aspect, 0.5, 600);
+      this.pickupMeshes = new Map();
+      this.buildStage();
+      this.vfx = TP.M5.Vfx ? new TP.M5.Vfx(this.scene, this.stage) : null;
+
+      if (TP.M5.Audio) TP.M5.Audio.init();
+      // One HUD for the whole page (it's DOM, not 3D); new players each match.
+      if (TP.M5.Hud) {
+        TP.M5.hud = TP.M5.hud || new TP.M5.Hud();
+        TP.M5.hud.setPlayers(match.players.map((p) => ({ name: p.name, index: p.index })));
+        TP.M5.hud.setCamera(this.camera);
+        TP.M5.hud.reset();
+        TP.M5.hud.show(!(TP.M5.Menu && TP.M5.Menu.isOpen));
+      }
+    }
+
+    buildStage() {
+      if (this.stage) this.stage.dispose();
+      for (const g of this.pickupMeshes.values()) this.scene.remove(g);
+      this.pickupMeshes.clear();
+      this.arenaId = this.match.arena.id;
+      this.stage = new Stage(this.scene, lookArena(this.match.arena), this.match.grid, this.camera);
+      this.stage.setAspect(this.aspect);
+      if (this.vfx) this.vfx.setWorld(this.stage);
+    }
+
+    resize(w, h) {
+      this.aspect = w / Math.max(1, h);
+      this.stage.setAspect(this.aspect);
+    }
+
+    update(dt) {
+      const m = this.match;
+      if (m.arena.id !== this.arenaId) this.buildStage();
+      this.stage.frame(m.cars, dt);
+      this.stage.update(dt);
+      if (this.vfx) this.vfx.update(dt, m.cars);
+      this.syncPickups();
+      if (TP.M5.hud) TP.M5.hud.update(dt, m);
+    }
+
+    // One floating pickup (with its beam) per live pickup in the match.
+    syncPickups() {
+      const live = new Set();
+      for (const p of this.match.pickups || []) {
+        live.add(p.id);
+        if (!this.pickupMeshes.has(p.id)) {
+          const g = this.stage.buildPickup(p.kind);
+          g.position.set(p.x, 0, p.z);
+          this.scene.add(g);
+          this.pickupMeshes.set(p.id, g);
+        }
+      }
+      for (const [id, g] of this.pickupMeshes) {
+        if (!live.has(id)) { this.scene.remove(g); this.pickupMeshes.delete(id); }
+      }
+    }
+
+    dispose() {
+      // The cars belong to the match (it disposes them itself).
+      this.scene.remove(this.match.root);
+      for (const g of this.pickupMeshes.values()) this.scene.remove(g);
+      if (this.vfx) this.vfx.dispose();
+      this.stage.dispose();
+      TP.disposeScene(this.scene);
+    }
   };
   TP.M5.LOOK = LOOK;
 })();
