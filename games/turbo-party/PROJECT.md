@@ -129,7 +129,20 @@ In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&
 | 5b | King of the Hill crowding, Goal Frenzy posts | Gameplay | **merged** (1342ade) |
 | 7 | Re-measure Sumo + KotH at the new car speeds, retune if needed; bonus-tie tiebreak; KotH seat-0 bias fix | Gameplay | **merged** (38b4faf) |
 | 8 | Controller/arrow navigation on the menu and cards with TP.MenuNav | Art and UI | **merged** (963d366, 82c90aa: shared MenuNav fixes, workaround removed) |
+| 9 | Sumo round length ≈ 28 s at the new speeds | Gameplay | **merged** (4c687dc) |
+| 10 | Bot item strategy (bots only ever bought Double Dice) + Goal Frenzy tie-breaker | Gameplay | sent |
 | 6 | Gamepad and sound check (checklist below) | Reece | end of round |
+
+## Balance results (20 bot matches × 6 turns)
+
+| Version | Board 🏆/match | Matches with 40+ coins & 0 board 🏆 | Bonuses changed 1st | Bonus share |
+|---|---|---|---|---|
+| f8dc98c (before trophy fix) | 2.35 | 14/20 | 3/20 | 60% |
+| b3dca18 (trophy fix + new car speeds, old bonus-tie rule) | 2.25 | 12/20 | 8/20 | 63% |
+
+## Feature backlog
+
+- Pickpocket target picker (today it always robs the richest rival).
 
 ## Art backlog (after jobs 1–5; the Director sets the order)
 
