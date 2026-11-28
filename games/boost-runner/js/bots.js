@@ -43,7 +43,9 @@ TP.BR = TP.BR || {};
        boostFull boost now and then just because the meter is full (hard only) */
   const LEVELS = {
     easy:   { jitter: 1.6, miss: 0.08, missHard: 0.25, net: 0.9, netHard: 0.6, late: 0.9, rescue: 0.3, aggro: 0.25, chase: 0.1, boostFull: 0 },
-    normal: { jitter: 0.9, miss: 0.03, missHard: 0.12, net: 0.97, netHard: 0.82, late: 0.4, rescue: 0.55, aggro: 0.6, chase: 0.35, boostFull: 0 },
+    // normal tuned in JOB 3 (2026-11-28): more slips on hard chunks so rounds are decided by
+    // mistakes and rival play, and a lower chase rate so the pack isn't on boost all the time.
+    normal: { jitter: 0.9, miss: 0.05, missHard: 0.2, net: 0.97, netHard: 0.7, late: 0.4, rescue: 0.55, aggro: 0.6, chase: 0.15, boostFull: 0 },
     hard:   { jitter: 0.3, miss: 0.0, missHard: 0.0, net: 1, netHard: 1, late: 0.1, rescue: 1.0, aggro: 1.2, chase: 0.8, boostFull: 0.6 },
   };
   const HARD_CHUNKS = new Set(["gap_wide", "oneway", "ramp"]);
@@ -135,20 +137,28 @@ TP.BR = TP.BR || {};
         const netOn = this.netFor(course, ci < 0 ? car.chunkIndex : ci);
 
         /* ---------- Bumped back or stopped at a step face? ----------
-           Back off to get a run-up (~6 units), then go again: the normal
-           wall-jump rule below fires once we're back up to speed. If the
-           camera edge is too close for that, hop and boost over instead. */
+           Two ways out, in order of preference:
+             1) Hop and boost straight up the face. The in-air "atWall"
+                rule below holds boost with the nose a little up, which
+                climbs a step from a standstill. Needs some meter.
+             2) No meter: back off to get a run-up (~5 units), then go
+                again; the normal wall-jump rule below fires once we're
+                back up to speed.
+           Backing off is never allowed to carry us into the danger zone
+           (JOB 3: reversing into the trailing edge was the main way hard
+           bots died at steps). With no room and no meter we hop anyway:
+           a hop at the face is a better bet than sitting still. */
         const nearFace = look.wall !== null && look.wall < 3.5 && car.vx < 8;
-        const edgeClose = car.x < view.left + view.width * 0.2;
+        const room = car.x - (view.dangerX + 3);  // units we can reverse before the danger zone
         if (nearFace && this.backOffT <= 0 && ctx.time - this.lastBackOff > 1.5) {
-          if (edgeClose && car.boost > 15) {
+          if (car.boost > 15 || room < 6) {
             if (ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
           } else {
             this.backOffT = 1.2;
             this.lastBackOff = ctx.time;
           }
         }
-        const backingOff = this.backOffT > 0 && !(look.wall === null || look.wall >= 6);
+        const backingOff = this.backOffT > 0 && room > 0 && !(look.wall === null || look.wall >= 5);
         if (this.backOffT > 0) this.backOffT = backingOff ? this.backOffT - dt : 0;
         if (backingOff) out.drive = -1;
 
@@ -159,9 +169,11 @@ TP.BR = TP.BR || {};
           if (look.edge <= at && ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
         }
         if (look.wall !== null && !backingOff) {
-          // The best take-off window for a ~1.4 step at 17 is ~3–9.5 units out.
+          // The best take-off window for a ~1.4 step at 17 is ~3–9.5 units out
+          // (measured from the car's centre, which is where walls are tested).
           const fast = car.vx > 9;
-          if ((fast && look.wall <= 5.2 + this.L.late * 0.5 && look.wall >= 2.2) || (!fast && look.wall <= 1.6)) {
+          const lo = 2.2, hi = 5.2 + this.L.late * 0.5;
+          if ((fast && look.wall <= hi && look.wall >= lo) || (!fast && look.wall <= 1.6)) {
             if (ctx.time - this.lastJumpT > 0.35) { this.pressJump(); this.lastJumpT = ctx.time; }
           }
         }

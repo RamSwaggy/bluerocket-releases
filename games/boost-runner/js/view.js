@@ -42,8 +42,12 @@ TP.BR = TP.BR || {};
     // Minimum speed of the trailing edge (units/s), by race time:
     minSpeedDelay: 2,       // nothing for the first 2 s after GO
     minSpeedStart: 6,
-    minSpeedEnd: 22,        // above gas (17) and above what a pack holds without boosting
-    minSpeedTime: 90,       // reaches minSpeedEnd at this race time (passes 17 at ~62 s)
+    // JOB 3 tuning (2026-11-28, 300 seeds of 4 normal bots): median round ~74 s, p90 ~77 s,
+    // no sudden deaths, ~42% of KOs are "fell" (mistakes), not the squeeze.
+    minSpeedEnd: 21,        // above gas (17), about what a pack holds by boosting now and then
+    minSpeedTime: 60,       // reaches minSpeedEnd at this race time (passes 17 at ~40 s)
+    minSpeedLate: 0.35,     // after minSpeedTime it keeps climbing this much per second (24.5 by
+                            // 70 s), so the last two cars can't hold on until sudden death
     suddenDeathAt: 120,     // the hard backstop
     suddenDeathRamp: 6,     // after it, the minimum speed climbs this much per second
     aspectMin: 4 / 3,
@@ -93,7 +97,10 @@ TP.BR = TP.BR || {};
     minSpeedAt(raceTime) {
       const R = VIEW_RULES;
       if (raceTime < R.minSpeedDelay) return 0;
-      if (raceTime >= R.suddenDeathAt) return R.minSpeedEnd + (raceTime - R.suddenDeathAt) * R.suddenDeathRamp;
+      // The speed the slow late climb has reached by time t (from minSpeedTime on).
+      const late = (t) => R.minSpeedEnd + Math.max(0, t - R.minSpeedTime) * R.minSpeedLate;
+      if (raceTime >= R.suddenDeathAt) return late(R.suddenDeathAt) + (raceTime - R.suddenDeathAt) * R.suddenDeathRamp;
+      if (raceTime >= R.minSpeedTime) return late(raceTime);
       const k = clamp((raceTime - R.minSpeedDelay) / (R.minSpeedTime - R.minSpeedDelay), 0, 1);
       return R.minSpeedStart + (R.minSpeedEnd - R.minSpeedStart) * k;
     }

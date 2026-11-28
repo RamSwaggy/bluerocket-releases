@@ -70,6 +70,17 @@ node tools/boost-runner-smoke.js 3 8 240 1     # every merge: full 4-bot match i
 node tools/boost-runner-balance.js 500 1       # ~40 s, run in the background: seats, round length, KOs
 ```
 
+```
+node tools/boost-runner-chunk.js 300           # ~1 min: one bot per chunk, no rivals, no squeeze -> PASS/FAIL
+node tools/boost-runner-ui.js 7 <shotsDir>     # ~2 min: the real page, menu + Keyboard 1 human path + HUD/cards
+node tools/menunav-qc.js                       # every menu (Boost Runner included) can be driven by D-pad
+```
+
+The chunk test bars: every chunk cleared ≥80% by normal and ≥95% by hard bots, and nothing stuck.
+The UI test holds real keys (D, Space, Left Shift) through `TP.Input`, opens and closes the Controls screen,
+checks no panel stays grey into the next countdown, and that the round-win card shows ≥1.5 s at speed 1.
+Balance sweeps without editing files: `BR_TUNE='{"VIEW_RULES":{"minSpeedEnd":22}}' node tools/boost-runner-balance.js 100`.
+
 Smoke extra args: `[seed] [page]`, e.g. `... 3 8 240 42 index.html` once the full game page exists.
 It prints the KO order per round, and the same seed gives the same match at any speed. It also checks
 that the mode's car tuning (`game.tuning`) differs from `TP.CAR_TUNING` only in `TP.MODE_TUNABLE` keys.
@@ -80,48 +91,24 @@ In the browser: `sim.html?demo&seed=N` (logic only, no rendering). URL flags: `d
 
 Any change to `../shared/` must keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
-## Current state (as of 2026-11-28)
+## Current state (as of 2026-11-28, round 2 builder)
 
-**PAUSED 2026-11-28** (Reece's call via the Director, to save usage). See the resume notes below.
+**Phase 0 (playable) done**; waiting for the Director to move the hub card off "Coming soon".
 
-- **Merged and passing on `team/boost-runner`:**
-  - **Game logic (Gameplay):** runner car, course chunks and seeded chainer, view/edge maths, rounds and match,
-    bots, `window.BR` hooks, `sim.html`. A full 4-bot match is deterministic by seed. The Hit-dash costs 20 boost
-    meter, and the bump clamp is in.
-  - **Look (Art and UI):** `index.html` with the Night-shift test range scene, camera, HUD, cards, effects, music,
-    and a menu using the hub setup and `TP.MenuNav`. `index.html?demo` plays a full match on the real logic.
-  - **Tests (QC):** `credits-check.js`, `boost-runner-smoke.js` (with the stuck rule: a pile-up is a warning,
-    a trap is a fail), `boost-runner-balance.js`.
-- **Checks on the merged tip:** smoke PASS on `sim.html` and `index.html` (seed 1), credits-check PASS,
-  car-feel tuning check PASS.
-- **Balance today (500 seeds):** fair seats (23-28% each), rounds 78-87 s, but **79% of KOs are "behind"**:
-  the camera squeeze decides most rounds, because bots clear about 97% of chunks. The step chunk is the deadliest (5%).
-
-## Paused 2026-11-28: resume notes
-
-**Unfinished, not merged:**
-- `team/boost-runner-gameplay` @ `1d0a5bb` (**WIP**, JOB 3 bot/squeeze retune). Done: bot skill spread
-  (easy/normal/hard), bots boost only with a reason, back off and re-jump after a bump at a step face, squeeze
-  min speed 22 by 90 s. **Not tuned:** median round 117 s, 46% of rounds reach sudden death, step KO 6.3%,
-  3 stuck cars (seeds 92, 241). It over-corrected: the squeeze is now too soft for the weaker bots.
-  JOB 3 targets (30 seeds, 4 normal bots): round p50 60-75 s, p90 at or under 90 s, under 5% sudden death,
-  at least 35% "fell" KOs, median pack vx at or under 19, seats within ±10%, every chunk ≥80% cleared by normal
-  and ≥95% by hard.
-
-**Known small issues (Art and UI):**
-- The HUD panels of cars KO'd last round stay grey during the next round's countdown.
-- The round-win card hasn't been checked at speed 1 on the real logic (at speed 4 it only flashes).
-- The sky gradient and the "P1" edge arrow on the round-win card were flagged on the stub; recheck on the real logic.
-- Commit `375636f` on the art branch has a wrong message (it's the stub-to-real-logic swap, not a sky fix).
-
-**Next steps to playable for Reece:**
-1. Gameplay finishes JOB 3 from `1d0a5bb` to the targets above. QC checks it independently with
-   `node tools/boost-runner-balance.js 500 1`, plus smoke seeds 1, 2, 7, 34, 42, 92, 241.
-2. Art and UI fixes the grey-panel carry-over, checks the round-win card at speed 1, and sends screenshots
-   (outside the repo).
-3. QC runs the smoke on `index.html` with a scripted human seat (keyboard 1) to cover a human path.
-4. Boss merges, then asks the Director to move the hub card off "Coming soon", and Reece plays
-   `boost-runner/index.html` (1 human + 3 bots).
+- **JOB 3 finished** (from `team/boost-runner-gameplay` 1d0a5bb). The squeeze now reaches 21 by 60 s, then keeps
+  climbing 0.35/s (`VIEW_RULES.minSpeedLate`, new), so the last two cars can't hold on to sudden death. Normal
+  bots slip more on hard chunks (miss 0.05, missHard 0.2, netHard 0.7) and chase-boost less (0.15). Bots at a step
+  face now hop and boost up it when they have meter, and never back off into the danger zone (that was how hard
+  bots died at steps).
+- **Balance, 500 seeds, 4 normal bots:** round median 74.2 s, p90 77.0 s, 0% sudden death, 45% "fell" KOs,
+  median pack vx 19.0, seats 22–29%, 0 stuck. **Hard (300):** median 76.4 s, every chunk ≥95%, but 99% of hard
+  KOs are "behind": hard bots almost never fall, so the squeeze ends their rounds (expected; humans will differ).
+- **Chunk test (300 tries):** normal ≥97%, hard 100% on every chunk, nothing stuck.
+- **UI:** a 🎮 Controls button on the menu (`data-open-controls`), and key hints built from the live bindings
+  (`TP.keyNames`, refreshed on `rumble-controls-changed`). The grey-panel carry-over and the round-win card were
+  rechecked on the real logic: no grey panel at any countdown; the card shows ~3 s at speed 1; no stray edge arrow.
+- **Tests:** smoke PASS (sim seeds 1, 2, 7, 34, 42, 92, 241; index.html seed 1), balance PASS, chunk PASS, UI PASS,
+  menunav-qc PASS (Boost Runner added to its PAGES), controls-test PASS, credits-check PASS.
 
 ## Round 2 roadmap: genre gap check (Reece, 2026-11-28)
 
@@ -180,3 +167,6 @@ of each phase. `team/boost-runner-gameplay` 1d0a5bb and the release branch (`cla
 - 2026-11-28 (Director, for Reece): **bumps keep `bumpScale` 1.3 (strong shove), but each bump is clamped so
   the pair's combined forward speed can't increase.** The victim is shoved hard and the hitter pays for it.
   This keeps "strong bumps" without pushing cars past the shared speed ceiling.
+- 2026-11-28 (round 2, builder): JOB 3 closed with the numbers in "Current state": squeeze 21 by 60 s then
+  +0.35/s; normal bots miss 0.05 / missHard 0.2 / netHard 0.7 / chase 0.15. The step markers stay at 5 units
+  before each face (earlier jumps were tried and did worse in races).

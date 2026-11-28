@@ -217,7 +217,9 @@ TP.BR = TP.BR || {};
             { pts: [[10, h], [24, h]] },
             { pts: [[24, h * 2], [38, h * 2]] },
           ],
-          // Jump ~5 units before each face (the window at 17 is ~3–9.5).
+          // Jump ~5 units before each face (the window at 17 is ~3–9.5). Walls are
+          // tested at the car's centre point. JOB 3 tried earlier jumps (6.6 out):
+          // they did worse in races (more cars landing short in a crowd), so 5 stays.
           markers: [{ x: 5, action: "jump" }, { x: 19, action: "jump" }],
         };
       },

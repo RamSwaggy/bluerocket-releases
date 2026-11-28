@@ -24,6 +24,7 @@ const PAGES = [
   { name: "turbo-party", url: "turbo-party/index.html" },
   { name: "deflect-duel", url: "deflect-duel/index.html" },
   { name: "car-fighter", url: "car-fighter/index.html" },
+  { name: "boost-runner", url: "boost-runner/index.html" },
 ];
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".jpg": "image/jpeg", ".glb": "model/gltf-binary", ".svg": "image/svg+xml", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav" };

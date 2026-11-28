@@ -31,6 +31,18 @@
        each one can be replayed
      - page errors
 
+     - p90 round length, and the median forward speed (vx) of the cars
+       still racing, sampled every 0.5 s (JOB 3 target: at or under 19)
+     - per chunk "cleared" = 100% minus the KO rate, flagged when it is
+       under the bar for the difficulty (80% normal, 95% hard)
+
+   TUNING SWEEPS: set BR_TUNE to a JSON object to override rule tables
+   inside the page before any round runs, without editing the game files.
+   Keys are tables on TP.BR (VIEW_RULES, ROUND_RULES, BOT_LEVELS, ...);
+   values are merged into them (one level deep for BOT_LEVELS).
+     BR_TUNE='{"VIEW_RULES":{"minSpeedEnd":24}}' node tools/boost-runner-balance.js 100
+     BR_TUNE='{"BOT_LEVELS":{"normal":{"missHard":0.2}}}' node tools/boost-runner-balance.js 100
+
    Exit code 0 = it ran with no page errors, no NaN, no round that never
    ended, and no trapped cars (stuck with fewer than 2 bumps; stuck after
    2+ bumps is a pile-up and only a warning). The balance
@@ -64,6 +76,23 @@ const difficulty = process.argv[5] || "normal";
   await page.goto(file);
   await page.waitForFunction(() => window.BR && BR.createGame && BR.Match, null, { timeout: 30000 });
 
+  // Optional rule overrides for tuning sweeps (see the header).
+  const tune = process.env.BR_TUNE ? JSON.parse(process.env.BR_TUNE) : null;
+  if (tune) {
+    await page.evaluate((tune) => {
+      for (const [table, vals] of Object.entries(tune)) {
+        const t = TP.BR[table];
+        if (!t) throw new Error("BR_TUNE: no table TP.BR." + table);
+        for (const [k, v] of Object.entries(vals)) {
+          // BOT_LEVELS is { easy: {...}, normal: {...} }: merge each level.
+          if (v && typeof v === "object" && t[k] && typeof t[k] === "object") Object.assign(t[k], v);
+          else t[k] = v;
+        }
+      }
+    }, tune);
+    console.log("BR_TUNE overrides: " + JSON.stringify(tune));
+  }
+
   console.log(`Boost Runner balance: ${rounds} rounds, seeds ${firstSeed}..${firstSeed + rounds - 1}, ${bots} bots (${difficulty})\n`);
   const started = Date.now();
 
@@ -85,7 +114,7 @@ const difficulty = process.argv[5] || "normal";
         // One-round match: winsToTake 1. A draw starts another round, so we
         // only look at round 1 to keep every sample on the same footing.
         const g = BR.createGame({ seed, seats, winsToTake: 1 });
-        const rec = { seed, winner: undefined, time: null, kos: [], stuck: [], chunksEntered: {}, nan: false, timedOut: false };
+        const rec = { seed, winner: undefined, time: null, kos: [], stuck: [], chunksEntered: {}, nan: false, timedOut: false, vx: [] };
         const best = {};
         const stuckSeen = {};
         const bumpTimes = {}; // seat -> race times of bumps it was in (to tell a pile-up from a geometry trap)
@@ -106,6 +135,8 @@ const difficulty = process.argv[5] || "normal";
           if (rec.time !== null) break; // round 1 decided
           if (g.state !== "race") continue;
           const t = g.raceTime;
+          // Every 0.5 s of racing, note the forward speed of each car still in.
+          if (steps % 30 === 0) for (const c of g.cars) if (c.alive) rec.vx.push(Math.round(c.vx * 10) / 10);
           for (const c of g.cars) {
             if (![c.x, c.y, c.vx, c.vy].every(isFinite)) rec.nan = true;
             if (!c.alive) continue;
@@ -157,13 +188,18 @@ const difficulty = process.argv[5] || "normal";
   const times = all.map((r) => r.time).sort((a, b) => a - b);
   const avg = times.reduce((s, x) => s + x, 0) / times.length;
   const median = times[Math.floor(times.length / 2)];
+  const p90 = times[Math.min(times.length - 1, Math.floor(times.length * 0.9))];
   const sudden = all.filter((r) => r.time > 120).length;
   const tooLong = all.filter((r) => r.time > 135 || r.timedOut).length;
   console.log(`\nROUND LENGTH (race time; design target 45-90 s)`);
-  console.log(`  average ${avg.toFixed(1)} s, median ${median.toFixed(1)} s, shortest ${times[0].toFixed(1)} s, longest ${times[times.length - 1].toFixed(1)} s`);
+  console.log(`  average ${avg.toFixed(1)} s, median ${median.toFixed(1)} s, p90 ${p90.toFixed(1)} s, shortest ${times[0].toFixed(1)} s, longest ${times[times.length - 1].toFixed(1)} s`);
   const inTarget = all.filter((r) => r.time >= 45 && r.time <= 90).length;
   console.log(`  in 45-90 s: ${inTarget} (${pct(inTarget, rounds)}), under 45 s: ${all.filter((r) => r.time < 45).length}, over 90 s: ${all.filter((r) => r.time > 90).length}`);
   console.log(`  reached sudden death (>120 s): ${sudden} (${pct(sudden, rounds)}), past 135 s or never ended: ${tooLong}`);
+
+  // Pack speed: the median forward speed of the cars still racing.
+  const vxs = all.flatMap((r) => r.vx).sort((a, b) => a - b);
+  if (vxs.length) console.log(`  median pack speed (vx of cars still racing, every 0.5 s): ${vxs[Math.floor(vxs.length / 2)].toFixed(1)} (gas tops out at 17, boost at 27)`);
 
   // KO causes, and how many rounds the camera squeeze decided on its own.
   const kos = all.flatMap((r) => r.kos);
@@ -181,8 +217,15 @@ const difficulty = process.argv[5] || "normal";
   kos.forEach((k) => (koAt[k.chunk] = (koAt[k.chunk] || 0) + 1));
   const ids = [...new Set([...Object.keys(entered), ...Object.keys(koAt)])].sort((a, b) => (koAt[b] || 0) - (koAt[a] || 0));
   console.log(`\nPER CHUNK (KO rate = KOs there / cars that entered it)`);
-  console.log(`  ${pad("chunk", 14)} ${"entered".padStart(8)} ${"KOs".padStart(6)} ${"KO rate".padStart(8)}`);
-  for (const id of ids) console.log(`  ${pad(id, 14)} ${String(entered[id] || 0).padStart(8)} ${String(koAt[id] || 0).padStart(6)} ${pct(koAt[id] || 0, entered[id] || 0).padStart(8)}`);
+  // The bar a chunk's "cleared" share must reach (JOB 3): 80% normal, 95% hard.
+  const clearBar = difficulty === "hard" ? 95 : difficulty === "normal" ? 80 : 0;
+  console.log(`  ${pad("chunk", 14)} ${"entered".padStart(8)} ${"KOs".padStart(6)} ${"KO rate".padStart(8)} ${"cleared".padStart(8)}`);
+  for (const id of ids) {
+    const e = entered[id] || 0, k = koAt[id] || 0;
+    const cleared = e ? 100 - (100 * k) / e : 100;
+    const flag = e && cleared < clearBar ? `   ! under ${clearBar}%` : "";
+    console.log(`  ${pad(id, 14)} ${String(e).padStart(8)} ${String(k).padStart(6)} ${pct(k, e).padStart(8)} ${(cleared.toFixed(1) + "%").padStart(8)}${flag}`);
+  }
   const known = await page.evaluate(() => Object.keys(BR.CHUNKS || {}).filter((id) => id !== "start"));
   const neverEntered = known.filter((id) => !entered[id]);
   if (neverEntered.length) console.log(`  never entered in these rounds: ${neverEntered.join(", ")}`);

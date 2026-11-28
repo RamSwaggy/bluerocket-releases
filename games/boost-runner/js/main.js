@@ -260,7 +260,9 @@
   }
 
   /* ---------- Title / setup menu ---------- */
+  let stopMenuKeys = null; // removes the last menu's key-hint listener
   function showMenu() {
+    if (stopMenuKeys) stopMenuKeys();
     // Bots race quietly behind the menu.
     startMatch({ slots: TP.DEFAULT_NAMES.map((name) => ({ name, controller: "bot" })), roundsToWin: 99, carCount: 4 }, true);
     TP.sfx.music(false);
@@ -302,17 +304,38 @@
         <span class="muted small" id="padinfo"></span>
       </div>
 
-      <table class="keys">
-        <tr><td>Keyboard 1</td><td>Drive <kbd>D</kbd>/<kbd>A</kbd> · Tilt <kbd>W</kbd><kbd>S</kbd> · Jump <kbd>Space</kbd> (twice = double) · Boost <kbd>Shift</kbd> · Dash <kbd>E</kbd></td></tr>
-        <tr><td>Keyboard 2</td><td>Drive <kbd>→</kbd>/<kbd>←</kbd> · Tilt <kbd>↑</kbd><kbd>↓</kbd> · Jump <kbd>Enter</kbd> · Boost <kbd>R-Shift</kbd> · Dash <kbd>.</kbd></td></tr>
-        <tr><td>Gamepad</td><td>Drive stick / <kbd>RT</kbd><kbd>LT</kbd> · Tilt stick up/down · Jump <kbd>A</kbd> · Boost <kbd>B</kbd> · Dash <kbd>X</kbd></td></tr>
-      </table>
+      <table class="keys" id="keys"></table>
       <p class="small">Tip: in the air, tilt the nose up and boost to fly over gaps. Press <kbd>M</kbd> to mute.</p>
 
       <div class="row" style="margin-top:14px">
         <a class="link" href="${TP.Rumble.HUB_URL}">← All modes</a>
+        <button class="btn ghost" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
         <button class="btn" id="start" data-nav-primary>Start race</button>
       </div>`, "menu");
+
+    /* The key table is built from the CURRENT bindings (TP.keyNames), so
+       after someone rebinds in the shared Controls screen the hints show
+       their keys, not the defaults. In this mode the keyboard's up/down
+       keys tilt the nose in the air (they're not gas), and left/right drive. */
+    const keyTable = card.querySelector("#keys");
+    const kbd = (s) => `<kbd>${esc(s)}</kbd>`;
+    const fillKeys = () => {
+      const row = (label, id) => {
+        const k = TP.keyNames(id);
+        const [tiltUp, tiltDown] = String(k.drive).split(" / ");
+        const [left, right] = String(k.steer).split(" / ");
+        return `<tr><td>${label}</td><td>Drive ${kbd(right)}/${kbd(left)} · Tilt ${kbd(tiltUp)}${kbd(tiltDown || "")} · Jump ${kbd(k.confirm)} (twice = double) · Boost ${kbd(k.boost)} · Dash ${kbd(k.hit)}</td></tr>`;
+      };
+      const p = TP.keyNames("pad0");
+      keyTable.innerHTML = row("Keyboard 1", "kb1") + row("Keyboard 2", "kb2") +
+        `<tr><td>Gamepad</td><td>Drive ${esc(p.steer)} / ${kbd(p.drive)} · Tilt stick up/down · Jump ${kbd(p.confirm)} · Boost ${kbd(p.boost)} · Dash ${kbd(p.hit)}</td></tr>`;
+    };
+    fillKeys();
+    // Rebuild the hints whenever the Controls screen saves a change. The
+    // listener is removed when the menu card goes away (a new card, or Start).
+    window.addEventListener("rumble-controls-changed", fillKeys);
+    const stopKeys = () => window.removeEventListener("rumble-controls-changed", fillKeys);
+    stopMenuKeys = stopKeys;
     TP.BRHud.attachNav(card, { onBack: () => { location.href = TP.Rumble.HUB_URL; } });
 
     // Gamepad hint.
@@ -325,6 +348,7 @@
     window.addEventListener("gamepadconnected", refreshPads);
 
     card.querySelector("#start").addEventListener("click", () => {
+      stopKeys();
       const slots = [0, 1, 2, 3].map((i) => ({
         name: card.querySelector("#n" + i).value.trim() || TP.DEFAULT_NAMES[i],
         controller: card.querySelector("#c" + i).value,
