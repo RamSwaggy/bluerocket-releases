@@ -31,7 +31,9 @@
        each one can be replayed
      - page errors
 
-   Exit code 0 = it ran with no page errors and no stuck cars. The balance
+   Exit code 0 = it ran with no page errors, no NaN, no round that never
+   ended, and no trapped cars (stuck with fewer than 2 bumps; stuck after
+   2+ bumps is a pile-up and only a warning). The balance
    numbers themselves are for people to read; they don't fail the run.
 
    How it works: it opens sim.html with no flags (so nothing starts by
@@ -113,7 +115,7 @@ const difficulty = process.argv[5] || "normal";
               stuckSeen[c.seat] = true;
               const ch = g.course.chunks[c.chunkIndex];
               // Bumps in the stuck window: several = a pile-up, none = something trapped it.
-              const bumps = (bumpTimes[c.seat] || []).filter((bt) => bt >= t - STUCK_SECONDS - 0.5).length;
+              const bumps = (bumpTimes[c.seat] || []).filter((bt) => bt >= b.t - 0.5).length;
               rec.stuck.push({ seat: c.seat, t: Math.round(t * 10) / 10, x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10, chunk: ch ? ch.id : c.chunkIndex, bumps });
             }
           }
@@ -189,16 +191,21 @@ const difficulty = process.argv[5] || "normal";
   const stuck = all.flatMap((r) => r.stuck.map((s) => ({ ...s, seed: r.seed })));
   const nan = all.filter((r) => r.nan).map((r) => r.seed);
   const timedOut = all.filter((r) => r.timedOut).map((r) => r.seed);
-  console.log(`\nSTUCK CARS (${stuck.length})`);
-  stuck.slice(0, 30).forEach((s) => console.log(`  seed ${s.seed}: ${names[s.seat]} at t=${s.t}s x=${s.x} y=${s.y} in chunk ${s.chunk}, ${s.bumps} bump(s) in the last ${3.5} s${s.bumps ? " (pile-up?)" : " (no bumps: geometry or bot trap?)"}   (replay: sim.html?demo&rounds=1&seed=${s.seed})`));
-  if (stuck.length > 30) console.log(`  ... and ${stuck.length - 30} more`);
+  // Boss's ruling (2026-11-28): stuck after 2+ bumps = a pile-up (WARNING);
+  // stuck with 0-1 bumps = the course or a bot trapped it (FAIL).
+  const trapped = stuck.filter((s) => s.bumps < 2);
+  const pileups = stuck.filter((s) => s.bumps >= 2);
+  const line = (s) => `  seed ${s.seed}: ${names[s.seat]} at t=${s.t}s x=${s.x} y=${s.y} in chunk ${s.chunk}, ${s.bumps} bump(s)   (replay: node tools/boost-runner-smoke.js 1 8 120 ${s.seed})`;
+  console.log(`\nSTUCK CARS: ${trapped.length} trapped (FAIL), ${pileups.length} pile-up(s) (WARNING)`);
+  trapped.slice(0, 30).forEach((s) => console.log("  FAIL" + line(s).slice(1)));
+  pileups.slice(0, 30).forEach((s) => console.log("  WARN" + line(s).slice(1)));
   if (nan.length) console.log(`\nNaN POSITIONS in seeds: ${nan.join(", ")}`);
   if (timedOut.length) console.log(`\nROUNDS THAT NEVER ENDED (200 s safety net) in seeds: ${timedOut.join(", ")}`);
 
   console.log(errors.length ? "\nERRORS:\n" + [...new Set(errors)].map((e) => "  - " + e).join("\n") : "\nNo page errors.");
   console.log(`Took ${((Date.now() - started) / 1000).toFixed(0)} s.`);
-  const ok = !errors.length && !stuck.length && !nan.length && !timedOut.length;
-  console.log(ok ? "RESULT: PASS (no errors, no stuck cars)" : "RESULT: FAIL (see above)");
+  const ok = !errors.length && !trapped.length && !nan.length && !timedOut.length;
+  console.log(ok ? "RESULT: PASS (no errors, no trapped cars)" : "RESULT: FAIL (see above)");
   await browser.close();
   process.exit(ok ? 0 : 1);
 })();

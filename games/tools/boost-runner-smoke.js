@@ -22,8 +22,11 @@
      - a round whose race time goes past 135 s (sudden death starts at
        120 s and must finish the round within about 15 s; reaching
        120 s is printed as a WARNING)
-     - a stuck car: alive, racing, and no forward progress for more than
-       3 s of race time
+     - a stuck car: alive, racing, no forward progress for more than
+       3 s of race time, and NO bumps in that window (something in the
+       course or the bot trapped it). A stuck car that took 2+ bumps in
+       the window is a pile-up: printed as a WARNING, not a failure
+       (boss's ruling, 2026-11-28). Exactly 1 bump still counts as a FAIL.
      - a soft-lock: the game clock stops moving, or 0-1 cars left and no
        round end within 2 s of race time
      - a NaN or infinite car position or velocity
@@ -124,6 +127,7 @@ function installWatcher(limits) {
   let fewLeftSince = null;
   let tooLongReported = false;
   let warnedSuddenDeath = false;
+  let bumpTimes = {}; // seat -> race times of bumps this round (pile-up vs trap)
   let eventsSeen = 0; // how many BR.events we've already processed
   let eventRound = 0; // round number from the latest round_start event
 
@@ -132,7 +136,8 @@ function installWatcher(limits) {
     const ev = R.events();
     for (; eventsSeen < ev.length; eventsSeen++) {
       const e = ev[eventsSeen];
-      if (e.type === "round_start") eventRound = e.round;
+      if (e.type === "round_start") { eventRound = e.round; bumpTimes = {}; }
+      if (e.type === "bump") for (const s of [e.a, e.b]) (bumpTimes[s] = bumpTimes[s] || []).push(e.t);
       const r = (qc.rounds[eventRound] = qc.rounds[eventRound] || { kos: [], end: null });
       if (e.type === "ko") {
         // ko carries chunk (placed index) and id (chunk id); print the id, falling back to a lookup by x.
@@ -212,7 +217,11 @@ function installWatcher(limits) {
       if (!b || x > b.x + limits.PROGRESS_UNITS) best[c.seat] = { x, t };
       else if (t - b.t > limits.STUCK_SECONDS && !stuckReported[c.seat]) {
         stuckReported[c.seat] = true;
-        fail(`round ${key} t=${t.toFixed(2)}: ${R.carName(c)} stuck at x=${x.toFixed(1)} y=${R.carY(c).toFixed(1)} in chunk ${R.carChunk(g, c)} (no progress for ${limits.STUCK_SECONDS} s)`);
+        // Count bumps since just before the car stopped making progress.
+        const bumps = (bumpTimes[c.seat] || []).filter((bt) => bt >= b.t - 0.5).length;
+        const where = `round ${key} t=${t.toFixed(2)}: ${R.carName(c)} stuck at x=${x.toFixed(1)} y=${R.carY(c).toFixed(1)} in chunk ${R.carChunk(g, c)} (no progress for ${limits.STUCK_SECONDS} s`;
+        if (bumps >= 2) qc.notes.push(`WARNING: ${where}, ${bumps} bumps: a pile-up)`);
+        else fail(`${where}, ${bumps} bump(s): course or bot trap)`);
       }
     }
 
