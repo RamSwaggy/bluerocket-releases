@@ -12,9 +12,9 @@
      3. Mid layer (z ≈ -60) closer, darker structures: scaffolds with
                   lit windows, pipe racks, striped tanks.
      4. Floor     the facility ground far below the track.
-     5. Track     (z = 0) steel slabs built from the course data, on
-                  pillars, with GLOWING CYAN EDGES on every surface you
-                  can drive on. Hazards are black/yellow, boost pads gold.
+     5. Track     (z = 0) steel slabs built from the course data, over
+                  a dark truss "fill", with GLOWING CYAN EDGES on every
+                  surface you can drive on. Boost pads are gold.
 
    Because the camera is a real perspective camera, the layers further
    back scroll more slowly: parallax without any extra code.
@@ -47,7 +47,6 @@
     steel: 0x56607a,      // track slab
     steelDark: 0x2c3244,  // walls, pillars
     edge: 0x35f3ff,       // drivable-edge cyan
-    hazardY: 0xffd23f,
     gold: 0xffcc33,       // boost pads (the house accent)
     redLight: 0xff3344,
   };
@@ -88,6 +87,23 @@
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
   }
+  // The face of the solid ground under the track: dark steel framing
+  // with X-bracing, so the "fill" reads as a gantry, not a cliff.
+  function trussTexture() {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 128;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#151827"; g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = "#2b3147"; g.lineWidth = 6;
+    g.strokeRect(3, 3, 122, 122);                       // frame
+    g.beginPath(); g.moveTo(6, 6); g.lineTo(122, 122); g.moveTo(122, 6); g.lineTo(6, 122); g.stroke(); // X-brace
+    g.fillStyle = "#3a4260";
+    for (const [x, y] of [[8, 8], [120, 8], [8, 120], [120, 120]]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); } // bolts
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
   function chevronTexture() {
     const cv = document.createElement("canvas");
     cv.width = 128; cv.height = 64;
@@ -101,24 +117,6 @@
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
-  }
-
-  /* Turn any course piece into straight lines [x0, y0, x1, y1].
-     Lines pass straight through. Arcs (centre cx, cy, radius r, from
-     angle a0 to a1) are cut into short straight pieces. */
-  function toLines(seg) {
-    if (seg.type === "arc" || seg.r !== undefined) {
-      const n = Math.max(4, Math.ceil(Math.abs(seg.a1 - seg.a0) * seg.r / 1.5));
-      const out = [];
-      for (let i = 0; i < n; i++) {
-        const t0 = seg.a0 + (seg.a1 - seg.a0) * (i / n);
-        const t1 = seg.a0 + (seg.a1 - seg.a0) * ((i + 1) / n);
-        out.push([seg.cx + Math.cos(t0) * seg.r, seg.cy + Math.sin(t0) * seg.r,
-                  seg.cx + Math.cos(t1) * seg.r, seg.cy + Math.sin(t1) * seg.r]);
-      }
-      return out;
-    }
-    return [[seg.x0, seg.y0, seg.x1, seg.y1]];
   }
 
   class BRScene {
@@ -139,7 +137,6 @@
         grate: new THREE.MeshStandardMaterial({ color: 0x3b4458, roughness: 0.6, metalness: 0.5 }),
         edge: new THREE.MeshBasicMaterial({ color: PAL.edge }),
         edgeGlow: new THREE.MeshBasicMaterial({ color: PAL.edge, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }),
-        hazard: new THREE.MeshStandardMaterial({ map: stripeTexture("#111111", "#ffd23f"), roughness: 0.6 }),
         far: new THREE.MeshBasicMaterial({ color: PAL.far }),
         mid: new THREE.MeshLambertMaterial({ color: PAL.mid }),
         midStripe: new THREE.MeshLambertMaterial({ map: stripeTexture("#191a2e", "#6b5a2a", 6) }),
@@ -152,6 +149,8 @@
         contrail: new THREE.MeshBasicMaterial({ color: 0xd8b8c8, transparent: true, opacity: 0.35, depthWrite: false }),
       };
       this.chevron = chevronTexture();
+      this.mats.fill = new THREE.MeshStandardMaterial({ map: trussTexture(), roughness: 0.9, metalness: 0.2 });
+      this.glowGeo = new THREE.PlaneGeometry(1, 1);
       this.mats.boost = new THREE.MeshBasicMaterial({ map: this.chevron });
 
       this.addLights();
@@ -388,127 +387,148 @@
       }
     }
 
-    /* ---------- The track ---------- */
+    /* ---------- The track ----------
+       Built from Gameplay's course data (see js/README.md):
+         course.surfaces  polylines you can drive on, left to right. Solid
+                          ones are filled down to course.floorY, so a gap
+                          is simply where no solid surface covers that x.
+                          A repeated x in a polyline is a vertical step.
+                          One-way ones are thin platforms.
+         course.pads      gold boost pads lying on a surface.
+       The course grows while a round runs (course.version goes up), so
+       each frame we build any surfaces and pads not built yet. */
     setCourse(course) {
-      if (this.course === course) return;
-      // New round, new course: clear the old pieces.
-      for (const p of this.pieces) this.disposeGroup(p.group);
-      this.pieces = [];
-      for (const m of this.boostMats) m.dispose();
-      this.boostMats = [];
-      this.course = course;
-      this.built = 0;
-      this.buildNewPieces();
+      if (this.course !== course) {
+        // New round, new course: clear the old pieces.
+        for (const p of this.pieces) this.disposeGroup(p.group);
+        this.pieces = [];
+        for (const m of this.boostMats) { if (m.map) m.map.dispose(); m.dispose(); }
+        this.boostMats = [];
+        this.course = course;
+        this.builtSurfaces = 0; this.builtPads = 0; this.version = -1;
+      }
+      if (course && course.version !== this.version) {
+        this.version = course.version;
+        const floorY = course.floorY ?? FLOOR_Y;
+        const S = course.surfaces || [], P = course.pads || [];
+        for (; this.builtSurfaces < S.length; this.builtSurfaces++) this.buildSurface(S[this.builtSurfaces], floorY);
+        for (; this.builtPads < P.length; this.builtPads++) this.buildPad(P[this.builtPads]);
+      }
     }
 
-    // Build any segments added since last time (a course may grow ahead
-    // of the camera as the round goes on).
-    buildNewPieces() {
-      const segs = (this.course && this.course.segments) || [];
-      for (; this.built < segs.length; this.built++) this.buildPiece(segs[this.built]);
+    /* One solid surface becomes one mesh: a steel top, a steel slab band
+       on the front face, a truss-textured fill from under the slab down
+       to the floor, end caps, and faces for any vertical steps. */
+    solidGeometry(pts, floorY) {
+      const pos = [], uv = [], groups = [[], [], []]; // 0 steel, 1 fill, 2 dark
+      const h = DEPTH / 2;
+      // Push a quad (a b c d, in order round the edge), flipped if needed
+      // so its face points along `normal`. UVs come from world position,
+      // so the truss texture lines up across pieces.
+      const quad = (grp, A, B, C, D, normal, uvOf) => {
+        const ab = new THREE.Vector3().subVectors(B, A), ac = new THREE.Vector3().subVectors(C, A);
+        const n = new THREE.Vector3().crossVectors(ab, ac);
+        const vs = n.dot(normal) >= 0 ? [A, B, C, A, C, D] : [A, C, B, A, D, C];
+        groups[grp].push(...vs.map((v) => [v, uvOf(v)]));
+      };
+      const V = (x, y, z) => new THREE.Vector3(x, y, z);
+      const front = (v) => [v.x / 6, v.y / 6], top = (v) => [v.x / 6, v.z / 6], side = (v) => [v.z / 6, v.y / 6];
+      const FRONT = V(0, 0, 1), UP = V(0, 1, 0);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+        if (Math.abs(x1 - x0) < 1e-6) {
+          // Vertical step: a steel face between the two heights, facing the lower side.
+          if (Math.abs(y1 - y0) < 1e-6) continue;
+          const lo = Math.min(y0, y1) - SLAB, hi = Math.max(y0, y1);
+          quad(0, V(x0, lo, h), V(x0, hi, h), V(x0, hi, -h), V(x0, lo, -h), V(y1 > y0 ? -1 : 1, 0, 0), side);
+          continue;
+        }
+        quad(0, V(x0, y0, h), V(x1, y1, h), V(x1, y1, -h), V(x0, y0, -h), UP, top);                              // top
+        quad(0, V(x0, y0 - SLAB, h), V(x1, y1 - SLAB, h), V(x1, y1, h), V(x0, y0, h), FRONT, front);              // slab band
+        quad(1, V(x0, floorY, h), V(x1, floorY, h), V(x1, y1 - SLAB, h), V(x0, y0 - SLAB, h), FRONT, front);      // fill
+      }
+      // End caps, visible at the edges of gaps.
+      const [fx, fy] = pts[0], [lx, ly] = pts[pts.length - 1];
+      quad(2, V(fx, floorY, h), V(fx, fy, h), V(fx, fy, -h), V(fx, floorY, -h), V(-1, 0, 0), side);
+      quad(2, V(lx, floorY, h), V(lx, ly, h), V(lx, ly, -h), V(lx, floorY, -h), V(1, 0, 0), side);
+
+      const geo = new THREE.BufferGeometry();
+      let start = 0;
+      groups.forEach((list, gi) => {
+        for (const [v, t] of list) { pos.push(v.x, v.y, v.z); uv.push(t[0], t[1]); }
+        geo.addGroup(start, list.length, gi);
+        start += list.length;
+      });
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      geo.computeVertexNormals();
+      return geo;
     }
 
-    buildPiece(seg) {
+    buildSurface(surf, floorY) {
       const g = new THREE.Group();
-      const kind = seg.kind || "solid";
+      const pts = surf.pts;
       let maxX = -Infinity;
-      for (const [x0, y0, x1, y1] of toLines(seg)) {
+      if (!surf.oneway) {
+        const mesh = new THREE.Mesh(this.solidGeometry(pts, floorY), [this.mats.steel, this.mats.fill, this.mats.steelDark]);
+        mesh.castShadow = mesh.receiveShadow = true;
+        g.add(mesh);
+      }
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
         maxX = Math.max(maxX, x0, x1);
-        const dx = x1 - x0, dy = y1 - y0;
-        const len = Math.hypot(dx, dy);
-        if (len < 0.01) continue;
+        const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+        if (Math.abs(dx) < 1e-6 || len < 0.01) continue; // vertical steps get no cyan edge
         const ang = Math.atan2(dy, dx);
         const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
-        // Outward normal pointing "down" from the surface (into the slab).
-        const nx = Math.sin(ang), ny = -Math.cos(ang);
-        const steep = Math.abs(dx) < 0.05 || Math.abs(ang) > 1.1 && Math.abs(ang) < 2.05;
+        const nx = Math.sin(ang), ny = -Math.cos(ang); // "down" into the slab
 
-        if (kind === "wall" || steep) {
-          // A riser between two heights: a steel block, no cyan edge
-          // (you can't drive on it).
-          const top = Math.max(y0, y1), bot = Math.min(y0, y1);
-          this.block(g, this.mats.steelDark, mx + 0.3, (top + bot) / 2 - SLAB / 2, 0, 0.8, top - bot + SLAB, DEPTH);
-          continue;
-        }
-        if (kind === "boost") {
-          // Gold chevron pad sitting just on top of the track.
-          const mat = this.mats.boost.clone();
-          mat.map = this.chevron.clone();
-          mat.map.needsUpdate = true;
-          mat.map.repeat.set(Math.max(1, Math.round(len / 2)), 1);
-          this.boostMats.push(mat);
-          const pad = this.block(g, mat, mx, my + 0.04, 0, len, 0.08, DEPTH * 0.7, ang);
-          pad.material.toneMapped = false;
-          continue;
-        }
-        if (kind === "hazard") {
-          // Black/yellow striped barrier strip.
-          const mat = this.mats.hazard.clone();
-          mat.map = this.mats.hazard.map.clone();
-          mat.map.needsUpdate = true;
-          mat.map.repeat.set(Math.max(1, Math.round(len / 1.5)), 1);
-          this.boostMats.push(mat); // reuse the list just for disposal
-          this.block(g, mat, mx, my + 0.25, 0, len, 0.5, DEPTH * 0.9, ang);
-          continue;
+        if (surf.oneway) {
+          // Thin grated platform hanging from rods.
+          const thick = surf.thickness || 0.6;
+          const slab = this.block(g, this.mats.grate, mx + nx * thick / 2, my + ny * thick / 2, 0, len + 0.02, thick, DEPTH, ang);
+          slab.castShadow = slab.receiveShadow = true;
+          this.block(g, this.mats.steelDark, x0 + 0.5, my + 7, -2, 0.15, 14, 0.15);
+          this.block(g, this.mats.steelDark, x1 - 0.5, my + 7, -2, 0.15, 14, 0.15);
         }
 
-        const oneway = kind === "oneway";
-        const thick = oneway ? 0.35 : SLAB;
-        // The slab: top face exactly on the segment line.
-        const slab = this.block(g, oneway ? this.mats.grate : this.mats.steel,
-          mx + nx * thick / 2, my + ny * thick / 2, 0, len + 0.02, thick, DEPTH, ang);
-        slab.receiveShadow = true;
-
-        // Cyan edges on the front and back top corners, plus a soft glow
-        // on the front face so you can read the track at a glance.
-        // One-way platforms get a dashed edge instead of a solid one.
+        // Cyan edges along the front and back top corners: solid for
+        // ground, dashed for one-way platforms. Plus a soft glow strip on
+        // the front face so the drivable line reads at a glance.
         for (const ez of [DEPTH / 2, -DEPTH / 2]) {
-          if (oneway) {
+          if (surf.oneway) {
             const n = Math.max(2, Math.floor(len / 1.2));
-            for (let i = 0; i < n; i += 1) {
-              if (i % 2) continue;
-              const t = (i + 0.5) / n - 0.5;
+            for (let k = 0; k < n; k += 2) {
+              const t = (k + 0.5) / n - 0.5;
               this.block(g, this.mats.edge, mx + Math.cos(ang) * t * len, my + Math.sin(ang) * t * len + 0.02, ez, len / n, 0.1, 0.12, ang);
             }
           } else {
             this.block(g, this.mats.edge, mx, my + 0.02, ez, len + 0.02, 0.12, 0.14, ang);
           }
         }
-        const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mats.edgeGlow);
+        const glow = new THREE.Mesh(this.glowGeo, this.mats.edgeGlow);
         glow.scale.set(len, 0.9, 1);
         glow.position.set(mx + nx * 0.3, my + ny * 0.3, DEPTH / 2 + 0.03);
         glow.rotation.z = ang;
         g.add(glow);
-
-        // Supports: steel pillars down to the ground with cross-braces,
-        // so the track reads as a gantry high above the facility floor.
-        if (!oneway) {
-          const bottom = Math.min(y0, y1) - SLAB;
-          const n = Math.max(1, Math.round(Math.abs(dx) / 9));
-          let prev = null;
-          for (let i = 0; i <= n; i++) {
-            const px = x0 + (dx * (i + 0.5)) / (n + 1);
-            const py = y0 + (dy * (i + 0.5)) / (n + 1) - SLAB;
-            const h = py - FLOOR_Y;
-            if (h <= 0) continue;
-            this.block(g, this.mats.steelDark, px, FLOOR_Y + h / 2, -0.6, 0.7, h, 0.7);
-            if (prev) {
-              // Diagonal brace between this pillar and the last one.
-              const bx = (px + prev.x) / 2, by = bottom - 2.5;
-              const bl = Math.hypot(px - prev.x, 3.5);
-              this.block(g, this.mats.steelDark, bx, by, -0.6, bl, 0.25, 0.25, Math.atan2(-3.5, px - prev.x));
-            }
-            prev = { x: px };
-          }
-        } else {
-          // One-way platforms hang from thin rods.
-          this.block(g, this.mats.steelDark, x0 + 0.4, my + 6, -2, 0.15, 12, 0.15);
-          this.block(g, this.mats.steelDark, x1 - 0.4, my + 6, -2, 0.15, 12, 0.15);
-        }
       }
-      g.traverse((o) => { if (o.isMesh && o.material !== this.mats.edgeGlow) o.castShadow = o.material === this.mats.steel || o.material === this.mats.grate; });
       this.track.add(g);
       this.pieces.push({ group: g, x1: maxX });
+    }
+
+    // Gold boost pad with chevrons that scroll forward.
+    buildPad(pad) {
+      const g = new THREE.Group();
+      const len = pad.x1 - pad.x0;
+      const mat = this.mats.boost.clone();
+      mat.map = this.chevron.clone();
+      mat.map.needsUpdate = true;
+      mat.map.repeat.set(Math.max(1, Math.round(len / 2)), 1);
+      mat.toneMapped = false;
+      this.boostMats.push(mat);
+      this.block(g, mat, (pad.x0 + pad.x1) / 2, pad.y + 0.05, 0, len, 0.1, DEPTH * 0.7);
+      this.track.add(g);
+      this.pieces.push({ group: g, x1: pad.x1 });
     }
 
     /* ---------- The occasional rocket launch in the background ---------- */
@@ -560,7 +580,6 @@
       }
       this.floor.position.x = camera.position.x;
       this.updateLayers(camera);
-      this.buildNewPieces();
 
       // Drop track pieces well behind the trailing edge.
       for (let i = this.pieces.length - 1; i >= 0; i--) {
@@ -591,7 +610,7 @@
     // shared materials are kept.
     disposeGroup(g) {
       if (g.parent) g.parent.remove(g);
-      g.traverse((o) => { if (o.isMesh && o.geometry !== this.box) o.geometry.dispose(); });
+      g.traverse((o) => { if (o.isMesh && o.geometry !== this.box && o.geometry !== this.glowGeo) o.geometry.dispose(); });
     }
 
     dispose() {
@@ -599,7 +618,8 @@
       for (const L of this.layers) for (const g of L.tiles.values()) this.disposeGroup(g);
       this.box.dispose();
       Object.values(this.mats).forEach((m) => m.dispose());
-      for (const m of this.boostMats) m.dispose();
+      for (const m of this.boostMats) { if (m.map) m.map.dispose(); m.dispose(); }
+      this.glowGeo.dispose();
     }
   }
 

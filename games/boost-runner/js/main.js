@@ -4,34 +4,34 @@
 
    Who does what:
      • Gameplay's logic runs the match (cars, course, view rectangle,
-       KOs, rounds). We only read its state and its events.
+       KOs, rounds): BR.createGame(...), see js/README.md. We only read
+       its state and listen to its events.
      • This file draws it: scene.js (the look), camera.js (fits the
        view rectangle to the screen), fx-br.js (particles), hud.js (all
        text), music.js (track + mode sounds).
 
-   URL options (add to the address, e.g. index.html?demo&rounds=2):
+   URL options (read by Gameplay's br.js; e.g. index.html?demo&rounds=2):
      ?demo          skip the menu: all bots, start straight away
      &rounds=N      round wins needed to take the match (default 3)
      &bots=2..4     how many cars in a demo (default 4)
      &speed=X       run game time X times faster (testing)
      &seed=S        course / bot seed
-     &chunk=<id>    loop one course chunk (passed to the logic)
+     &chunk=<id>    loop one course chunk
      &norender      run without drawing (headless checks)
    ===================================================================== */
 (function () {
   "use strict";
 
   const params = new URLSearchParams(location.search);
-  const SPEED = Math.max(0.1, Number(params.get("speed")) || 1);
   const NORENDER = params.has("norender");
   const BG = 0x070b1a; // letterbox bars, same as the page background
 
-  /* ---------- The one place that creates a match ----------
-     Everything else in this file talks to the match only through the
-     shape below, so switching from the temporary stub to Gameplay's real
-     logic means changing just this function. */
-  function createMatch(cfg) {
-    return TP.BRStub.createMatch(cfg);
+  /* ---------- The one place that creates a game ----------
+     Gameplay's BR.createGame when it's loaded; until then the temporary
+     stub (stub-logic.js) that fakes the same contract. */
+  function createGame(opts) {
+    if (window.BR && typeof window.BR.createGame === "function") return window.BR.createGame(opts);
+    return TP.BRStub.createGame(opts);
   }
 
   /* ---------- Renderer, look, camera, effects ---------- */
@@ -47,41 +47,47 @@
   look.attachCamera(cam.camera);
   const fx = new TP.BRFX(look.scene);
 
+  // The logic's view rectangle takes the window's shape (clamped to
+  // 4:3–21:9 by Gameplay). The camera letterboxes anything outside that.
   function resize() {
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
-    cam.resize(window.innerWidth, window.innerHeight, cam.aspect);
+    const W = window.innerWidth, H = window.innerHeight;
+    renderer.setSize(W, H, false);
+    if (app.game) app.game.setAspect(W / H);
+    const v = app.game && app.game.view;
+    cam.resize(W, H, v && v.width ? v.width / v.height : W / H);
     TP.BRHud.setStage(cam.viewport);
   }
-  window.addEventListener("resize", resize);
-  resize();
 
   /* ---------- App state ---------- */
   const app = {
-    match: null,      // the running match (real or attract-mode)
+    game: null,       // the running game (real or attract-mode)
     config: null,     // last match settings, for Rematch
     attract: false,   // true = bots racing quietly behind the menu
     players: [],      // [{ seat, name, color, css, controller }]
+    events: [],       // events queued by game.on, handled after each frame
+    unlisten: null,
     freeze: 0,        // seconds of KO hit-stop left (real time)
     slowmo: 0,        // seconds of round-end slow motion left (real time)
     cardTimer: 0,     // seconds until the round card appears
     pendingCard: null,
+    lastCount: 0,     // last 3-2-1 number shown
     beepTimer: 0,
     muted: false,
   };
   TP.brApp = app; // handy in the browser console
+  window.addEventListener("resize", resize);
+  resize();
 
   /* ---------- Start a match ----------
      config: { slots: [{ name, controller }] (4), roundsToWin, seed,
                difficulty, carCount } */
   function startMatch(config, attract = false) {
-    if (app.match) app.match.dispose();
+    if (app.unlisten) app.unlisten();
+    if (app.game) app.game.dispose();
     fx.clear();
     if (!attract) TP.BRHud.hideCard(); // (the menu card stays up over attract mode)
     TP.BRHud.center("");
-    app.config = config;
-    app.attract = attract;
-    app.freeze = app.slowmo = app.cardTimer = 0;
-    app.pendingCard = null;
+    Object.assign(app, { config, attract, freeze: 0, slowmo: 0, cardTimer: 0, pendingCard: null, lastCount: 0, events: [] });
 
     const count = TP.util.clamp(config.carCount || 4, 2, 4);
     app.players = config.slots.slice(0, count).map((s, seat) => ({
@@ -92,21 +98,23 @@
       // Empty seats ("off") are played by bots, as the design says.
       controller: s.controller === "off" ? "bot" : s.controller,
     }));
-    app.match = createMatch({
+    app.game = createGame({
       scene: look.scene,
-      players: app.players,
-      roundsToWin: config.roundsToWin || 3,
-      seed: config.seed ?? Math.floor(Math.random() * 1e6),
-      difficulty: config.difficulty || "normal",
+      seats: app.players.map((p) => ({ name: p.name, controller: p.controller, difficulty: config.difficulty || "normal" })),
+      seed: config.seed,
+      winsToTake: config.roundsToWin || 3,
       chunk: params.get("chunk") || null,
+      aspect: window.innerWidth / window.innerHeight,
     });
-    TP.BRHud.setup(app.players, config.roundsToWin || 3);
+    app.unlisten = app.game.on((ev) => app.events.push(ev));
+    resize();
+    TP.BRHud.setup(app.players, app.game.winsToTake || config.roundsToWin || 3);
     TP.BRHud.show(!attract);
-    TP.BRHud.round(attract ? 0 : app.match.round);
+    TP.BRHud.round(attract ? 0 : app.game.roundNumber);
     if (!attract) {
       TP.sfx.music(true, "boost-runner");
       const humans = app.players.filter((p) => p.controller !== "bot");
-      TP.BRHud.toast(humans.length ? "Jump: Space / Enter / A · Boost: Shift / B" : "Demo: bots only", 2.5);
+      TP.BRHud.toast(humans.length ? "Tilt in the air + boost to fly over gaps" : "Demo: bots only", 2.5);
     }
   }
 
@@ -115,35 +123,43 @@
   const loud = () => !app.attract;
 
   function handleEvent(e) {
-    const m = app.match;
+    const g = app.game;
     switch (e.type) {
       case "round_start":
         fx.clear();
-        if (!app.attract) TP.BRHud.hideCard();
-        TP.BRHud.round(app.attract ? 0 : e.round);
-        break;
-      case "countdown":
-        if (!app.attract) { TP.BRHud.countdown(e.n); TP.sfx.play("count"); }
+        app.lastCount = 0;
+        if (!app.attract) { TP.BRHud.hideCard(); TP.BRHud.round(e.round); }
         break;
       case "go":
-        if (!app.attract) { TP.BRHud.go(); TP.sfx.play("go"); }
+        if (loud()) { TP.BRHud.go(); TP.sfx.play("go"); }
         break;
       case "jump":
         if (loud() && isHuman(e.seat)) TP.BRSound.play(e.double ? "djump" : "jump");
         break;
       case "land":
         fx.dust(e.x, e.y);
+        if (e.bad) { fx.dust(e.x, e.y); cam.shake(0.12); }
         if (loud() && isHuman(e.seat)) TP.BRSound.play("land");
         break;
-      case "bump":
-        fx.spark(e.x, e.y, e.strength ?? 0.5);
-        cam.shake(0.15 + 0.2 * (e.strength ?? 0.5));
+      case "dash":
+        fx.spark(e.x, e.y + 0.6, 0.3);
+        if (loud()) TP.sfx.play("swing");
+        break;
+      case "pad":
+        fx.burst(new THREE.Vector3(e.x, e.y + 0.3, 0), [0xffcc33, 0xfff1b8], { count: 10, speed: 6, size: 0.22, up: 2 });
+        if (loud() && isHuman(e.seat)) TP.sfx.play("boost");
+        break;
+      case "bump": {
+        const k = TP.util.clamp((e.impact ?? 8) / 15, 0.2, 1);
+        fx.spark(e.x, e.y, k);
+        cam.shake(0.15 + 0.2 * k);
         if (loud()) TP.sfx.play("bump");
         break;
+      }
       case "ko": {
         // Explode where the car left the picture: clamp to just inside
         // the view so you always see it.
-        const v = m.view;
+        const v = g.view;
         const x = TP.util.clamp(e.x, v.left + 1.5, v.right - 1.5);
         const y = TP.util.clamp(e.y, v.bottom + 1.5, v.top - 1.5);
         fx.ko(x, y, app.players[e.seat].color);
@@ -154,16 +170,16 @@
       }
       case "round_end":
         // Slow motion on the last car, then the round card.
-        app.slowmo = 1.2;
-        app.cardTimer = 1.2;
+        app.slowmo = 1.0;
+        app.cardTimer = 1.0;
         app.pendingCard = { winner: e.winner, round: e.round, koOrder: e.koOrder, wins: e.wins };
         if (loud()) TP.BRSound.play("roundWin");
         break;
       case "match_end": {
         app.pendingCard = null;
         if (app.attract) { startMatch(app.config, true); break; } // attract mode just loops
-        const winner = m.cars.find((c) => c.seat === e.winner);
-        if (winner) fx.confetti(new THREE.Vector3(winner.pos.x, winner.pos.y + 1, 0));
+        const w = g.cars[e.winner];
+        if (w) fx.confetti(new THREE.Vector3(w.x, w.y + 1, 0));
         TP.BRSound.play("matchWin");
         TP.BRHud.matchCard({ winner: e.winner, wins: e.wins }, {
           rematch: () => startMatch(app.config),
@@ -179,44 +195,48 @@
   function frame(now) {
     const realDt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    TP.Input.poll();
+    TP.Input.poll(); // once per frame; Gameplay reads the controls itself
     if (TP.sched) TP.sched.update(realDt);
 
-    const m = app.match;
-    if (m) {
+    const g = app.game;
+    if (g) {
       // Time scale: freeze for KO hit-stop, slow motion at round end.
-      let scale = SPEED;
+      // (The ?speed flag is applied inside game.frame by Gameplay.)
+      let scale = 1;
       if (app.freeze > 0) { app.freeze -= realDt; scale = 0; }
-      else if (app.slowmo > 0) { app.slowmo -= realDt; scale *= 0.3; }
+      else if (app.slowmo > 0) { app.slowmo -= realDt; scale = 0.3; }
       const dt = realDt * scale;
+      g.frame(dt);
+      for (const e of app.events.splice(0)) { handleEvent(e); if (app.game !== g) break; }
 
-      // Controls for human seats (bots are driven by the logic itself).
-      const controls = {};
-      for (const p of app.players) if (p.controller !== "bot") controls[p.seat] = TP.Input.get(p.controller);
-      if (!app.attract || m.state !== "match_end") m.update(dt, controls);
-      for (const e of m.drainEvents()) handleEvent(e);
+      if (app.game === g) {
+        // 3-2-1 from the logic's countdown clock.
+        if (g.state === "countdown" && !app.attract) {
+          const n = Math.ceil(g.countdown);
+          if (n > 0 && n !== app.lastCount) { app.lastCount = n; TP.BRHud.countdown(n); TP.sfx.play("count"); }
+        }
+        // Round card appears once the slow motion is over.
+        if (app.pendingCard && (app.cardTimer -= realDt) <= 0) {
+          if (!app.attract) TP.BRHud.roundCard(app.pendingCard);
+          app.pendingCard = null;
+        }
 
-      // Round card appears once the slow motion is over.
-      if (app.pendingCard && (app.cardTimer -= realDt) <= 0) {
-        if (!app.attract) TP.BRHud.roundCard(app.pendingCard);
-        app.pendingCard = null;
-      }
+        // Visuals.
+        look.setCourse(g.course);
+        for (const c of g.cars) if (c.alive && (c.boosting || c.dashing > 0)) fx.trail(c, app.players[c.seat].color, dt);
+        fx.update(dt);
+        cam.fit(g.view, realDt);
+        look.update(dt, g.view, cam.camera);
+        TP.BRHud.setStage(cam.viewport);
 
-      // Visuals.
-      look.setCourse(m.course);
-      for (const c of m.cars) if (c.alive && c.boosting) fx.trail(c, app.players[c.seat].color, dt);
-      fx.update(dt);
-      cam.fit(m.view, realDt);
-      look.update(dt, m.view, cam.camera);
-      TP.BRHud.setStage(cam.viewport);
-
-      if (!app.attract) {
-        const danger = TP.BRHud.update(m.cars, m.wins, cam);
-        // Rising warning beep: faster and higher the deeper a car is in.
-        if (danger > 0 && m.state === "race") {
-          app.beepTimer -= realDt;
-          if (app.beepTimer <= 0) { TP.BRSound.play("danger", danger); app.beepTimer = 0.32 - danger * 0.2; }
-        } else app.beepTimer = 0;
+        if (!app.attract) {
+          const danger = TP.BRHud.update(g.cars, g.wins, cam);
+          // Rising warning beep: faster and higher the deeper a car is in.
+          if (danger > 0 && g.state === "race") {
+            app.beepTimer -= realDt;
+            if (app.beepTimer <= 0) { TP.BRSound.play("danger", danger); app.beepTimer = 0.32 - danger * 0.2; }
+          } else app.beepTimer = 0;
+        }
       }
     }
 

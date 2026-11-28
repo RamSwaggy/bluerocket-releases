@@ -47,7 +47,7 @@
       const back = new THREE.Vector3(-Math.cos(angle), -Math.sin(angle), 0);
       while (t > 0.016) {
         t -= 0.016;
-        const pos = new THREE.Vector3(car.pos.x, car.pos.y + 0.65, 0).addScaledVector(back, 2.0);
+        const pos = new THREE.Vector3(car.x, car.y + 0.65, 0).addScaledVector(back, 2.0);
         pos.z += rand(-0.3, 0.3);
         const vel = back.clone().multiplyScalar(rand(3, 6));
         vel.y += rand(-0.6, 0.6);

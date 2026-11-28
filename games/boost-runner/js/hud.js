@@ -80,14 +80,14 @@
     round(n) { $("round-label").textContent = n ? `ROUND ${n}` : ""; },
 
     /* Per-frame update.
-       cars:  [{ seat, pos:{x,y}, alive, boost }]
+       cars:  Gameplay's cars ({ seat, x, y, alive, boost, ... })
        wins:  round wins per seat
        cam:   the BRCamera (for world → stage pixels)
        Returns how deep the worst car is into the danger edge (0..1),
        so main.js can pitch the warning beep. */
     update(cars, wins, cam) {
       const vp = cam.viewport, v = cam.view;
-      const dangerX = v.left + (v.right - v.left) * DANGER;
+      const dangerX = v.dangerX ?? v.left + (v.right - v.left) * DANGER;
       let worst = 0;
       for (const c of cars) {
         const pc = $("pc" + c.seat);
@@ -100,16 +100,16 @@
         if (pp.innerHTML !== want) pp.innerHTML = want;
 
         if (!c.alive) { m.tag.style.display = m.ring.style.display = m.arrow.style.display = "none"; continue; }
-        const p = cam.toStage(c.pos.x, c.pos.y + 0.7);
+        const p = cam.toStage(c.x, c.y + 0.7);
         const inside = p.x >= 0 && p.x <= vp.w && p.y >= 0 && p.y <= vp.h;
 
         // Tag floats above the car's marker arrow.
-        const tp = cam.toStage(c.pos.x, c.pos.y + 3.6);
+        const tp = cam.toStage(c.x, c.y + 3.6);
         m.tag.style.display = inside ? "" : "none";
         m.tag.style.transform = `translate(${tp.x}px, ${tp.y}px)`;
 
         // Danger ring: how far into the trailing 10% is the car (0..1)?
-        const k = c.pos.x < dangerX ? Math.min(1, (dangerX - c.pos.x) / (dangerX - v.left)) : 0;
+        const k = c.x < dangerX ? Math.min(1, (dangerX - c.x) / (dangerX - v.left)) : 0;
         worst = Math.max(worst, k);
         m.ring.style.display = k > 0 && inside ? "" : "none";
         m.ring.style.transform = `translate(${p.x}px, ${p.y}px) scale(${1 + k * 0.4})`;
