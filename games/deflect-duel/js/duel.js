@@ -526,7 +526,9 @@
 
         // Humans and bots produce the same controls. (A test can force
         // a player's controls with setInput.)
-        const ctrl = this.inputOverride[i] || (this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller));
+        // (Never null: a bot move that finishes on the very step it starts
+        // returns nothing, so fall back to "no input" for that one step.)
+        const ctrl = this.inputOverride[i] || (this.bots[i] ? this._botControls(i) : TP.Input.get(p.controller)) || TP.Input.NEUTRAL;
         car.update(dt, ctrl, this, this.tuning);
         this._keepCarInArena(car);
 
@@ -1198,7 +1200,7 @@
           S.flipFor = b.hitId;
           if (Math.random() < S.flipChance) {
             S.act = { kind: "flip", until: this.time + 1.1 };
-            return this._botAct(i);
+            return this._botAct(i) || TP.Input.NEUTRAL;
           }
         }
       }
@@ -1301,13 +1303,13 @@
           const plan = TP.ai.planJump(need, this.tuning);
           if (plan.kind === "double" && tImpact <= plan.t + 0.15) { // a little early: the second jump climbs slower than planJump assumes
             S.act = { kind: "hop", until: this.time + 1.2, secondAt: plan.secondAt };
-            return this._botAct(i);
+            return this._botAct(i) || TP.Input.NEUTRAL;
           }
           if (tImpact <= 0.45) {
             const len = Math.hypot(b.vel.x, b.vel.z) || 1;
             const side = mx * b.vel.z - mz * b.vel.x >= 0 ? 1 : -1;
             S.act = { kind: "side", until: this.time + 1.0, tx: car.pos.x + (-b.vel.z / len) * side * 10, tz: car.pos.z + (b.vel.x / len) * side * 10 };
-            return this._botAct(i);
+            return this._botAct(i) || TP.Input.NEUTRAL;
           }
         }
         const len = Math.hypot(b.vel.x, b.vel.z) || 1;
