@@ -133,6 +133,11 @@
     id: "coin-rush",
     name: "Coin Rush",
     cls: CoinRush,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Grab the most coins. Ram rivals to knock theirs loose.",
+    format: "Free-for-all",
+    length: "30 s",
+    kind: "Collect",
     blurb: "Grab as many coins as you can in 30 seconds. Ram rivals hard to knock 2 of their coins loose — then steal them!",
   });
 })();

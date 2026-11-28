@@ -79,14 +79,72 @@
       // Play until time runs out or the mode says it's over.
       await TP.sched.until(() => this.state === "done");
 
+      // Rank now (nothing scores after the whistle) so the cars can react
+      // to how they did while "FINISH!" is up.
+      const ranking = TP.util.rankByScore(this.scores());
+      this.startReactions(ranking);
       TP.UI.center("FINISH!", "", "#ffcc33");
       TP.sfx.play("goal");
+      TP.partySfx.play("cheer");
       TP.UI.hint("");
       await TP.sched.wait(1.8);
       TP.UI.center("");
       TP.UI.mgHud(null);
       TP.UI.showPlayers(true);
-      return TP.util.rankByScore(this.scores());
+      return ranking;
+    }
+
+    /* ---------- Finish-line reactions ----------
+       After the whistle every car still on the field shows how it did:
+         winners  — bounce and spin on the spot with the rocket flame lit,
+                    throwing sparks in their colour;
+         last     — a deflated slump: nose drooping, body squashed low,
+                    with a little puff of grey smoke now and then;
+         the rest — a small nod.
+       If everyone tied, everyone just nods (nobody won). It's all done
+       on the car's body model (car.manualBodyPose), so the physics,
+       scores and positions are untouched. */
+    startReactions(ranking) {
+      const allTie = ranking.length === 1;
+      const first = allTie ? [] : ranking[0];
+      const last = allTie ? [] : ranking[ranking.length - 1];
+      this.reactions = this.cars.map((car) => ({
+        kind: first.includes(car.index) ? "win" : last.includes(car.index) ? "lose" : "meh",
+        t: Math.random() * 0.3, // small offset so winners don't bounce in sync
+      }));
+      this.cars.forEach((c) => { c.manualBodyPose = true; });
+    }
+
+    _animateReactions(dt) {
+      this.reactions.forEach((r, i) => {
+        const car = this.cars[i];
+        if (car.out || !car.mesh.visible) return;
+        r.t += dt;
+        const { body, flame } = car.mesh.userData;
+        if (r.kind === "win") {
+          body.position.y = Math.abs(Math.sin(r.t * 7)) * 0.9;
+          body.rotation.y += dt * 7;
+          body.rotation.x = 0;
+          flame.visible = true;
+          flame.scale.set(1, 0.8 + Math.random() * 0.6, 1);
+          if (Math.random() < 0.25) {
+            const p = car.pos.clone(); p.y += 1.5;
+            this.fx.burst(p, [car.player.color, 0xffffff, 0xffcc33], { count: 2, speed: 5, size: 0.18, up: 4 });
+          }
+        } else if (r.kind === "lose") {
+          const k = Math.min(1, r.t / 0.5);
+          body.rotation.x = 0.32 * k;
+          body.scale.set(1 + 0.08 * k, 1 - 0.25 * k, 1);
+          flame.visible = false;
+          if (Math.random() < 0.06) {
+            const p = car.pos.clone(); p.y += 1.6;
+            this.fx.burst(p, [0x6b7280, 0x9ca3af], { count: 2, speed: 1, size: 0.3, up: 1.5, gravity: -2, life: 0.8 });
+          }
+        } else {
+          body.rotation.x = Math.sin(r.t * 5) * 0.1;
+          flame.visible = false;
+        }
+      });
     }
 
     // Called every frame by the game while this arena is on screen.
@@ -96,6 +154,7 @@
       const steps = Math.max(1, Math.ceil(dt / (1 / 60)));
       for (let i = 0; i < steps; i++) this.step(dt / steps);
       this.animate(dt);
+      if (this.reactions) this._animateReactions(dt);
 
       // Boost trail: a puff of flame-coloured particles behind boosting cars.
       for (const car of this.cars) {

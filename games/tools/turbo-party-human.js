@@ -63,6 +63,77 @@ function expect(part, name, ok, detail = "") {
   console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${detail ? `  (${detail})` : ""}`);
 }
 
+/* =====================================================================
+   PART 2b — Board set pieces (round 2, phase 2)
+     • swing gate closed → the fork goes main road, no menu
+     • prevSpace: the road back out of the shortcut and the merge
+     • Spark Cannon: cars in the zone go back exactly 3 spaces, cars
+       outside it don't move
+     • Final 3 turns: blue +6 / red −6, and last place gets the catch-up
+       bonus (+10)
+   ===================================================================== */
+async function partSetPieces(browser, errors) {
+  console.log("\nPART 2b — board set pieces (gate, cannon, final stretch)");
+  const context = await browser.newContext({ viewport: { width: 640, height: 360 } });
+  const page = await context.newPage();
+  page.on("pageerror", (e) => errors.push("setpiece PAGE ERROR: " + e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push("setpiece CONSOLE ERROR: " + m.text()); });
+  await page.goto(url("turbo-party/index.html") + "?demo&turns=1&speed=8");
+  await page.waitForFunction(() => window.TP && TP.game && TP.game.board);
+  const u = await page.evaluate(async () => {
+    const g = TP.game, b = g.board, out = {};
+    // Freeze the demo match's own turns: only our calls run.
+    b.takeTurn = async () => {}; g.minigameRound = async () => {}; g.finale = async () => {};
+    const me = g.players[0];
+
+    // Gate closed: the fork has no menu and goes down the main road.
+    b.gate.open = false;
+    me.space = b.forkIndex;
+    let menu = false;
+    const choose = b.choose; b.choose = async (...a) => { menu = true; return choose.apply(b, a); };
+    const next = await b.pickNext(me);
+    b.choose = choose;
+    out.gate = { next, main: b.spaces[b.forkIndex].next[0], menu };
+    b.gate.open = true;
+
+    // The road back.
+    out.prev = { fromSc: b.prevSpace(b.shortcutFirst), fork: b.forkIndex,
+      fromMergeIsLoop: !b.spaces[b.prevSpace(b.mergeIndex)].shortcut, from0: b.prevSpace(0) };
+
+    // Cannon: put players 0 and 1 in the zone, 2 and 3 well away from it.
+    b.cannon.zone = [10, 11, 12, 13, 14];
+    g.players[0].space = 12; g.players[1].space = 10;
+    g.players[2].space = 20; g.players[3].space = 25;
+    g.players.forEach((p) => b.parkToken(p.index));
+    const exp0 = b.prevSpace(b.prevSpace(b.prevSpace(12)));
+    const exp1 = b.prevSpace(b.prevSpace(b.prevSpace(10)));
+    await b.fireCannon();
+    out.cannon = { got: g.players.map((p) => p.space), exp: [exp0, exp1, 20, 25] };
+
+    // Final stretch: blue/red doubled.
+    b.finalStretch = true;
+    const blue = b.spaces.find((s) => s.type === "blue"), red = b.spaces.find((s) => s.type === "red");
+    me.coins = 20; me.space = blue.index; await b.landOn(me);
+    const afterBlue = me.coins;
+    me.coins = 20; me.space = red.index; await b.landOn(me);
+    out.stretch = { afterBlue, afterRed: me.coins };
+    b.finalStretch = false;
+
+    // Catch-up bonus: player 3 alone in last place.
+    g.players.forEach((p, i) => { p.trophies = [2, 1, 1, 0][i]; p.coins = [5, 9, 9, 30][i]; });
+    await g.startFinalStretch();
+    out.catchup = { coins: g.players.map((p) => p.coins), stretch: b.finalStretch };
+    return out;
+  });
+  expect("setpiece", "gate closed: fork goes main road with no menu", u.gate.next === u.gate.main && !u.gate.menu, JSON.stringify(u.gate));
+  expect("setpiece", "the road back out of the shortcut leads to the fork", u.prev.fromSc === u.prev.fork, JSON.stringify(u.prev));
+  expect("setpiece", "the road back from the merge is the main loop", u.prev.fromMergeIsLoop, JSON.stringify(u.prev));
+  expect("setpiece", "Spark Cannon: cars in the zone go back 3, others stay", JSON.stringify(u.cannon.got) === JSON.stringify(u.cannon.exp), JSON.stringify(u.cannon));
+  expect("setpiece", "final stretch: blue +6, red −6", u.stretch.afterBlue === 26 && u.stretch.afterRed === 14, JSON.stringify(u.stretch));
+  expect("setpiece", "final stretch starts: last place gets +10, others unchanged", u.catchup.stretch && u.catchup.coins.join() === "5,9,9,40", JSON.stringify(u.catchup));
+  await context.close();
+}
+
 /* ---------------------------------------------------------------------
    Key presses. A tap is held for ~3 frames so the game's per-frame
    "just pressed" edge detection always sees it.
@@ -258,6 +329,9 @@ function installScenario() {
   window.__beforeTurn = async (board, player, turn) => {
     if (player.index !== 0) return;
     const P = board.players;
+    // The swing gate flips every round; keep it open on the human's turns
+    // so the scripted fork choices (T2 shortcut, T3 main road) can happen.
+    if (board.gate) board.gate.open = true;
     const beforeTrophy = () => board.spaces.find((s) => s.next.includes(board.trophyIndex));
 
     if (turn === 1) {
@@ -493,6 +567,7 @@ function judgeHumanMatch(m) {
   const errors = [];
   await partHub(browser, errors);
   await partUnits(browser, errors);
+  await partSetPieces(browser, errors);
   const m = await partHumanMatch(browser, errors);
   judgeHumanMatch(m);
   await browser.close();

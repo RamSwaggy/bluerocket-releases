@@ -194,6 +194,11 @@
     id: "bomb-tag",
     name: "Bomb Tag",
     cls: BombTag,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Pass the bomb by bumping. Don't be holding it when it blows!",
+    format: "Free-for-all",
+    length: "Last car left",
+    kind: "Push",
     blurb: "Someone's carrying a ticking bomb — bump into a rival to pass it on! When it blows, the holder is out. The bomb flashes faster as it's about to go. Last car left wins.",
   });
 })();

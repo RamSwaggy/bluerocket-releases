@@ -258,6 +258,11 @@
     id: "sumo-ring",
     name: "Sumo Ring",
     cls: SumoRing,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Knock everyone off the shrinking ring.",
+    format: "Free-for-all",
+    length: "45 s max",
+    kind: "Survival",
     blurb: "Bump everyone off the floating ring. It shrinks after 12 seconds. Last car standing wins!",
   });
 })();

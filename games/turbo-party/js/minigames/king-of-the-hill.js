@@ -242,6 +242,11 @@
     id: "king-of-the-hill",
     name: "King of the Hill",
     cls: KingOfTheHill,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Be the only car in the glowing zone to score.",
+    format: "Free-for-all",
+    length: "40 s",
+    kind: "Push",
     blurb: "Score a point every second you're the ONLY car in the glowing zone. Two or more inside? Nobody scores — shove them out! The zone moves every 8 seconds.",
   });
 })();

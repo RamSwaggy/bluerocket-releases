@@ -315,6 +315,11 @@
     id: "goal-frenzy",
     name: "Goal Frenzy",
     cls: GoalFrenzy,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Guard your goal, score in everyone else's.",
+    format: "Free-for-all",
+    length: "60 s",
+    kind: "Ball",
     blurb: "Four goals, one ball, 60 seconds. Guard the goal in your colour and smash the ball into everyone else's. Score: +1. Get scored on: -1. Tied for 1st at the end? Golden goal!",
   });
 })();

@@ -30,6 +30,11 @@
   const TOKEN_SCALE = 0.55;   // cars are shrunk down on the board
   const STEP_TIME = 0.3;      // seconds to hop one space
   const MAX_ITEMS = 2;
+  // Spark Cannon (the board hazard): rounds between shots, how many loop
+  // spaces it hits, and how far back it blasts cars.
+  const CANNON_ROUNDS = 3;
+  const CANNON_ZONE = 5;
+  const CANNON_KNOCKBACK = 3;
   // After someone buys the trophy it moves at least this many spaces
   // ahead of them (counted along the track), so it can't just be re-bought.
   const MIN_TROPHY_AHEAD = 10;
@@ -53,6 +58,10 @@
     warp: { id: "warp", name: "Trophy Warp", icon: "🌀", price: 14, desc: "Teleport right next to the trophy" },
   };
   TP.ITEMS = ITEMS;
+
+  // The winners' stand for the end ceremony sits just north of the loop,
+  // out of the way of the track. Trees are kept clear of this spot.
+  const PODIUM_POS = new THREE.Vector3(0, 0, -44);
 
   // Where each player's car parks on a shared space (so they don't overlap).
   const PARK_OFFSETS = [[-0.85, -0.85], [0.85, -0.85], [-0.85, 0.85], [0.85, 0.85]];
@@ -88,6 +97,13 @@
         return car;
       });
       this.tokens.forEach((t, i) => this.parkToken(i));
+
+      // Scenery, crowd, sky and the moving set pieces (board-life.js).
+      this.buildLife();
+      // Final-3-turns twist: blue and red spaces pay double (game.js sets it).
+      this.finalStretch = false;
+      // The Spark Cannon's first target, a full round ahead.
+      this.cannonReset();
     }
 
     /* ------------------------------------------------------------------
@@ -338,6 +354,8 @@
         const r = 1.35 + Math.random() * 0.5;
         const tree = new THREE.Mesh(new THREE.ConeGeometry(1.4, 4 + Math.random() * 2, 6), treeMat);
         tree.position.set(Math.cos(a) * 38 * r, 2.5, Math.sin(a) * 27 * r);
+        // Keep the podium area and the camera's view of it clear.
+        if (Math.abs(tree.position.x - PODIUM_POS.x) < 14 && tree.position.z < -26) continue;
         tree.castShadow = true;
         this.scene.add(tree);
       }
@@ -483,6 +501,7 @@
        Per-frame update: camera, spinning things, particles
        ------------------------------------------------------------------ */
     update(dt) {
+      this.updateLife(dt);
       if (this.orbit) {
         // Slow circle for the title-screen background and the intro.
         const t = performance.now() * 0.00008;
@@ -522,6 +541,22 @@
       }
 
       this.tokens.forEach((t) => t.syncMesh(dt));
+      // (After syncMesh, which would otherwise switch the flame back off.)
+      // Podium: the champion spins and bounces, confetti keeps falling.
+      if (this.podium && this.podiumRanked) {
+        this._podiumT += dt;
+        const champ = this.tokens[this.podiumRanked[0].index];
+        const body = champ.mesh.userData.body;
+        body.rotation.y += dt * 2.5;
+        body.position.y = Math.abs(Math.sin(this._podiumT * 4)) * 0.6;
+        champ.mesh.userData.flame.visible = true;
+        if (Math.random() < dt * 3) {
+          const at = this.podiumSpots[0].clone();
+          at.x += TP.util.rand(-6, 6); at.y += 8;
+          this.fx.confetti(at, { count: 14 });
+        }
+      }
+
       this.fx.update(dt);
     }
 
@@ -534,6 +569,41 @@
     focusOverview() {
       this.camFocus.set(0, 0, 4);
       this.camOffset.set(0, 62, 48);
+    }
+
+    /* Camera punch-in: a quick, tight close-up on a player for big moments
+       (event spaces, the shop, a trophy buy), with a thump. Call
+       focusOn(player) afterwards to ease back to the normal follow view.
+       The camera glides there with the usual smoothing, so it reads as a
+       fast zoom rather than a cut. */
+    punchIn(player, close = 1) {
+      const p = this.tokens[player.index].pos;
+      this.camFocus.set(p.x, 0.6, p.z);
+      this.camOffset.set(0, 7.5 * close, 8.5 * close);
+      TP.partySfx.play("thump");
+    }
+
+    /* Where a 3D point is on screen, in window pixels (for HTML bubbles
+       that should sit over a car). */
+    screenPos(v) {
+      this.camera.updateMatrixWorld();
+      const p = v.clone().project(this.camera);
+      return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight, behind: p.z > 1 };
+    }
+
+    /* Floating "+3 🪙" / "−3 🪙" bubble over a player's car, plus a pop
+       sound. Every coin change on the board goes through here (spaces,
+       the lap bonus, items, events, the shop and trophy buys), so players
+       always see where coins went. */
+    coinPop(player, delta) {
+      if (!delta) return;
+      const pos = this.tokens[player.index].pos.clone();
+      pos.y += 2.2;
+      const s = this.screenPos(pos);
+      if (s.behind) return;
+      const text = (delta > 0 ? "+" : "−") + Math.abs(delta) + " 🪙";
+      TP.UI.popup(text, s.x, s.y, delta > 0 ? "#ffd84d" : "#ff6b6b", Math.abs(delta) >= 8);
+      TP.partySfx.play("pop", delta > 0);
     }
 
     /* ------------------------------------------------------------------
@@ -554,6 +624,11 @@
     async pickNext(player) {
       const s = this.spaces[player.space];
       if (s.next.length === 1) return s.next[0];
+      // The swing gate is across the shortcut: main road only this round.
+      if (!this.shortcutOpen()) {
+        TP.UI.toast("🚧 The gate is closed: main road only!");
+        return s.next[0];
+      }
       const choice = await this.choose(player, "Which way?", ["Main road", "Risky shortcut!"], this.botForkChoice(player));
       return s.next[choice];
     }
@@ -570,21 +645,58 @@
       return Math.random() < 0.35 ? 1 : 0;
     }
 
-    // Hop one space forward with a little jump arc.
+    /* Drive one space forward. The car turns smoothly to face the next
+       space during the first part of the move (no instant snap), hops in a
+       little arc with its nose tipping up on take-off and down on the way
+       in, then squashes flat for a moment on landing with a puff of dust.
+       Boost-pad zooms (fast = true) are quicker, flatter and leave a
+       flame trail. */
     async stepForward(player, fast = false) {
       const tok = this.tokens[player.index];
       const from = tok.pos.clone();
       const next = await this.pickNext(player);
       const to = this.spaces[next].pos.clone();
       to.y = 0.36;
-      tok.heading = Math.atan2(to.x - from.x, to.z - from.z);
+      const h0 = tok.heading;
+      const turn = TP.util.wrapAngle(Math.atan2(to.x - from.x, to.z - from.z) - h0);
+      const body = tok.mesh.userData.body;
+      tok.manualBodyPose = true; // we pose the body ourselves while hopping
       TP.sfx.play("step");
 
-      await TP.sched.tween(fast ? STEP_TIME * 0.6 : STEP_TIME, (k) => {
-        tok.pos.lerpVectors(from, to, k);
-        tok.pos.y = 0.36 + Math.sin(k * Math.PI) * 1.2;
+      // The jump ramp over the middle of the shortcut: a big airborne
+      // leap with a full barrel roll and a cheer, instead of a hop.
+      const ramp = player.space === this.rampFrom && next === this.rampTo;
+      const hopH = ramp ? 5 : fast ? 0.5 : 1.1;
+      if (ramp) { TP.sfx.play("boost"); this.crowdCheer(1.2); }
+      await TP.sched.tween(ramp ? 0.9 : fast ? STEP_TIME * 0.6 : STEP_TIME, (k) => {
+        // Ease the turn in over the first 40% of the move.
+        tok.heading = h0 + turn * TP.ease.outCubic(Math.min(1, k / 0.4));
+        const e = TP.ease.inOutQuad(k);
+        tok.pos.lerpVectors(from, to, e);
+        tok.pos.y = 0.36 + Math.sin(k * Math.PI) * hopH;
+        // Nose up on the way up, nose down on the way in.
+        body.rotation.x = -Math.cos(k * Math.PI) * 0.25;
+        body.rotation.z = ramp ? TP.ease.inOutQuad(k) * Math.PI * 2 : 0;
+        body.scale.set(1, 1, 1);
+        if (ramp && Math.random() < 0.8) {
+          const back = tok.forward().multiplyScalar(-1.1).add(tok.pos);
+          this.fx.burst(back, [0xffa62b, 0xffe14d, 0xffffff], { count: 1, speed: 1, up: 0.2, life: 0.4, size: 0.22, gravity: -1 });
+        }
+        if (fast && Math.random() < 0.7) {
+          const back = tok.forward().multiplyScalar(-1.1).add(tok.pos);
+          back.y += 0.35;
+          this.fx.burst(back, [0xffa62b, 0xffe14d], { count: 1, speed: 1, up: 0.3, life: 0.3, size: 0.18, gravity: -1 });
+        }
         this.camFocus.set(tok.pos.x, 0, tok.pos.z);
       });
+      // Landing: squash and spring back, with a small dust puff.
+      body.rotation.x = 0;
+      body.rotation.z = 0;
+      this.fx.burst(to, [0xcfd6e6, 0x9aa3b8], { count: 4, speed: 2, up: 0.5, life: 0.35, size: 0.16, gravity: 4 });
+      TP.sched.tween(0.16, (k) => {
+        const sq = Math.sin(k * Math.PI) * 0.22;
+        body.scale.set(1 + sq * 0.5, 1 - sq, 1 + sq * 0.5);
+      }).then(() => { body.scale.set(1, 1, 1); tok.manualBodyPose = false; });
       player.space = next;
       player.stats.spacesMoved++;
 
@@ -605,9 +717,12 @@
       const human = player.controller !== "bot";
       ui.setPlayers(this.players, player.index);
       this.focusOn(player);
-      ui.center(`${player.name}'s turn`, "", player.css);
-      await TP.sched.wait(0.9);
-      ui.center("");
+      // Turn banner sweeps across in the player's colour, and their car
+      // does a little "ready!" hop on the spot.
+      const place = TP.UI.places(this.players)[player.index];
+      ui.banner(`${player.name}'s turn`, `${TP.UI.PLACE_NAMES[place]} place · 🏆 ${player.trophies} · 🪙 ${player.coins}`, player.css, 0.9);
+      this.cheerHop(player);
+      await TP.sched.wait(1.1);
       // Fresh turn, so this player may buy the trophy again (max one per turn).
       this.trophyBoughtThisTurn = false;
 
@@ -653,6 +768,251 @@
       this.parkToken(player.index);
       ui.setPlayers(this.players, player.index);
       await TP.sched.wait(0.5);
+    }
+
+    /* ------------------------------------------------------------------
+       Between rounds: the board's moving parts (Phase 2 set pieces)
+       ------------------------------------------------------------------
+       Called by game.js after everyone has had their turn, before the
+       minigame:
+         1. the Spark Cannon ticks down, and fires if it reaches zero;
+         2. the swing gate flips (shortcut open ⇄ closed). */
+    async roundEnd() {
+      await this.cannonTick();
+      const open = this.advanceGate();
+      this.camFocus.copy(this.gate.group.position);
+      this.camOffset.set(0, 16, 14);
+      TP.UI.banner(open ? "🚧 GATE OPEN" : "🚧 GATE CLOSED", open ? "The Risky Shortcut is open again" : "Main road only next round", open ? "#34d399" : "#f87171", 1.0);
+      TP.sfx.play("swing");
+      await TP.sched.wait(1.5);
+      this.focusOverview();
+    }
+
+    /* ---------- The Spark Cannon (the board hazard) ----------
+       It aims at a stretch of CANNON_ZONE spaces on the main loop and
+       counts down a round at a time (it shows the number on its screen,
+       and the target spaces pulse red). At zero it fires: every car parked
+       in the zone is blasted CANNON_KNOCKBACK spaces back along the road.
+       Then it picks a new target and starts again from CANNON_ROUNDS.
+       Targets: half the time the stretch around the current leader (a
+       gentle catch-up rule), otherwise around a random player, so the
+       zone is usually somewhere that matters. */
+    cannonReset() {
+      const cn = this.cannon;
+      if (!cn) return;
+      // Take away the old target's warning rings.
+      for (const r of cn.rings || []) { this.scene.remove(r); r.material.dispose(); }
+      cn.rings = [];
+      const leader = this.players.slice().sort((a, b) => b.trophies - a.trophies || b.coins - a.coins)[0];
+      const who = Math.random() < 0.5 ? leader : pick(this.players);
+      // Centre the zone on that player's space, or the closest loop space.
+      let centre = who.space < LOOP_COUNT ? who.space : this.mergeIndex;
+      // Skip the very start of the match (everyone on space 0): aim ahead.
+      if (centre === 0) centre = randInt(6, LOOP_COUNT - 6);
+      cn.zone = [];
+      for (let d = -Math.floor(CANNON_ZONE / 2); d <= Math.floor(CANNON_ZONE / 2); d++) {
+        cn.zone.push((centre + d + LOOP_COUNT) % LOOP_COUNT);
+      }
+      // A pulsing red ring with hazard ticks around each target space
+      // (the space's own colour stays readable inside it).
+      if (!this.zoneRingGeo) this.zoneRingGeo = new THREE.RingGeometry(2.05, 2.55, 32);
+      for (const idx of cn.zone) {
+        const ring = new THREE.Mesh(this.zoneRingGeo, new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(this.spaces[idx].pos.x, 0.06, this.spaces[idx].pos.z);
+        this.scene.add(ring);
+        cn.rings.push(ring);
+      }
+      cn.count = CANNON_ROUNDS;
+      const c = this.spaces[centre].pos;
+      cn.aimTarget = Math.atan2(c.x - cn.group.position.x, c.z - cn.group.position.z);
+      this.drawCannonScreen(String(cn.count));
+    }
+
+    async cannonTick() {
+      const cn = this.cannon;
+      if (!cn) return;
+      cn.count--;
+      if (cn.count > 0) {
+        this.drawCannonScreen(String(cn.count));
+        if (cn.count === 1) {
+          // One round of warning: show where it's aimed.
+          this.camFocus.copy(this.spaces[cn.zone[Math.floor(cn.zone.length / 2)]].pos);
+          this.camOffset.set(0, 30, 24);
+          TP.UI.banner("⚠ SPARK CANNON", "Fires after the next round: stay off the red zone!", "#ff5a3c", 1.2);
+          await TP.sched.wait(1.8);
+        }
+        return;
+      }
+      await this.fireCannon();
+      this.cannonReset();
+    }
+
+    async fireCannon() {
+      const cn = this.cannon;
+      const ui = TP.UI;
+      this.drawCannonScreen("FIRE!", "#ffcc33");
+      this.camFocus.copy(cn.group.position);
+      this.camOffset.set(0, 34, 30);
+      ui.banner("💥 SPARK CANNON!", "", "#ff5a3c", 0.9);
+      await TP.sched.wait(1.0);
+
+      // The fireball: a glowing ball arcing from the barrel to the zone.
+      const target = this.spaces[cn.zone[Math.floor(cn.zone.length / 2)]].pos.clone();
+      const start = cn.group.position.clone().setY(4);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffb020 }));
+      this.scene.add(ball);
+      cn.recoil = 1;
+      TP.sfx.play("boost");
+      await TP.sched.tween(0.9, (k) => {
+        ball.position.lerpVectors(start, target, k);
+        ball.position.y = start.y + (target.y - start.y) * k + Math.sin(k * Math.PI) * 14;
+        this.camFocus.lerpVectors(cn.group.position, target, k);
+        if (Math.random() < 0.9) this.fx.burst(ball.position, [0xff5a3c, 0xffcc33], { count: 2, speed: 2, up: 0, size: 0.35, life: 0.4, gravity: 0 });
+      });
+      this.scene.remove(ball);
+      ball.geometry.dispose(); ball.material.dispose();
+      this.fx.explosion(target);
+      for (const idx of cn.zone) this.fx.burst(this.spaces[idx].pos, [0xff5a3c, 0xffcc33, 0x333333], { count: 10, speed: 9 });
+      TP.sfx.play("ko");
+      this.crowdCheer(1.5);
+
+      // Everyone parked in the zone is blasted back.
+      const hit = this.players.filter((p) => cn.zone.includes(p.space));
+      if (!hit.length) {
+        ui.toast("The cannon missed everyone!");
+        await TP.sched.wait(1.2);
+        return;
+      }
+      ui.toast(`Blasted back ${CANNON_KNOCKBACK} spaces: ${hit.map((p) => p.name).join(", ")}!`, 2.2);
+      await Promise.all(hit.map((p) => this.knockBack(p, CANNON_KNOCKBACK)));
+      await TP.sched.wait(0.8);
+    }
+
+    // The space that leads into `index` (main-loop road preferred).
+    prevSpace(index) {
+      const from = this.spaces.filter((s) => s.next.includes(index));
+      return (from.find((s) => !s.shortcut) || from[0]).index;
+    }
+
+    // Fly a player's car backwards `n` spaces in one tumbling arc.
+    async knockBack(player, n) {
+      const tok = this.tokens[player.index];
+      let to = player.space;
+      for (let k = 0; k < n; k++) to = this.prevSpace(to);
+      const from = tok.pos.clone();
+      player.space = to;
+      const [ox, oz] = PARK_OFFSETS[player.index];
+      const end = this.spaces[to].pos.clone().add(new THREE.Vector3(ox, 0.36, oz));
+      const body = tok.mesh.userData.body;
+      tok.manualBodyPose = true;
+      await TP.sched.tween(0.8, (k) => {
+        tok.pos.lerpVectors(from, end, k);
+        tok.pos.y = 0.36 + Math.sin(k * Math.PI) * 4;
+        body.rotation.x = k * Math.PI * 2;
+      });
+      body.rotation.x = 0;
+      tok.manualBodyPose = false;
+      this.parkToken(player.index);
+      this.fx.burst(tok.pos, [0x9aa3b8, 0x6b7280], { count: 8, speed: 3 });
+    }
+
+    /* ---------- End ceremony podium ----------
+       Builds a three-step winners' stand north of the loop, moves the cars
+       onto it (1st in the middle and highest, 2nd on the left, 3rd on the
+       right, 4th parked on the grass in front, slumped), points the
+       camera at it and fires confetti. Board.update keeps the champion
+       spinning and the confetti coming while it's up. */
+    showPodium(ranked) {
+      const g = new THREE.Group();
+      g.position.copy(PODIUM_POS);
+      const steps = [
+        { place: 0, x: 0, h: 3.0, color: 0xffcc33 },
+        { place: 1, x: -4.2, h: 2.0, color: 0xcbd5e1 },
+        { place: 2, x: 4.2, h: 1.2, color: 0xd08a4a },
+      ];
+      this.podiumSpots = [];
+      for (const st of steps) {
+        const block = new THREE.Mesh(
+          new THREE.BoxGeometry(4, st.h, 4),
+          new THREE.MeshStandardMaterial({ color: 0x1e2a55, roughness: 0.6 })
+        );
+        block.position.set(st.x, st.h / 2, 0);
+        block.castShadow = block.receiveShadow = true;
+        g.add(block);
+        // A coloured stripe on the front with the place number painted on.
+        const face = new THREE.Mesh(
+          new THREE.PlaneGeometry(3.4, Math.min(1.1, st.h * 0.7)),
+          new THREE.MeshBasicMaterial({ map: this.placeTexture(st.place, st.color) })
+        );
+        face.position.set(st.x, st.h * 0.5, 2.01);
+        g.add(face);
+        this.podiumSpots[st.place] = new THREE.Vector3(PODIUM_POS.x + st.x, st.h, PODIUM_POS.z);
+      }
+      // 4th place: on the grass in front of the stand.
+      this.podiumSpots[3] = new THREE.Vector3(PODIUM_POS.x + 7.5, 0, PODIUM_POS.z + 3.5);
+      // A back wall with lights, so the stand doesn't float in the dark.
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(18, 7, 0.6), new THREE.MeshStandardMaterial({ color: 0x141c3c }));
+      wall.position.set(0, 3.5, -3.5);
+      g.add(wall);
+      for (let k = 0; k < 7; k++) {
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), new THREE.MeshBasicMaterial({ color: [0xffcc33, 0xff5fa2, 0x5fb4ff][k % 3] }));
+        bulb.position.set(-7.5 + k * 2.5, 6.6, -3.1);
+        g.add(bulb);
+      }
+      const spot = new THREE.PointLight(0xfff1c4, 60, 30, 1.6);
+      spot.position.set(0, 10, 6);
+      g.add(spot);
+      this.scene.add(g);
+      this.podium = g;
+
+      // Park the cars on their steps, facing the camera, a bit bigger
+      // than on the board so they read well.
+      ranked.forEach((p, i) => {
+        const tok = this.tokens[p.index];
+        const at = this.podiumSpots[Math.min(i, 3)];
+        tok.pos.set(at.x, at.y + 0.02, at.z);
+        tok.heading = 0; // +Z = toward the camera
+        tok.mesh.scale.setScalar(0.85);
+        tok.manualBodyPose = true;
+        const body = tok.mesh.userData.body;
+        body.rotation.set(i === 3 ? 0.3 : 0, 0, 0);
+        body.scale.set(1, i === 3 ? 0.8 : 1, 1);
+        tok.syncMesh(0);
+      });
+      this.podiumRanked = ranked;
+      this.camFocus.set(PODIUM_POS.x, 2.4, PODIUM_POS.z);
+      this.camOffset.set(0, 5.5, 17);
+      this.fx.confetti(this.podiumSpots[0].clone().setY(5), { count: 120 });
+      this._podiumT = 0;
+    }
+
+    // "1st" / "2nd" / "3rd" painted on a stripe for the podium front.
+    placeTexture(place, color) {
+      const c = document.createElement("canvas");
+      c.width = 256; c.height = 80;
+      const g = c.getContext("2d");
+      g.fillStyle = "#" + color.toString(16).padStart(6, "0");
+      g.fillRect(0, 0, 256, 80);
+      g.fillStyle = "#0b1020";
+      g.font = "900 60px Segoe UI, system-ui, sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(["1st", "2nd", "3rd"][place], 128, 44);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    /* A small celebratory hop-and-spin on the spot (turn start, trophy buy).
+       `spins` = full turns of the car while it's in the air. */
+    cheerHop(player, height = 1.4, spins = 1, time = 0.5) {
+      const tok = this.tokens[player.index];
+      const y0 = 0.36, h0 = tok.heading;
+      return TP.sched.tween(time, (k) => {
+        tok.pos.y = y0 + Math.sin(k * Math.PI) * height;
+        tok.heading = h0 + TP.ease.inOutQuad(k) * Math.PI * 2 * spins;
+      }).then(() => { tok.pos.y = y0; tok.heading = h0; });
     }
 
     /* Spin the die above the car until the player (or bot) stops it.
@@ -799,6 +1159,8 @@
         player.stats.coinsEarned += amt;
         ui.toast(`Pickpocketed ${amt} coins from ${rich.name}!`);
         this.fx.burst(this.tokens[rich.index].pos, 0xffcc33, { count: amt * 2 });
+        this.coinPop(rich, -amt);
+        this.coinPop(player, amt);
         TP.sfx.play("coin");
         ui.setPlayers(this.players, player.index);
         await TP.sched.wait(1);
@@ -833,6 +1195,8 @@
       TP.sfx.play(amount >= 0 ? "coin" : "lose");
       const pos = this.tokens[player.index].pos;
       if (amount > 0) this.fx.burst(pos, 0xffcc33, { count: 6 + amount, speed: 6 });
+      // The bubble shows what actually changed (a −3 with only 1 coin left is −1).
+      this.coinPop(player, change);
       TP.UI.setPlayers(this.players, player.index);
       return change;
     }
@@ -850,11 +1214,14 @@
           this.addCoins(player, 3, "Start line! +3 coins");
           break;
         case "blue":
-          this.addCoins(player, 3, "Blue space! +3 coins");
+          // Final 3 turns: double coins on blue and red spaces.
+          if (this.finalStretch) this.addCoins(player, 6, "Blue space, doubled! +6 coins");
+          else this.addCoins(player, 3, "Blue space! +3 coins");
           break;
         case "red":
           player.stats.redSpaces++;
-          this.addCoins(player, -3, "Red space! −3 coins");
+          if (this.finalStretch) this.addCoins(player, -6, "Red space, doubled! −6 coins");
+          else this.addCoins(player, -3, "Red space! −3 coins");
           break;
         case "boost":
           if (fromBoost) break; // a boost can't trigger another boost
@@ -911,15 +1278,18 @@
             player.coins += amt;
             player.stats.coinsEarned += amt;
             TP.UI.toast(`Took ${amt} coins from ${rich.name}!`);
+            this.coinPop(rich, -amt);
+            this.coinPop(player, amt);
             TP.sfx.play("coin");
             TP.UI.setPlayers(this.players, player.index);
           },
         },
       ];
       const ev = pick(events);
-      TP.UI.center("? EVENT ?", ev.title, "#9be22d");
-      await TP.sched.wait(1.1);
-      TP.UI.center("");
+      this.punchIn(player);
+      TP.UI.banner("? EVENT ?", ev.title, "#9be22d", 1.0);
+      await TP.sched.wait(1.2);
+      this.focusOn(player);
       await ev.run(); // some events (pit-lane swap) can pause for a trophy offer
     }
 
@@ -936,9 +1306,11 @@
       const labels = ["Leave", ...stock.map((it) => player.coins >= it.price
         ? `${it.icon} ${it.name} · ${it.price}🪙`
         : { label: `${it.icon} ${it.name}`, disabled: `need ${it.price}🪙` })];
+      this.punchIn(player, 1.2);
       ui.center("SHOP", "Items are used at the start of your turn", "#a855f7");
       const choice = await this.choose(player, `Buy something? You have ${player.coins} coins`, labels, this.botShopChoice(player, stock));
       ui.center("");
+      this.focusOn(player);
       if (choice === 0) return;
       const item = stock[choice - 1];
       if (player.coins < item.price) {
@@ -949,6 +1321,7 @@
       player.coins -= item.price;
       player.items.push(item.id);
       ui.toast(`Bought ${item.icon} ${item.name}!`);
+      this.coinPop(player, -item.price);
       TP.sfx.play("coin");
       ui.setPlayers(this.players, player.index);
     }
@@ -1010,12 +1383,19 @@
       player.coins -= TROPHY_COST;
       player.trophies += 1;
       this.trophyBoughtThisTurn = true;
+      // Big moment: punch in on the buyer, who does a double spin while
+      // the confetti flies and the crowd cheers.
+      this.punchIn(player, 1.1);
+      this.coinPop(player, -TROPHY_COST);
       TP.sfx.play("trophy");
+      TP.partySfx.play("cheer");
+      this.crowdCheer(2);
       this.fx.confetti(this.trophy.position);
-      TP.UI.center("🏆 TROPHY!", `${player.name} has ${player.trophies}`, "#ffcc33");
+      TP.UI.banner("🏆 TROPHY!", `${player.name} now has ${player.trophies}`, "#ffcc33", 1.3);
       TP.UI.setPlayers(this.players, player.index);
-      await TP.sched.wait(1.6);
-      TP.UI.center("");
+      await this.cheerHop(player, 2.2, 2, 0.8);
+      await TP.sched.wait(0.8);
+      this.focusOn(player);
 
       // Move the trophy at least 10 spaces ahead of the buyer (see
       // trophySpotsFrom for the full rules), and show where it went.

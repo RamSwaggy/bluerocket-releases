@@ -28,6 +28,11 @@ characters, art, music or levels.
 
 Message a session with `send_message` and its session ID. Roles reply to the boss.
 
+**Round 2 (from 2026-11-28): one builder.** The roles above are paused. A single session,
+"Rocket Rumble · Turbo Party · Builder (round 2)", does gameplay, art, UI and QC on
+`team/turbo-party` and reports to the Director (`session_01GHNBrpeLU9EhxDWu9Qk78E`) at the end of
+each phase. The file-ownership split below still describes which *kind* of code lives where.
+
 ## Who owns what
 
 Several files mix rules and visuals. Split them by **function**, not by file.
@@ -57,7 +62,12 @@ node tools/turbo-party-balance.js 20 6       # 20 six-turn bot matches → troph
 node tools/turbo-party-human.js              # scripted Keyboard-1 player: hub, shop, items, fork, trophy + 14 rule checks (~4 min)
 node tools/turbo-party-minigame.js all 10 [seed]  # seeded, replayable; flags ties, cap hits, console errors
 node tools/credits-check.js turbo-party      # every third-party asset has a CREDITS.md line (pass the mode name!)
+node tools/turbo-party-shots.js <outDir> [scene ...]   # screenshots: menu board hop dusk cannon intro minigame finish bonus podium
 ```
+
+**Run tests from a snapshot, not the tree you're editing.** The tests load the game files fresh for
+every match, so editing while a long run is going mixes old and new code (one balance match got
+stuck that way). Use `git worktree add --detach <dir> HEAD` and run the tools from `<dir>/games`.
 
 In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&speed=N`,
 `&minigame=<id>`. `TP.game` is exposed in the console for poking at state.
@@ -238,6 +248,66 @@ game's names, characters, boards, minigames, art or music.**
 Each phase: smoke + minigame + human tests pass, `credits-check` passes, screenshots, then
 message the Director "Turbo Party phase N: ready to merge". Shared changes (car feel, input,
 sfx) still go through the Director.
+
+## Round 2 progress (builder)
+
+| Phase | What | Status |
+|---|---|---|
+| 0 | Job 10 merged (bot item strategy + Goal Frenzy golden goal); balance re-check | done, see Phase 0 notes |
+| 1 | Juice and presentation | done (see below) |
+| 2 | Board life: scenery, crowd, sky, gate, ramp, Spark Cannon, Final 3 turns | done (see below) |
+| 3 | Minigames 6 → 14+, team formats, Duel space | next |
+| 4 | Interaction: 6+ items, steal-a-trophy event | — |
+| 5 | Minigame-only mode, length presets, second board | — |
+
+### Phase 1: juice and presentation (what's in)
+- **Moving on the board** (`board.js` `stepForward`): the car turns smoothly toward the next space,
+  hops with its nose tipping up then down, and squashes on landing with a dust puff. Boost-pad zooms
+  leave a flame trail. A turn starts with a little hop-and-spin (`cheerHop`).
+- **Coin bubbles**: every coin change on the board floats "+3 🪙" / "−3 🪙" over the car
+  (`Board.coinPop`, `UI.popup`), with a pop sound. HUD coin numbers count up/down and flash green/red.
+- **Live rank**: each HUD card has a place ribbon (gold/silver/bronze/plain; ties share a place; it
+  pops when a place changes). Replaced the old "👑 1st" leader badge.
+- **Banners** (`UI.banner`): sliding strips for "<name>'s turn" (with place, trophies, coins),
+  "Minigame time!", "Final turn!", events and trophy buys.
+- **Camera punch-ins** (`Board.punchIn`): events, the shop and trophy buys zoom in on the car.
+- **Minigame intro card** (`Game.introCard`): format tag, kind, length, one-line rule in big type,
+  the full description, controls, and a **ready check** (one chip per player; humans press confirm,
+  bots nod in after a moment; 15 s auto-start). Each minigame now registers `rule`, `format`,
+  `kind` and `length`.
+- **Finish reactions** (`Arena.startReactions`): winners bounce and spin with the flame lit,
+  last place slumps with smoke, the rest nod.
+- **Results card**: medals, rows sliding in, a reaction word, the winner's row glowing.
+- **End ceremony**: "The party's over!", each bonus trophy revealed with a drumroll while the name
+  slot flickers, then a close-up on the winner; then a **podium** north of the board with confetti
+  and a fanfare (`Board.showPodium`), then the final standings.
+- **Sounds** (`js/party-sfx.js`, all made in code, through the shared mute): drumroll, whoosh,
+  cheer, aww, pop, fanfare, thump, ready.
+
+### Phase 2: board life (what's in)
+All scenery is in `js/board-life.js` (methods added to `TP.Board`); the rules are in `board.js`.
+- **Sky and time of day**: a gradient sky dome with stars; afternoon at turn 1 drifting to sunset
+  and night by the last turn (`setTimeOfDay`, `Game.shiftSky`). Floodlight beams appear at dusk.
+- **Stands and crowd**: three roofed grandstands with ~400 fans (instanced) who bob, do a stadium
+  wave, and jump and cheer on trophy buys, ramp jumps and cannon shots (`crowdCheer`).
+- **Dressing**: billboards for made-up sponsors, tyre stacks, cones, bunting between the floodlight
+  towers, party-bulb strings on the stands.
+- **Swing gate** at the fork: flips at the end of every round. Closed = the shortcut is shut and the
+  fork goes straight down the main road (no menu). Banner + camera on each flip.
+- **Jump ramp** in the middle of the shortcut: cars leap it with a barrel roll.
+- **Spark Cannon** (the board hazard): counts down 3 rounds (screen on the cannon), its 5-space
+  target zone on the main loop is ringed in pulsing red; a warning banner one round ahead; then it
+  fires a fireball and every car in the zone is blasted 3 spaces back. Targets the leader's stretch
+  half the time (gentle catch-up), otherwise a random player's.
+- **Final 3 turns** (matches of 5+ turns): banner, blue/red spaces become ±6, and last place gets a
+  +10 catch-up bonus.
+- Tests: `turbo-party-human.js` PART 2b checks the gate, the road back, the cannon knockback,
+  the doubled spaces and the catch-up bonus. The scripted human match keeps the gate open on the
+  human's turns.
+
+### Decisions made while building (builder, under the Director's approved roadmap)
+- Rank ribbons replace the single crown: same ranking rule as the final standings.
+- Duel wins (phase 3) will move coins only; they won't count toward the Minigame Ace bonus.
 
 ## Reece's checklist: gamepad and sound (job 6)
 

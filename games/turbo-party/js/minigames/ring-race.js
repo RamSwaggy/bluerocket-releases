@@ -219,6 +219,11 @@
     id: "ring-race",
     name: "Ring Race",
     cls: RingRace,
+    // One-line rule and format tags for the intro card (see game.js).
+    rule: "Race 4 laps clockwise. Orange pads refill boost.",
+    format: "Free-for-all",
+    length: "4 laps",
+    kind: "Race",
     blurb: "4 laps clockwise around the ring. Orange pads refill your boost. Bump rivals into the walls! Once the winner finishes, everyone else has 8 seconds.",
   });
 })();
