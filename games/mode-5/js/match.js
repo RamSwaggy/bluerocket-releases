@@ -150,7 +150,13 @@ TP.M5 = TP.M5 || {};
       this.suddenDeath = null;   // { sides, players } during a sudden-death round
       this._hintsShown = new Set();
 
-      this.arena = TP.M5.arenaFor(this.firstArena);
+      /* Which spawn spot each seat gets is rotated by a random amount once
+         per match. The spots aren't all equally good on every arena (on
+         Split Level the south deck ends start a little worse), so fixed
+         spots would quietly favour some seats forever. A rotation keeps
+         teammates (seats 1+3, 2+4) together on the same side. */
+      this.spawnShift = Math.floor(Math.random() * 4);
+      this.arena = this._arenaFor(this.firstArena);
       this.grid = new TP.M5.PaintGrid(this.arena);
       this.grid.setTeams(this.teams);
       this.startRound();
@@ -182,9 +188,17 @@ TP.M5 = TP.M5 || {};
     /* ------------------------------------------------------------------
        Round setup
        ------------------------------------------------------------------ */
+    // The arena for arena number n, with this match's spawn rotation applied.
+    _arenaFor(n) {
+      const a = TP.M5.arenaFor(n), sp = a.spawns, k = this.spawnShift || 0;
+      a.spawns = sp.map((_, i) => sp[(i + k) % sp.length]);
+      a.pads = a.spawns;
+      return a;
+    }
+
     startRound() {
       this.round++;
-      this.arena = TP.M5.arenaFor(this.firstArena + this.round - 1);
+      this.arena = this._arenaFor(this.firstArena + this.round - 1);
       this.grid.reset(this.arena);
 
       this.phase = "countdown";

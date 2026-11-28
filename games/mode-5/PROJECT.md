@@ -64,3 +64,4 @@ See the table in `DESIGN.md` → "Code architecture". `DESIGN.md` and this file 
 - QC 10a0e5e: tools/mode-5-{lib,smoke,shots,probe}.js (test-hook contract forwarded to Gameplay).
 - Art 1f58907: world/vfx/hud/audio + art-preview.html (reviewed screenshots 1280×720, 390×844, match card; no errors).
 - Boss part 20: minor (tiny-trail) pops are silent (no floater, sound, splash or shake) — QC's pop ping-pong report; human re-pop chains handled by popGrace 2 s + bots leaving their last victim 5 s.
+- Boss part 21: spawn spots rotate by a random offset per match (Split Level's south deck ends start weaker: south seats won 1/20 hard matches; swapping spots moved the weakness with them). Teammates stay paired.
