@@ -337,7 +337,8 @@
       group.add(body);
 
       // Glowing bands (and a lit cap when the pillar has a top you can see).
-      const capMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonB }));
+      // Transparent so the glow can dim along with the body (pillar x-ray).
+      const capMat = keep(new THREE.MeshBasicMaterial({ color: COL.neonB, transparent: true }));
       const bandGeo = keep(new THREE.CylinderGeometry(p.r + 0.03, p.r + 0.03, 0.14, 40, 1, true));
       const bandYs = BOX ? [1.2, H * 0.5, H - 1.2] : [pillarH - 0.35];
       for (const y of bandYs) {
@@ -523,7 +524,12 @@
         p.pulse = Math.max(0, p.pulse - dt * 2.5);
         const base = new THREE.Color(COL.neonB);
         p.capMat.color.copy(base).lerp(p.color, p.pulse).multiplyScalar(1 + p.pulse * 0.6);
-        p.ringMat.opacity = 0.3 + 0.08 * Math.sin(t * 3 + p.x) + p.pulse * 0.6;
+        // When the pillar is see-through (it's in front of the action), its
+        // cap, bands and floor halo dim too, so nothing bright sits in the
+        // foreground. They keep a faint outline so you still see the pillar.
+        const dim = 0.2 + 0.8 * p.fade;
+        p.capMat.opacity = dim;
+        p.ringMat.opacity = (0.3 + 0.08 * Math.sin(t * 3 + p.x) + p.pulse * 0.6) * (0.15 + 0.85 * p.fade);
         p.ringMat.color.copy(base).lerp(p.color, p.pulse);
       }
 
