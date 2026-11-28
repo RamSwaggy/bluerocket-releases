@@ -305,6 +305,7 @@
       <p class="error" id="err"></p>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="start" data-nav-primary>Start duel</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
         <a class="btn alt" style="text-decoration:none" href="${Rumble.HUB_URL}" data-nav-back>← All modes</a>
       </div>`);
 

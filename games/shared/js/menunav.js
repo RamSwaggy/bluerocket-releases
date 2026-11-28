@@ -21,6 +21,14 @@
                             unassigned their controller.)
      B (or Escape) ........ back (opts.onBack, or a [data-nav-back] element)
      Start ................ press the [data-nav-primary] element (e.g. "Play")
+     View / Back (pad 8) .. open the Controls screen (rebinding)
+     ← → on a slider ...... adjust it
+
+   Only the top-most menu listens: while a modal (TP.MenuNav.modal, e.g.
+   the Controls screen) is open, menus underneath ignore input, and while
+   a rebind is capturing (TP.Controls.capturing) every menu ignores input.
+   Anything still held when a menu becomes active again is ignored until
+   released, so the press that closed the modal doesn't also click here.
 
    Mark the main action with data-nav-primary so it's highlighted first.
    Text boxes are skipped by gamepad movement (a pad can't type); they
@@ -51,6 +59,10 @@ window.TP = window.TP || {};
 
   function attach(container, opts = {}) {
     ensureStyle();
+    // True while this menu shouldn't respond: a rebind is listening for a
+    // key/button, or a modal that isn't (and doesn't contain) this menu is open.
+    const blocked = () => (TP.Controls && TP.Controls.capturing) ||
+      (TP.MenuNav.modal && TP.MenuNav.modal !== container && !TP.MenuNav.modal.contains(container));
     let current = null;
     let alive = true;
     const held = {};      // direction/button → seconds held (for repeat + edges)
@@ -130,6 +142,14 @@ window.TP = window.TP || {};
     // move to on that side do ← → change its value instead.
     function direction(dx, dy) {
       const el = ensureCurrent();
+      // Sliders: ← → adjust the value (↑ ↓ still move away).
+      if (el && el.type === "range" && dx !== 0) {
+        if (dx > 0) el.stepUp(); else el.stepDown();
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        play("tick");
+        return;
+      }
       if (move(dx, dy)) return;
       if (el && el.tagName === "SELECT" && dx !== 0) nudgeSelect(el, dx);
     }
@@ -175,10 +195,11 @@ window.TP = window.TP || {};
       if (!alive) return;
       const dt = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
-      if (container.isConnected && visible(container)) {
+      if (blocked()) { firstTick = true; }
+      else if (container.isConnected && visible(container)) {
         const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
         // Combine every pad: anyone can drive the menu.
-        let x = 0, y = 0, a = false, b = false, start = false;
+        let x = 0, y = 0, a = false, b = false, start = false, view = false;
         for (const gp of pads) {
           const bt = (i) => gp.buttons[i] && gp.buttons[i].pressed;
           const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
@@ -186,11 +207,11 @@ window.TP = window.TP || {};
           if (bt(15) || ax > 0.55) x = 1;
           if (bt(12) || ay < -0.55) y = -1;
           if (bt(13) || ay > 0.55) y = 1;
-          a = a || bt(0); b = b || bt(1); start = start || bt(9);
+          a = a || bt(0); b = b || bt(1); start = start || bt(9); view = view || bt(8);
         }
         if (firstTick) {
           firstTick = false;
-          const now = { left: x < 0, right: x > 0, up: y < 0, down: y > 0, a, b, start };
+          const now = { left: x < 0, right: x > 0, up: y < 0, down: y > 0, a, b, start, view };
           for (const k of Object.keys(now)) if (now[k]) held[k] = -1;
         }
         if (edge("left", x < 0, dt, true)) direction(-1, 0);
@@ -200,6 +221,7 @@ window.TP = window.TP || {};
         if (edge("a", a, dt, false)) press();
         if (edge("b", b, dt, false)) back();
         if (edge("start", start, dt, false)) primary();
+        if (edge("view", view, dt, false) && !TP.MenuNav.modal && TP.Controls) TP.Controls.openMenu();
       }
       requestAnimationFrame(tick);
     }
@@ -207,7 +229,7 @@ window.TP = window.TP || {};
 
     /* ---------- Keyboard: arrows move (unless typing), Escape = back ---------- */
     function onKey(e) {
-      if (!container.isConnected || !visible(container)) return;
+      if (blocked() || !container.isConnected || !visible(container)) return;
       const typing = isText(document.activeElement);
       const map = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       if (map[e.key] && !typing && !e.altKey) {
@@ -250,5 +272,5 @@ window.TP = window.TP || {};
     };
   }
 
-  TP.MenuNav = { attach };
+  TP.MenuNav = { attach, modal: null };
 })();

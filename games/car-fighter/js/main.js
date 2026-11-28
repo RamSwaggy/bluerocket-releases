@@ -110,6 +110,7 @@
         <span class="muted" id="padinfo"></span>
         <span class="muted">Press <kbd>M</kbd> to mute</span>
         <button class="btn" id="start" data-nav-primary>Fight!</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
       </div>`);
 
     // Show/hide the difficulty picker as the controller changes.
