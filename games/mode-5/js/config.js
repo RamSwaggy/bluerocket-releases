@@ -39,6 +39,8 @@ TP.M5 = TP.M5 || {};
     trailDry: 6,            // a wet trail dries by itself after this long
     stunTime: 1.0,          // how long a popped car spins out
     popGrace: 1.0,          // after the spin-out, this long before you can be popped again
+    minFill: 8,             // fills smaller than this many cells are "small" (silent)
+    minPop: 6,              // trails shorter than this pop without a stun ("minor")
     hardBump: 9,            // bump impact needed for a splat + pop
     bumpCooldown: 0.5,      // the same pair can't hard-bump twice within this
 
