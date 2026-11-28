@@ -39,7 +39,7 @@
     fog: 0x3a2346,        // dusky purple haze, also the horizon colour
     skyTop: 0x070722,     // deep indigo
     skyMid: 0x2a1845,     // violet
-    ember: 0xe8704a,      // warm low glow at the horizon
+    ember: 0xc8644e,      // warm, dusky low glow at the horizon (kept off player orange)
     far: 0x4b3466,        // far silhouettes (fog lightens them further)
     mid: 0x2a2846,        // mid silhouettes (soft, so they read as background)
     window: 0xc99a6a,     // warm lit windows (dimmed: background, not track)
@@ -222,13 +222,19 @@
             c = mix(c, top, smoothstep(0.58, 0.86, y));
             // Ember glow rising off the horizon: a broad warm wash plus a
             // brighter band right at the skyline, so the dusk reads.
-            c += ember * 0.45 * exp(-pow((y - 0.5) * 4.5, 2.0));
-            c += ember * 0.6 * exp(-pow((y - 0.5) * 12.0, 2.0));
+            // It starts just above the horizon, so right at eye level the
+            // sky matches the fog and the distant floor blends in.
+            float above = smoothstep(0.49, 0.56, y);
+            c += ember * 0.5 * above * exp(-pow((y - 0.56) * 5.0, 2.0));
+            c += ember * 0.45 * above * exp(-pow((y - 0.535) * 16.0, 2.0));
             // Stars: only high up, and only a few cells light up.
             vec2 cell = floor(vUv * vec2(260.0, 150.0));
             float s = step(0.9965, hash(cell)) * smoothstep(0.66, 0.9, y);
             c += vec3(0.85, 0.85, 1.0) * s * (0.5 + 0.5 * hash(cell + 7.0));
             gl_FragColor = vec4(c, 1.0);
+            // Convert to the screen's colour space, like every built-in
+            // material does, so the horizon matches the fog exactly.
+            #include <colorspace_fragment>
           }`,
       });
       this.sky = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -576,7 +582,8 @@
       this.time += dt;
       // Sky plane: far in front of the camera, sized to fill the view.
       if (this.skyCam) {
-        const dist = 800;
+        // Must sit inside the camera's far plane (camera.js sets far = d + 700).
+        const dist = 600;
         const h = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * 1.1;
         this.sky.position.set(0, 0, -dist);
         this.sky.scale.set(h * camera.aspect * 1.1, h, 1);
