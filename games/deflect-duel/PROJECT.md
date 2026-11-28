@@ -1,7 +1,8 @@
 # Deflect Duel: team project file
 
-**Read `../TEAMS.md` first**, then `DESIGN.md` (the current design, v2) (team structure, branches, rules). This file is the Deflect Duel
-specifics. The boss keeps it up to date.
+**Read `../TEAMS.md` first** (team structure, branches, rules), then **`DESIGN.md`** (the current
+design, v2). This file is the Deflect Duel specifics. The boss keeps it up to date.
+
 
 ## What it is
 
