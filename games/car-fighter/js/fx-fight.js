@@ -13,6 +13,7 @@
      • SHAKE    a camera shake amount (0..1) that the view reads every
                 frame. Heavy hits shake, light hits barely do.
      • KICK     a short camera push-in (0..1) on heavy hits.
+     • SMOKE    grey puffs that rise, swell and fade (damaged cars).
 
    The view (view.js) creates one TP.FightFX for the fight scene, feeds it
    fight events, and calls update(dt) once per rendered frame. Nothing in
@@ -50,6 +51,7 @@
       this.scene = scene;
       this.camera = camera;
       this.colors = colors;
+      this.sparkColors = [0xffffff, 0xffffff];   // each car's own spark colour (set by view.js from bodies.js)
       this.parts = new TP.FX(scene);     // shared spark/debris particles
       this.live = [];                    // rings and flashes currently showing
       this.shake = 0;                    // 0..1, decays every frame
@@ -59,6 +61,10 @@
       this.ringGeo = new THREE.RingGeometry(0.7, 1.0, 40);
       this.plateGeo = new THREE.PlaneGeometry(1, 1);
       this.plateEdgeGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1));
+      // Smoke puffs: a pool of low-poly balls, each with its own fading material.
+      this.puffGeo = new THREE.IcosahedronGeometry(0.5, 0);
+      this.puffs = [];
+      this.puffPool = [];
     }
 
     /* React to one fight event (see DESIGN.md §9 for the event shape). */
@@ -70,7 +76,7 @@
 
       if (ev.type === "hit" || ev.type === "throw") {
         const tier = ev.type === "throw" ? 1 : hitTier(ev);
-        this.sparks(pos, seat, tier);
+        this.sparks(pos, seat, tier, this.sparkColors[atk]);
         this.ring(pos, tier === 0 ? 0xffffff : 0xfff3c4, 1.2 + tier * 1.1, 0.22 + tier * 0.08);
         if (tier >= 1) this.ring(pos, seat, 0.8 + tier * 0.8, 0.3 + tier * 0.1, 0.06);
         // Light hits only twitch the camera; heavier ones shake and push in.
@@ -82,7 +88,7 @@
       } else if (ev.type === "ko") {
         // A KO burst: bigger than a heavy hit, but not a full explosion
         // (the car isn't destroyed, it's knocked out).
-        this.sparks(pos, seat, 2);
+        this.sparks(pos, seat, 2, this.sparkColors[atk]);
         this.parts.burst(pos, [0xffe14d, 0xff7a1a, 0x2a2f3a], { count: 18, speed: 10, life: 0.8, size: 0.32, up: 5 });
         this.ring(pos, 0xffffff, 3, 0.45);
         this.addShake(1);
@@ -92,12 +98,13 @@
 
     addShake(a) { this.shake = Math.min(1, Math.max(this.shake, a)); }
 
-    /* Sparks: mostly the attacker's colour, some white-hot, a few dark
-       bits of grit. More and faster for heavier hits. */
-    sparks(pos, seatColor, tier) {
+    /* Sparks: the attacker's seat colour, its car's own spark colour and
+       some white-hot ones, plus a few dark bits of grit. More and faster
+       for heavier hits. */
+    sparks(pos, seatColor, tier, carSpark = 0xfff1a8) {
       const count = [12, 22, 36][tier];
       const speed = [7, 11, 15][tier];
-      this.parts.burst(pos, [seatColor, 0xffffff, seatColor, 0xfff1a8], {
+      this.parts.burst(pos, [seatColor, carSpark, seatColor, 0xffffff, carSpark], {
         count, speed, life: 0.45 + tier * 0.15, size: 0.2 + tier * 0.05, up: 2, gravity: 26,
       });
       if (tier >= 1) this.parts.burst(pos, [0x2a2f3a, 0x5b6170], { count: 6 * tier, speed: 6, life: 0.9, size: 0.3, up: 4 });
@@ -139,8 +146,40 @@
       this.parts.burst(pos, [0xbfe3ff, 0x8fb7d9], { count: 6, speed: 5, life: 0.35, size: 0.16, up: 1 });
     }
 
+    /* One puff of smoke at `pos`. dark = 0 (grey) .. 1 (black, a wreck). */
+    smoke(pos, dark = 0) {
+      const mesh = this.puffPool.pop() || new THREE.Mesh(this.puffGeo,
+        new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 1, transparent: true, depthWrite: false, flatShading: true }));
+      const grey = 0.45 - dark * 0.35;
+      mesh.material.color.setRGB(grey, grey, grey * 1.05);
+      mesh.material.opacity = 0.7;
+      mesh.position.copy(pos).add(new THREE.Vector3(rand(-0.2, 0.2), 0, rand(-0.2, 0.2)));
+      mesh.rotation.set(rand(0, 6), rand(0, 6), 0);
+      mesh.scale.setScalar(0.4);
+      mesh.visible = true;
+      this.scene.add(mesh);
+      this.puffs.push({ mesh, t: 0, life: rand(1.1, 1.7) + dark * 0.6,
+        vel: new THREE.Vector3(rand(-0.4, 0.4), rand(1.4, 2.2), rand(-0.3, 0.1)), grow: 1.2 + dark });
+    }
+
+    clearSmoke() {
+      for (const p of this.puffs) { this.scene.remove(p.mesh); this.puffPool.push(p.mesh); }
+      this.puffs.length = 0;
+    }
+
     update(dt) {
       this.parts.update(dt);
+      // Smoke: rise, drift, swell, fade.
+      for (let i = this.puffs.length - 1; i >= 0; i--) {
+        const p = this.puffs[i];
+        p.t += dt;
+        const k = p.t / p.life;
+        if (k >= 1) { this.scene.remove(p.mesh); this.puffPool.push(p.mesh); this.puffs.splice(i, 1); continue; }
+        p.mesh.position.addScaledVector(p.vel, dt);
+        p.mesh.rotation.y += dt * 0.6;
+        p.mesh.scale.setScalar(0.4 + k * p.grow);
+        p.mesh.material.opacity = 0.7 * (1 - k);
+      }
       for (let i = this.live.length - 1; i >= 0; i--) {
         const e = this.live[i];
         e.t += dt;
@@ -177,6 +216,9 @@
     }
 
     dispose() {
+      this.clearSmoke();
+      this.puffPool.forEach((m) => m.material.dispose());
+      this.puffGeo.dispose();
       for (const e of this.live) this.scene.remove(e.mesh);
       this.live.length = 0;
       this.parts.dispose();

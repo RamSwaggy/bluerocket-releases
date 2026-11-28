@@ -191,7 +191,7 @@ function inPage(args) {
       startup: pick("startup"), active: pick("active"), recovery: pick("recovery"),
       damage: pick("damage", "dmg"), hitstun: pick("hitstun", "hitStun"), blockstun: pick("blockstun", "blockStun"),
       flags: Object.assign({}, flagsObj, { launcher: m.launcher || flagsObj.launcher, throw: m.throw || flagsObj.throw }),
-      input: m.input, cost: m.superCost || m.cost, internal: isInternal(m),
+      input: m.input, cost: m.superCost || m.cost, internal: isInternal(m), raw: m,
       reach: m.hitbox ? (m.hitbox.x || 0) + (m.hitbox.forward || 0) + (m.hitbox.w || m.hitbox.size || 0) / 2 : undefined,
     };
   }
@@ -202,7 +202,8 @@ function inPage(args) {
     return allMoves().filter((mv) => !mv.internal);
   }
   function allMoves() {
-    const T = TP.MOVES;
+    // Per-car tables (M2): TP.fighterMoves(id) builds the car's own rows.
+    const T = TP.fighterMoves ? TP.fighterMoves(opts.p1 || "rivet") : TP.MOVES;
     if (!T) return [];
     if (Array.isArray(T)) return T.map((m, i) => normMove(m.id || "move" + i, m));
     // Could be { jab: {...}, ... } or { base: { jab: {...} }, rivet: {...} }.
@@ -279,8 +280,19 @@ function inPage(args) {
     return Math.hypot(c2.x - c1.x, c2.z - c1.z);
   }
 
-  /* One scripted attempt: P1 does the move, P2 either stands still
-     ("idle") or holds away to block ("block"). Returns what happened. */
+  /* One scripted attempt: P1 does the move, P2 defends in one of three ways:
+       "idle"         stands still
+       "block"        holds away from where P1 STARTED (never switches)
+       "block-switch" holds away from where P1 is NOW, every frame, so it
+                      switches to the new away after a cross-up
+     Returns what happened, with every connecting hit of the move.
+
+     Frame numbers (DESIGN.md §9, contract detail 2): frame 1 is the first
+     frame the move is running, which is the press frame for a normal
+     press. A press made during hit-stop (or buffered during an earlier
+     move) starts the move on the first unfrozen frame after it, and that
+     frame is frame 1. Hit-stop frames after that don't count either: the
+     whole fight is frozen during them. */
   function attempt(mv, recipe, dist, defend, steerSign) {
     // Signature moves (boost+heavy) cost a super bar, so P1 starts with one
     // through the per-player `super` option (DESIGN.md §9, contract detail 3).
@@ -291,36 +303,37 @@ function inPage(args) {
     const realDist = place(fight, dist);
     const s0 = fight.state;
     const p1Right = s0.cars[0].x > s0.cars[1].x;
-    // Screen direction (steer) for P1 toward P2, and for P2 away from P1.
+    // Screen direction (steer) for P1 toward P2 at the start.
     const towardP1 = (p1Right ? -1 : 1) * steerSign;
-    const awayP2 = (p1Right ? -1 : 1) * steerSign; // P2 is on the other side, so its "away" is the same screen direction as P1's "toward"
+    // P2's "away" from where P1 started: the same screen direction as P1's toward.
+    const awayFixed = towardP1;
 
     const evStart = fight.events.length;
-    const hp0 = s0.cars[1].health;
+    let evSeen = evStart;
     const res = {
-      dist: realDist, moveStart: null, startMoveFrame: null, hit: null, hitRel: null,
-      hpLoss: 0, stunFrames: 0, stunStates: [], attackerFree: null, defenderFree: null, otherMoves: [],
-      super0: s0.cars[0].super,
+      dist: realDist, moveStart: null, hits: [], stunFrames: 0, stunStates: [],
+      attackerFree: null, defenderFree: null, otherMoves: [], super0: s0.cars[0].super,
+      crossed: false, startX: s0.cars[0].x,
     };
     let pressesDone = 0, lastPress = -99, airborneSince = null;
-    // state.frame and P1's x on the step that held the latest button press.
-    // The press that started the move is frame 1 of the move (contract detail 2).
-    let lastPressFrame = null, lastPressX = null, hitstopSincePress = 0;
+    let frozenSinceStart = 0;   // hit-stop frames since the move started
+    let hpBefore = s0.cars[1].health;
 
-    for (let f = 0; f < 4 * FPS; f++) {
+    for (let f = 0; f < 5 * FPS; f++) {
       const st = fight.state;
-      const me = st.cars[0];
+      const me = st.cars[0], foe = st.cars[1];
       const c1 = neutral();
       const c2 = neutral();
 
-      // ---- P2: idle or block (hold away). ----
-      if (defend === "block") c2.steer = awayP2;
+      // ---- P2's defence ----
+      if (defend === "block") c2.steer = awayFixed;
+      if (defend === "block-switch") c2.steer = (foe.x > me.x ? 1 : -1) * steerSign;
 
-      // ---- P1: hold modifiers, press buttons. ----
+      // ---- P1: hold modifiers, press buttons ----
       if (recipe.hold.toward) c1.steer = towardP1;
       if (recipe.hold.away) c1.steer = -towardP1;
-      if (recipe.hold.up) c1.throttle = 1;
-      if (recipe.hold.down) c1.throttle = -1;
+      if (recipe.hold.up) c1.pitch = 1;
+      if (recipe.hold.down) c1.pitch = -1;
       if (recipe.hold.boost) c1.boost = true;
 
       let wantPress = res.moveStart === null || (recipe.repeat > pressesDone && me.move !== mv.id);
@@ -336,77 +349,128 @@ function inPage(args) {
         if (recipe.press.jump) { c1.jump = true; c1.confirmPressed = true; }
         lastPress = f; pressesDone++;
       }
-      const pressedNow = lastPress === f;
       const xBeforeStep = me.x;
-
-      const hpBeforeStep = st.cars[1].health;
       const phaseBefore = st.phase;   // read before stepping: state may be one live object
+      hpBefore = foe.health;
+
       fight.step([c1, c2]);
       const after = fight.state;
       const a = after.cars[0], d = after.cars[1];
-      if (pressedNow) { lastPressFrame = after.frame; lastPressX = xBeforeStep; hitstopSincePress = 0; }
-      // Hit-stop freezes both cars (DESIGN.md §5), so those frames don't
-      // count towards the move's frame number. A chain move pressed on the
-      // frame the previous hit landed sits frozen through that hit-stop.
-      // A step that began in hit-stop was a frozen frame.
-      else if (phaseBefore === "hitstop" && !res.hit) hitstopSincePress++;
 
+      // A step that began in hit-stop was frozen: it doesn't count.
+      if (res.moveStart !== null && phaseBefore === "hitstop") frozenSinceStart++;
       if (a.move && a.move !== mv.id && !res.otherMoves.includes(a.move)) res.otherMoves.push(a.move);
       if (res.moveStart === null && a.move === mv.id) {
-        res.moveStart = after.frame; res.startMoveFrame = a.moveFrame;
-        // Count from the press that started it (falls back to the first frame the move shows).
-        res.pressFrame = lastPressFrame !== null ? lastPressFrame : after.frame;
-        res.pressX = lastPressX !== null ? lastPressX : a.x;
+        res.moveStart = after.frame;      // this step is frame 1 of the move
+        res.startMoveFrame = a.moveFrame;
+        res.pressX = xBeforeStep;
       }
+      // Has P1 gone through to the other side of P2 (a cross-up)?
+      if (res.moveStart !== null && Math.sign(a.x - d.x) !== Math.sign(res.startX - s0.cars[1].x)) res.crossed = true;
 
-      // First hit/block/throw by P1 with this move.
-      if (res.moveStart !== null && !res.hit) {
-        for (let i = evStart; i < fight.events.length; i++) {
-          const e = fight.events[i];
-          if (e.attacker === 0 && e.move === mv.id && (e.type === "hit" || e.type === "block" || e.type === "throw")) {
-            res.hit = { type: e.type, damage: e.damage, stun: e.stun, frame: e.frame };
-            // Move frame number of the hit, counting the press frame as frame 1.
-            res.hitRel = e.frame - res.pressFrame + 1 - hitstopSincePress;
-            res.hitstopFrames = hitstopSincePress;
-            // How far P1 travelled between the press and the hit: a move that
-            // travels (Dash Strike, lunges) may connect later in its active window.
-            res.travel = Math.abs(a.x - res.pressX);
-            res.hpAtHit = hpBeforeStep;
-            break;
-          }
+      // Every hit/block/throw by P1 with this move, in order.
+      if (res.moveStart !== null) {
+        for (; evSeen < fight.events.length; evSeen++) {
+          const e = fight.events[evSeen];
+          if (!(e.attacker === 0 && e.move === mv.id && (e.type === "hit" || e.type === "block" || e.type === "throw"))) continue;
+          res.hits.push({
+            type: e.type, damage: e.damage, stun: e.stun, frame: e.frame,
+            rel: e.frame - res.moveStart + 1 - frozenSinceStart,   // our own count
+            engineRel: a.moveFrame || 0,                            // fight.js's own move frame (state shows it already advanced), for comparison
+            travel: Math.abs(a.x - res.pressX), crossed: res.crossed, hpBefore,
+          });
+          // Block-stun / hit-stun are measured from the LAST hit, so restart the count.
+          res.stunFrames = 0; res.stunStates = []; res.defenderFree = null;
         }
-      }
-      // After the hit: count the frames the defender spends in stun
-      // (not counting hit-stop, when everything is frozen).
-      if (res.hit) {
+      } else evSeen = fight.events.length;
+
+      // After a hit: count the frames the defender spends in stun (not hit-stop).
+      if (res.hits.length) {
         if (["hitstun", "blockstun", "juggle", "knockdown", "thrown", "air"].includes(d.state) && res.defenderFree === null) {
           if (after.phase !== "hitstop") res.stunFrames++;
           if (!res.stunStates.includes(d.state)) res.stunStates.push(d.state);
         } else if (res.defenderFree === null && res.stunStates.length) res.defenderFree = after.frame;
         if (res.attackerFree === null && !a.move && ["idle", "walk", "block"].includes(a.state)) res.attackerFree = after.frame;
       }
-      if (res.hit && res.defenderFree !== null && res.attackerFree !== null) break;
+      if (res.hits.length && res.defenderFree !== null && res.attackerFree !== null) break;
     }
-    // Health lost from the moment this move connected (earlier chain hits not included).
-    res.hpLoss = (res.hpAtHit !== undefined ? res.hpAtHit : hp0) - fight.state.cars[1].health;
-    res.super1 = fight.state.cars[0].super;
+    res.hit = res.hits[0] || null;
+    res.hpLossTotal = s0.cars[1].health - fight.state.cars[1].health;
     return res;
+  }
+
+  /* The hits a row expects, in order: one per `hits` entry for a
+     multi-hit row, otherwise one. Each has its first active frame
+     (counting the press as 1), window end, damage, hit-stun, block-stun. */
+  function expectedHits(raw) {
+    const list = raw.hits && raw.hits.length ? raw.hits : [{}];
+    return list.map((h) => {
+      const startup = h.frame !== undefined ? h.frame : raw.startup;
+      const active = h.active !== undefined ? h.active : (raw.hits ? 3 : raw.active);
+      return {
+        first: startup + 1, last: startup + active,
+        damage: h.damage !== undefined ? h.damage : raw.damage,
+        hitstun: h.hitstun !== undefined ? h.hitstun : raw.hitstun,
+        blockstun: h.blockstun !== undefined ? h.blockstun : raw.blockstun,
+        knockdown: !!((h.flags && h.flags.knockdown) || (raw.flags && (raw.flags.knockdown || raw.flags.launcher))),
+      };
+    });
+  }
+
+  // Damage after combo scaling for the n-th hit (1-based) of a combo.
+  // Accept either reading of "10% less per hit": additive or compounding.
+  function damageOk(seen, base, n) {
+    const a = base * Math.max(0.5, 1 - 0.1 * (n - 1)), b = base * Math.max(0.5, Math.pow(0.9, n - 1));
+    const tol = 0.5 + 0.01 * base;
+    return { ok: Math.abs(seen - a) <= tol || Math.abs(seen - b) <= tol, want: a };
+  }
+
+  /* Throw input with the two buttons a few frames apart, the way a person
+     presses them (DESIGN.md §5 rule: Hit and Heavy within
+     FIGHT_RULES.throwPairFrames frames = a throw). P2 stands still, cars
+     touching. Returns the moves P1 started and P1's events. */
+  function staggeredThrow(first, second, gap) {
+    const fight = newFight({ fighter: opts.p1 || "rivet", controller: "kb1" }, { fighter: opts.p2 || "rivet", controller: "kb2" }, seed, 3, 60);
+    if (!skipToFight(fight)) return { error: "never reached phase fight" };
+    place(fight, 2.6);
+    const evStart = fight.events.length;
+    const moves = [];
+    const btn = (c, b) => { c[b] = true; c[b + "Pressed"] = true; };
+    for (let f = 0; f < 90; f++) {
+      const c1 = neutral();
+      if (f === 0) btn(c1, first);
+      if (f === gap) btn(c1, second);
+      // Keep both held after their press, like fingers on keys.
+      if (f > 0) c1[first] = true;
+      if (f > gap) c1[second] = true;
+      fight.step([c1, neutral()]);
+      const m = fight.state.cars[0].move;
+      if (m && moves[moves.length - 1] !== m) moves.push(m);
+    }
+    const evs = fight.events.slice(evStart).filter((e) => e.attacker === 0 && ["hit", "block", "throw", "whiff"].includes(e.type)).map((e) => `${e.type}:${e.move}`);
+    return { moves, evs };
   }
 
   function runFrames() {
     const steerSign = calibrateSteer();
     const moves = listMoves();
-    const report = { steerSign, rows: [], problems: 0, skipped: 0 };
-    if (!moves.length) { report.fatal = "TP.MOVES is missing or empty"; return report; }
+    const report = { steerSign, fighter: opts.p1 || "rivet", source: TP.fighterMoves ? "TP.fighterMoves" : "TP.MOVES", rows: [], problems: 0, skipped: 0 };
+    if (!moves.length) { report.fatal = "the move table is missing or empty"; return report; }
 
     for (const mv of moves) {
       const row = { id: mv.id, table: mv, notes: [], status: "OK" };
+      const fail = (msg) => { row.status = "FAIL"; row.notes.push(msg); };
       const recipe = recipeFor(mv);
       if (!recipe) { row.status = "SKIP"; row.notes.push("no input recipe (add an `input` field to this row)"); report.skipped++; report.rows.push(row); continue; }
       row.input = recipe.text;
+      const raw = mv.raw;
+      const exp = expectedHits(raw);
+      const crossup = !!(raw.crossup || (raw.flags && raw.flags.crossup));
+      // A chain move is hit N of a combo (Swipe = 2nd, Spinout = 3rd).
+      const comboStart = recipe.repeat;
       try {
         // Try distances from close up outwards; the first that connects is used.
-        const dists = mv.reach ? [Math.max(2.4, mv.reach), 2.6, 3.2, 4, 5.5, 7.5] : [2.6, 3.2, 4, 5.5, 7.5, 10];
+        const dists = [2.6, 3.2, 4, 5.5, 7.5, 10];
         let hitRun = null;
         for (const d of dists) {
           const r = attempt(mv, recipe, d, mv.flags.throw ? "block" : "idle", steerSign);
@@ -415,85 +479,108 @@ function inPage(args) {
           if (!hitRun) hitRun = r; // keep the last miss for the report
         }
         row.hitRun = hitRun;
-        const t = mv;
         if (!hitRun || hitRun.moveStart === null) {
-          row.status = "FAIL";
-          if (recipe.hold.boost && recipe.press.heavy && hitRun && hitRun.super0 < 100) row.notes.push(`move never started: needs a super bar, but P1 had ${hitRun.super0} even with super: 100 passed to TP.Fight.create`);
-          else row.notes.push(`move never started${hitRun && hitRun.otherMoves.length ? ` (got ${hitRun.otherMoves.join(", ")} instead)` : ""}`);
+          if (recipe.hold.boost && recipe.press.heavy && hitRun && hitRun.super0 < 100) fail(`move never started: needs a super bar, but P1 had ${hitRun.super0} even with super: 100 passed to TP.Fight.create`);
+          else fail(`move never started${hitRun && hitRun.otherMoves.length ? ` (got ${hitRun.otherMoves.join(", ")} instead)` : ""}`);
         } else if (!hitRun.hit) {
-          row.status = "FAIL";
-          row.notes.push(`started but never connected at any distance up to ${dists[dists.length - 1]}`);
+          fail(`started but never connected at any distance up to ${dists[dists.length - 1]}`);
         } else {
-          const h = hitRun.hit;
-          /* Hit frame (contract detail 2): the first active frame is startup+1,
-             counting the press frame as 1. The cars start touching, so a move
-             that doesn't travel must land exactly on that frame. A move that
-             carries the car forward (it moved > TRAVEL units before hitting) may
-             land anywhere inside its active window. Either way the exact frame
-             is reported. */
-          if (t.startup !== undefined && t.active !== undefined) {
-            const TRAVEL = 0.3;
-            const first = t.startup + 1, last = t.startup + t.active;
-            const travelled = (hitRun.travel || 0) > TRAVEL;
-            if (hitRun.hitRel < first || hitRun.hitRel > last) {
-              row.status = "FAIL"; row.notes.push(`hit on move frame ${hitRun.hitRel}, outside the active window ${first}-${last}`);
-            } else if (hitRun.hitRel !== first && !travelled) {
-              row.status = "FAIL"; row.notes.push(`hit on move frame ${hitRun.hitRel}, expected ${first}: the target was already in reach and the car didn't travel`);
-            } else if (hitRun.hitRel !== first) {
-              row.notes.push(`travelling move: hit on move frame ${hitRun.hitRel} (window ${first}-${last}, moved ${hitRun.travel.toFixed(2)} first)`);
+          const hits = hitRun.hits;
+          if (exp.length > 1 && hits.length !== exp.length) fail(`${hits.length} of ${exp.length} hits connected`);
+          if (exp.length === 1 && hits.length > 1) row.notes.push(`${hits.length} hits from a one-hit row`);
+          const n = Math.min(hits.length, exp.length);
+          for (let i = 0; i < n; i++) {
+            const h = hits[i], e = exp[i];
+            const tag = exp.length > 1 ? `hit ${i + 1}: ` : "";
+            /* Hit frame: first active frame is startup+1. The cars start
+               touching, so a move that doesn't travel (or cross up) must
+               land exactly then; one that carries the car forward may land
+               anywhere in its window. */
+            const travelled = h.travel > 0.3 || h.crossed;
+            if (h.rel < e.first || h.rel > e.last) fail(`${tag}hit on move frame ${h.rel}, outside the active window ${e.first}-${e.last}`);
+            else if (h.rel !== e.first && !travelled) fail(`${tag}hit on move frame ${h.rel}, expected ${e.first}: the target was already in reach and the car didn't travel`);
+            else if (h.rel !== e.first) row.notes.push(`${tag}${h.crossed ? "cross-up" : "travelling move"}: hit on move frame ${h.rel} (window ${e.first}-${e.last})`);
+            if (h.engineRel !== h.rel) row.notes.push(`${tag}our frame count says ${h.rel}, fight.js's moveFrame says ${h.engineRel}`);
+            // Damage, with combo scaling for chain hits and later multi-hits.
+            if (e.damage !== undefined && h.type === "hit") {
+              const dmg = damageOk(h.damage || 0, e.damage, comboStart + i);
+              if (!dmg.ok) fail(`${tag}event damage ${h.damage}, table ${e.damage}` + (comboStart + i > 1 ? ` x combo scaling = ${dmg.want.toFixed(1)}` : ""));
             }
+            if (e.hitstun !== undefined && h.type === "hit" && h.stun !== undefined && h.stun !== e.hitstun && !e.knockdown)
+              fail(`${tag}event stun ${h.stun}, table hitstun ${e.hitstun}`);
           }
-          /* Damage. A chained move is hit N of a combo, so DESIGN.md §5 scaling
-             applies: 10% less per earlier hit, floor 50%. We accept either
-             reading of "10% less" (additive 0.9, 0.8 ... or compounding 0.9, 0.81 ...). */
-          if (t.damage !== undefined && h.type !== "block") {
-            const n = recipe.repeat;
-            const scaleA = Math.max(0.5, 1 - 0.1 * (n - 1)), scaleB = Math.max(0.5, Math.pow(0.9, n - 1));
-            const okA = Math.abs((h.damage || 0) - t.damage * scaleA) <= 0.5 + 0.01 * t.damage;
-            const okB = Math.abs((h.damage || 0) - t.damage * scaleB) <= 0.5 + 0.01 * t.damage;
-            if (!okA && !okB) { row.status = "FAIL"; row.notes.push(`event damage ${h.damage}, table ${t.damage}` + (n > 1 ? ` x combo scaling ${scaleA.toFixed(2)} = ${(t.damage * scaleA).toFixed(1)}` : "")); }
-            if (Math.abs(hitRun.hpLoss - (h.damage || 0)) > 0.5 && !/sig|grinder/.test(mv.id)) {
-              row.notes.push(`health dropped ${hitRun.hpLoss.toFixed(1)} but the event says ${h.damage} (multi-hit?)`);
-            }
-          }
-          // Stun: compare event and measured with the table (not for launches/knockdowns).
-          const launched = hitRun.stunStates.some((s) => s === "juggle" || s === "knockdown" || s === "air" || s === "thrown");
-          if (t.hitstun !== undefined && h.type === "hit") {
-            if (h.stun !== undefined && h.stun !== t.hitstun) { row.status = "FAIL"; row.notes.push(`event stun ${h.stun}, table hitstun ${t.hitstun}`); }
-            if (!launched && Math.abs(hitRun.stunFrames - t.hitstun) > 1) { row.status = "FAIL"; row.notes.push(`defender was in hit-stun for ${hitRun.stunFrames} frames, table says ${t.hitstun}`); }
-          }
+          // Measured stun after the LAST hit.
+          const last = exp[Math.min(hits.length, exp.length) - 1];
+          const launched = hitRun.stunStates.some((x) => x === "juggle" || x === "knockdown" || x === "air" || x === "thrown");
+          if (hits[0].type === "hit" && !launched && last.hitstun !== undefined && Math.abs(hitRun.stunFrames - last.hitstun) > 1)
+            fail(`defender was in hit-stun for ${hitRun.stunFrames} frames after the last hit, table says ${last.hitstun}`);
           if (launched) row.notes.push(`defender went ${hitRun.stunStates.join(" > ")} for ${hitRun.stunFrames} frames`);
-          if (h.type === "throw" || mv.flags.throw) {
-            if (h.type !== "throw") { row.status = "FAIL"; row.notes.push(`expected a throw through block, got "${h.type}"`); }
-          }
+          if (mv.flags.throw && hits[0].type !== "throw") fail(`expected a throw through block, got "${hits[0].type}"`);
+          if (crossup && !hitRun.hits[0].crossed) fail("cross-up row hit without passing through the defender");
         }
 
         // ---- Blocked version (not for throws, which go through block) ----
-        if (!mv.flags.throw && row.hitRun && row.hitRun.hit) {
-          const b = attempt(mv, recipe, row.hitRun.dist, "block", steerSign);
+        if (!mv.flags.throw && hitRun && hitRun.hit) {
+          // For a cross-up the defender must switch to the NEW away after the pass.
+          const b = attempt(mv, recipe, hitRun.dist, crossup ? "block-switch" : "block", steerSign);
           row.blockRun = b;
-          if (b.hit) {
-            if (b.hit.type !== "block") { row.status = "FAIL"; row.notes.push(`defender held away but the result was "${b.hit.type}", not "block"`); }
-            else {
-              const chip = t.damage !== undefined ? t.damage * 0.15 : undefined;
-              if (chip !== undefined && Math.abs((b.hit.damage || 0) - chip) > 1) { row.status = "FAIL"; row.notes.push(`chip damage ${b.hit.damage}, expected 15% = ${chip.toFixed(1)}`); }
-              if (t.blockstun !== undefined && b.hit.stun !== undefined && b.hit.stun !== t.blockstun) { row.status = "FAIL"; row.notes.push(`event block-stun ${b.hit.stun}, table ${t.blockstun}`); }
-              if (t.blockstun !== undefined && Math.abs(b.stunFrames - t.blockstun) > 1) { row.status = "FAIL"; row.notes.push(`defender was in block-stun for ${b.stunFrames} frames, table says ${t.blockstun}`); }
-              if (b.attackerFree !== null && b.defenderFree !== null) row.blockAdv = b.defenderFree - b.attackerFree; // + = attacker recovers first
+          if (!b.hits.length) row.notes.push("blocked version never connected");
+          else {
+            const n = Math.min(b.hits.length, exp.length);
+            for (let i = 0; i < n; i++) {
+              const h = b.hits[i], e = exp[i];
+              const tag = exp.length > 1 ? `blocked hit ${i + 1}: ` : "";
+              if (h.type !== "block") { fail(`${tag}defender held ${crossup ? "the new " : ""}away but the result was "${h.type}", not "block"`); continue; }
+              const chip = e.damage * 0.15;
+              if (Math.abs((h.damage || 0) - chip) > 1) fail(`${tag}chip damage ${h.damage}, expected 15% of ${e.damage} = ${chip.toFixed(1)}`);
+              if (e.blockstun !== undefined && h.stun !== undefined && h.stun !== e.blockstun) fail(`${tag}event block-stun ${h.stun}, table ${e.blockstun}`);
             }
-          } else row.notes.push("blocked version never connected");
+            // Block-stun measured from the LAST hit.
+            const lastE = exp[n - 1];
+            if (b.hits[n - 1].type === "block" && lastE.blockstun !== undefined && Math.abs(b.stunFrames - lastE.blockstun) > 1)
+              fail(`defender was in block-stun for ${b.stunFrames} frames after the last hit, table says ${lastE.blockstun}`);
+            if (b.attackerFree !== null && b.defenderFree !== null) row.blockAdv = b.defenderFree - b.attackerFree; // + = attacker recovers first
+          }
+          // Cross-up only: holding the OLD away (not switching) must get hit.
+          if (crossup) {
+            const nb = attempt(mv, recipe, hitRun.dist, "block", steerSign);
+            const t0 = nb.hits[0];
+            if (!t0) row.notes.push("no-switch version never connected");
+            else if (t0.type !== "hit") fail(`cross-up: defender kept holding the OLD away and the result was "${t0.type}", should be "hit"`);
+            else row.notes.push("cross-up: blocked when switching to the new away, hit when holding the old away");
+          }
         }
       } catch (err) {
-        row.status = "FAIL";
-        row.notes.push("exception: " + (err && err.stack ? err.stack.split("\n").slice(0, 2).join(" | ") : err));
+        fail("exception: " + (err && err.stack ? err.stack.split("\n").slice(0, 2).join(" | ") : err));
       }
       if (row.status === "FAIL") report.problems++;
       // Trim heavy fields before sending back to Node.
-      row.summary = row.hitRun && row.hitRun.hit ? {
-        type: row.hitRun.hit.type, dist: row.hitRun.dist, hitRel: row.hitRun.hitRel,
-        damage: row.hitRun.hit.damage, stun: row.hitRun.hit.stun, stunFrames: row.hitRun.stunFrames,
+      const hr = row.hitRun;
+      row.summary = hr && hr.hit ? {
+        type: hr.hit.type, dist: hr.dist, frames: hr.hits.map((h) => h.rel).join(","),
+        damage: hr.hits.map((h) => Math.round(h.damage)).join(","), stun: hr.hit.stun, stunFrames: hr.stunFrames,
       } : null;
-      delete row.hitRun; delete row.blockRun;
+      delete row.hitRun; delete row.blockRun; delete row.table.raw;
+      report.rows.push(row);
+    }
+    // ---- Throw with the buttons pressed a few frames apart ----
+    const pair = (TP.FIGHT_RULES && TP.FIGHT_RULES.throwPairFrames) || 3;
+    const cases = [];
+    for (let g = 1; g <= pair; g++) cases.push(["hit", "heavy", g]);
+    cases.push(["heavy", "hit", 1]);
+    for (const [first, second, gap] of cases) {
+      const label = `${first === "hit" ? "E" : "R"} then ${second === "hit" ? "E" : "R"} +${gap}f`;
+      const row = { id: "tow_hook " + label, table: { startup: "-", active: "-", recovery: "-", damage: "-", hitstun: "-", blockstun: "-" }, input: `${first}, ${second} ${gap} frame${gap > 1 ? "s" : ""} later`, notes: [], status: "OK", summary: null };
+      const r = staggeredThrow(first, second, gap);
+      if (r.error) { row.status = "FAIL"; row.notes.push(r.error); }
+      else {
+        row.notes.push(`moves ${r.moves.join(" > ") || "none"}; events ${JSON.stringify(r.evs)}`);
+        if (r.moves[r.moves.length - 1] !== "tow_hook" || !r.evs.some((e) => e === "throw:tow_hook")) {
+          row.status = "FAIL";
+          row.notes.push(`expected Tow Hook: the buttons were ${gap} frame${gap > 1 ? "s" : ""} apart, inside throwPairFrames = ${pair}`);
+        }
+      }
+      if (row.status === "FAIL") report.problems++;
       report.rows.push(row);
     }
     return report;
@@ -550,12 +637,12 @@ function inPage(args) {
       if (warn.length) console.log("\nWARNINGS:\n  " + warn.join("\n  "));
     } else {
       if (r.fatal) { ok = false; console.log("FATAL: " + r.fatal); }
-      console.log(`Frame-data check, ${opts.p1 || "rivet"} vs ${opts.p2 || "rivet"}, seed ${seed} (steer +1 moves ${r.steerSign > 0 ? "+x" : "-x"}), ${secs}s\n`);
-      console.log("Move               Input                     Table s/a/r  dmg   hs   bs | Seen: type   frame  dmg   stun  dist  blockAdv  Result");
+      console.log(`Frame-data check, ${opts.p1 || "rivet"} vs ${opts.p2 || "rivet"} (table from ${r.source}), seed ${seed} (steer +1 moves ${r.steerSign > 0 ? "+x" : "-x"}), ${secs}s\n`);
+      console.log("Move               Input                     Table s/a/r  dmg   hs   bs | Seen: type   frame(s)     dmg          stun  dist  blockAdv  Result");
       for (const row of r.rows) {
         const t = row.table, s = row.summary;
         const tbl = `${t.startup ?? "?"}/${t.active ?? "?"}/${t.recovery ?? "?"}`.padEnd(11) + `${String(t.damage ?? "?").padStart(4)} ${String(t.hitstun ?? "?").padStart(4)} ${String(t.blockstun ?? "?").padStart(4)}`;
-        const seen = s ? `${s.type.padEnd(6)} ${String(s.hitRel).padStart(5)} ${String(s.damage ?? "?").padStart(5)} ${String(s.stun ?? s.stunFrames).padStart(5)} ${s.dist.toFixed(1).padStart(5)} ${String(row.blockAdv ?? "-").padStart(9)}` : "-".padEnd(48);
+        const seen = s ? `${s.type.padEnd(6)} ${String(s.frames).padEnd(12)} ${String(s.damage ?? "?").padEnd(12)} ${String(s.stun ?? s.stunFrames).padStart(4)} ${s.dist.toFixed(1).padStart(5)} ${String(row.blockAdv ?? "-").padStart(9)}` : "-".padEnd(56);
         console.log(`${row.id.padEnd(18)} ${String(row.input || "-").padEnd(25)} ${tbl} | ${seen}  ${row.status}`);
         for (const n of row.notes) console.log(`${" ".repeat(20)}- ${n}`);
       }
