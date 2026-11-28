@@ -290,11 +290,17 @@ TP.M5 = TP.M5 || {};
 
     /* A rival with a decent wet trail, close, roughly in front of us:
        aim where they'll be (lead them by their speed). */
+    /* Did I pop this rival in the last few seconds? Then let them regroup:
+       chasing the same victim again straight away reads as a stun-lock. */
+    _justPopped(o) {
+      return o.poppedBy === this.car.index && this.match.elapsed - (o.poppedAt || -99) < 5;
+    }
+
     _findRam() {
       const g = this.match.grid, car = this.car;
       if (car.speed2D() < 8) return null;
       for (const o of this._rivals()) {
-        if (g.wetCount[o.index] < 8 || o.grace > 0 || o.mega > 0) continue;
+        if (g.wetCount[o.index] < 8 || o.grace > 0 || o.mega > 0 || this._justPopped(o)) continue;
         const d = dist2D(car.pos.x, car.pos.z, o.pos.x, o.pos.z);
         if (d > 13) continue;
         const t = d / (car.speed2D() + 6);
@@ -316,7 +322,7 @@ TP.M5 = TP.M5 || {};
       let best = null, bestT = Infinity;
       for (const o of this._rivals()) {
         const q = o.index;
-        if (g.wetCount[q] < 10 || o.mega > 0 || o.grace > 0 || m.trailAge[q] > 5.3) continue;
+        if (g.wetCount[q] < 10 || o.mega > 0 || o.grace > 0 || m.trailAge[q] > 5.3 || this._justPopped(o)) continue;
         // How long until they're home? (Straight-line guess.)
         const hc = g.nearest(o.pos.x, o.pos.z, (k) => g.isHome(k, q), 40);
         const home = hc < 0 ? null : g.centerOf(hc);

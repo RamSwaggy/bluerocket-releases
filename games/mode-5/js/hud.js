@@ -138,7 +138,7 @@
      reads its size (safe area) and frames the floor in the rest. */
   .m5-card-wrap { position: absolute; inset: 0; display: flex; opacity: 0; transition: opacity .35s; pointer-events: none; }
   .m5-card-wrap.show { opacity: 1; }
-  .m5-card { overflow: auto; padding: clamp(14px, 2.4vw, 24px); background: rgba(12, 15, 36, .93);
+  .m5-card { pointer-events: auto; overscroll-behavior: contain; overflow: auto; padding: clamp(14px, 2.4vw, 24px); background: rgba(12, 15, 36, .93);
     border: 2px solid var(--m5-line); box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04) inset;
     transition: transform .45s cubic-bezier(.2,.9,.25,1); }
   .m5-card-wrap.side { justify-content: flex-end; align-items: center; padding: 16px max(16px, env(safe-area-inset-right)) 16px 16px; }
@@ -154,6 +154,10 @@
     .m5-card h2 { font-size: 24px !important; margin-bottom: 8px !important; }
     .m5-row { margin: 4px 0 !important; }
     .m5-stats { font-size: 12px !important; margin-top: 8px !important; }
+    /* Very short landscape screens: drop the least important stat column
+       so the whole card fits without scrolling. */
+    .m5-stats .opt { display: none; }
+    .m5-card .kicker { font-size: 11px; }
   }
   .m5-card .kicker { font-size: 13px; letter-spacing: .18em; color: #9aa6c8; text-transform: uppercase; }
   .m5-card h2 { margin: 2px 0 14px; font-size: clamp(26px, 3.4vw, 40px); font-style: italic; font-weight: 900; line-height: 1;
@@ -171,6 +175,8 @@
   .m5-stats td { text-align: right; padding: 6px; border-top: 1px solid var(--m5-line); font-variant-numeric: tabular-nums; }
   .m5-stats th:first-child, .m5-stats td:first-child { text-align: left; }
   .m5-card .foot { margin-top: 14px; color: #9aa6c8; font-size: 14px; text-align: center; }
+  .m5-card .foot b { white-space: nowrap; }   /* never split "Blue 0" across lines */
+  .m5-card .why { margin: -6px 0 12px; color: #c8d0ea; font-size: 14px; }
 
   @media (prefers-reduced-motion: reduce) {
     .m5-timer.warn, .m5-seg.lead { animation: none; }
@@ -545,25 +551,33 @@
       const fmt = (k, v) => (v == null ? "–" : k === "distance" ? Math.round(v) + " m" :
         k === "bestFill" ? (Math.round(v * 10) / 10) + "%" :
         k === "painted" ? (grid && grid.paintable ? Math.round((v / grid.paintable) * 100) + "%" : Math.round(v)) : Math.round(v * 10) / 10);
+      // If the top two finished level on rounds, say how it was decided
+      // (most floor painted over the whole match), so the result isn't a mystery.
+      const sds = e.standings || [];
+      const tiedOnRounds = !oneRound && sds.length > 1 && typeof sds[0] === "object" && sds[0].roundWins === sds[1].roundWins;
+      const whyLine = draw ? `<div class="why">Level on rounds and on paint.</div>`
+        : tiedOnRounds ? `<div class="why">Tied on rounds, so the most floor painted over the match decides.</div>` : "";
+      const need = Math.floor((st.rounds || 1) / 2) + 1;
       this.openCard(`
         <div class="kicker">Match over</div>
         <h2 style="--glow:${CSS()[champ % 4]};color:${CSS()[champ % 4]}">${draw ? "It's a draw!" : esc(nameOf(champ)) + " wins!"}</h2>
+        ${whyLine}
         <div class="m5-row head"><span>Player</span><span>${oneRound ? "Final floor" : "Rounds won"}</span><span style="text-align:right">${oneRound ? "%" : "Wins"}</span></div>
         ${order.map((i, rank) => {
           // One round: bars = final % of the floor. Several: bars = rounds won.
           const sd = (e.standings || []).find((x) => x && x.player === i);
           const pct = sd && sd.totalPct != null ? sd.totalPct : (toPercents(st.scores) || [])[i] || 0;
           const wins = e.roundWins ? e.roundWins[i] || 0 : 0;
-          const most = e.roundWins ? Math.max(1, ...e.roundWins) : 1;
-          const w = oneRound ? Math.min(100, pct) : (wins / most) * 100;
+          // Bar = progress toward the rounds needed to win the match.
+          const w = oneRound ? Math.min(100, pct) : Math.min(100, (wins / need) * 100);
           return `<div class="m5-row ${rank === 0 && !draw ? "win" : ""}" style="color:${CSS()[i % 4]}">
           <span class="nm" style="color:#f2f5ff">${rank + 1}. ${esc(nameOf(i))}</span>
           <span class="track"><span class="fill" data-w="${w.toFixed(1)}"></span></span>
           <span class="val" style="color:#f2f5ff">${oneRound ? Math.round(pct) + "%" : wins}</span></div>`;
         }).join("")}
-        ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
+        ${keys.length ? `<table class="m5-stats"><tr><th>Player</th>${keys.map((k) => `<th${k === "distance" ? ' class="opt"' : ""}>${esc(LABELS[k] || k)}</th>`).join("")}</tr>
           ${order.map((i) => `<tr><td style="color:${CSS()[i % 4]};font-weight:800">${esc(nameOf(i))}</td>
-            ${keys.map((k) => `<td>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
+            ${keys.map((k) => `<td${k === "distance" ? ' class="opt"' : ""}>${fmt(k, stats[i] && stats[i][k])}</td>`).join("")}</tr>`).join("")}</table>` : ""}`);
     }
 
     // Match card for 2v2: team rows (rounds won, or final floor for one round)

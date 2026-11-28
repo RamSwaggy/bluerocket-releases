@@ -849,9 +849,18 @@
         pitch = 1.22 + portrait * 0.2;  // steeper: almost straight down
         rx = half + 3; rz = half + 3;
       } else {
-        const margin = 7;               // floor kept visible around the outermost cars
+        // Floor kept visible around the outermost cars. In a territory game
+        // the floor IS the score, so keep a generous margin (enough to see a
+        // nearby wall and the turf you're about to close a loop on).
+        const margin = 10;
         cx = (minX + maxX) / 2; cz = (minZ + maxZ) / 2;
-        rx = (maxX - minX) / 2 + margin; rz = (maxZ - minZ) / 2 + margin;
+        // Lean the view a little toward the middle of the arena, so the
+        // picture stays anchored instead of sliding to one wall.
+        cx *= 0.8; cz *= 0.8;
+        minX = Math.min(minX, cx); maxX = Math.max(maxX, cx);
+        minZ = Math.min(minZ, cz); maxZ = Math.max(maxZ, cz);
+        // Half-extents measured from the (leaned) centre to the farthest car.
+        rx = Math.max(maxX - cx, cx - minX) + margin; rz = Math.max(maxZ - cz, cz - minZ) + margin;
         // Never zoom in so far that the play feels claustrophobic.
         rx = Math.max(rx, 18); rz = Math.max(rz, 14);
       }

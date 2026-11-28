@@ -607,7 +607,7 @@
   const Pause = {
     enabled: false,
     isOpen: false,
-    ACTIONS: [["resume", "Resume"], ["restart", "Restart round"], ["quit", "Menu"]],
+    ACTIONS: [["resume", "Resume"], ["restart", "Restart match"], ["quit", "Menu"]],
 
     build() {
       if (this.root) return;
@@ -663,6 +663,18 @@
   // Capture phase, so we see keys before the shared input module blocks them.
   addEventListener("keydown", (e) => {
     const tag = (e.target && e.target.tagName) || "";
+    // The shared input module calls preventDefault() on Space/Enter (so
+    // they don't scroll the page), which also cancels a focused button's
+    // native "press". So we press focused buttons/links ourselves here, in
+    // the capture phase, for the menu, the help panel and the pause card.
+    if ((tag === "BUTTON" || tag === "A") && (e.code === "Enter" || e.code === "Space" || e.code === "NumpadEnter")) {
+      if (!e.repeat) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.target.click();
+      }
+      return;
+    }
     if (Menu.isOpen) {
       // A focused button, link or dropdown handles Enter/Space itself (and
       // the shared MenuNav handles arrows). Enter while typing a name, or

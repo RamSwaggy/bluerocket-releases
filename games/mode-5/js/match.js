@@ -210,6 +210,7 @@ TP.M5 = TP.M5 || {};
         car.placeAt(s.x, s.z, s.heading, s.y);
         car.boost = 100;
         car.stun = car.mega = car.grace = car.airT = car._surfVy = 0;
+        car.poppedBy = -1; car.poppedAt = -99;
         this.grid.paintCircle(s.x, s.z, CFG.padR, i, false);
       });
       this._updateScores();
@@ -459,6 +460,11 @@ TP.M5 = TP.M5 || {};
       victim.stun = CFG.stunTime;
       victim.grace = CFG.stunTime + CFG.popGrace;
       victim.boost = 0;
+      // Remember who popped us, so that bot leaves us alone for a few
+      // seconds instead of popping the fresh trail we leave while
+      // recovering right next to it (felt like a stun-lock in playtests).
+      victim.poppedBy = by;
+      victim.poppedAt = this.elapsed;
       this.stats[by].pops++;
       this.stats[q].popped++;
       this._hint("popped", q);
