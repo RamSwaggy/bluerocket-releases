@@ -35,8 +35,8 @@ TP.BR = TP.BR || {};
     jumpBuffer: 0.1,      // a jump pressed this long before landing still happens
     dashCooldown: 1.0,    // Hit-dash cooldown on the ground (one per airtime in the air)
     dashTime: 0.25,       // how long the dash counts as "dashing" (trail, bumps)
-    dashBoostCost: 20,    // boost meter a Hit-dash uses (PROPOSED, needs sign-off: without
-                          // it, dashing every 1 s cooldown sustains ~24 vs 17 on gas)
+    dashBoostCost: 20,    // boost meter a Hit-dash uses (approved by the Director, 2026-11-28:
+                          // without it, dashing every 1 s cooldown sustains ~24 vs 17 on gas)
     badLanding: (50 * Math.PI) / 180, // landing more than this far off the surface angle = tumble
     tumbleTime: 0.6,      // seconds without control after a bad landing
     tumbleKeep: 0.35,     // fraction of speed kept after a bad landing
@@ -416,12 +416,23 @@ TP.BR = TP.BR || {};
           if (closing <= 0) continue;
           const restitution = 0.9;
           const impulse = ((closing * (1 + restitution)) / 2) * T.bumpScale;
+          const sumVxBefore = a.vel.x + b.vel.x;
           a.vel.x -= nx * impulse; a.vel.y -= ny * impulse;
           b.vel.x += nx * impulse; b.vel.y += ny * impulse;
 
           // Big hits pop the slower car into the air (shared rule).
           const victim = Math.abs(aN) < Math.abs(bN) ? a : b;
           const attacker = victim === a ? b : a;
+
+          /* Bump clamp (Director, 2026-11-28). bumpScale 1.3 makes bumps
+             extra-bouncy, which used to let a pack "pump" itself faster by
+             bumping. So: the victim still gets the full shove, but the two
+             cars together may not leave the bump with more forward (x)
+             speed than they brought into it. Any extra comes off the
+             hitter: the hitter pays for the shove. The vertical pop below
+             is unchanged. */
+          const extra = a.vel.x + b.vel.x - sumVxBefore;
+          if (extra > 0) attacker.vel.x -= extra;
           if (closing > 8 && victim.onGround) {
             victim.vel.y = Math.max(victim.vel.y, Math.min(7, closing * 0.3));
             victim.onGround = false;
