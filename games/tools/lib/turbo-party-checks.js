@@ -35,10 +35,24 @@
                   if the turn ended on a boost pad (boosts don't chain)
      R11 stats    spacesMoved = hops actually made; coinsEarned and
                   minigameWins never go down
-     R12 payout   a minigame round never takes coins away, and exactly
-                  the 1st-place group gets +1 minigame win
-     R13 bonus    each bonus trophy goes to exactly the players with the
-                  highest stat (ties all get one, skipped if best is 0)
+     R12 payout   minigame payouts follow the Director's ruling, worked
+                  out here independently of Game.payouts: places pay
+                  10/6/3/0, tied players share the higher place (and use
+                  up the places they share), a tie for 1st is a win for
+                  each; if ALL players tie, everyone gets 3 and nobody
+                  gets a win. The coins and wins players actually receive
+                  must match exactly.
+     R13 bonus    each bonus trophy goes to the one player with the
+                  highest stat; a tie on the stat is broken on coins (at
+                  the end of the match); still tied on coins → nobody
+                  gets it; best stat 0 → nobody gets it
+     R14 relocate after a trophy buy (and at the start) the trophy lands
+                  10+ spaces ahead of the buyer by the shortest forward
+                  route, never on start or a shop, and never on the
+                  shortcut when the buyer is on it or reaches the fork in
+                  under 10 spaces. Distances are worked out here with our
+                  own walk of the board, not the board's spacesAhead().
+                  (Adapted from Gameplay's job-1 trophy-check script.)
 
    The bonus list (R13) mirrors BONUSES in turbo-party/js/game.js. If
    Gameplay changes that list, update BONUS_STATS below.
@@ -49,6 +63,62 @@
 function installTurboPartyChecks() {
   const BONUS_STATS = ["minigameWins", "coinsEarned", "spacesMoved"];
   const MAX_ITEMS = 2;
+  const PAYOUT = [10, 6, 3, 0];   // mirrors game.js
+  const ALL_TIE_PAYOUT = 3;       // mirrors game.js
+  const MIN_TROPHY_AHEAD = 10;    // mirrors board.js
+
+  /* Our own, independent idea of the payout rules (R12). Given a ranking
+     like [[2], [0, 1], [3]] returns { index: { gain, win } }. */
+  function expectedPayouts(ranking) {
+    const out = {};
+    const all = ranking.flat();
+    if (ranking.length === 1 && all.length > 1) {
+      all.forEach((i) => { out[i] = { gain: ALL_TIE_PAYOUT, win: false }; });
+      return out;
+    }
+    let place = 0;
+    for (const group of ranking) {
+      group.forEach((i) => { out[i] = { gain: PAYOUT[place], win: place === 0 }; });
+      place += group.length;
+    }
+    return out;
+  }
+
+  /* Our own reading of the bonus-trophy rule (R13). `players` is a list
+     of { coins, stats } in seat order. Returns the winning seat or null. */
+  function expectedBonusWinner(players, stat) {
+    const best = Math.max(...players.map((p) => p.stats[stat]));
+    if (best <= 0) return null;
+    const tied = players.map((p, i) => i).filter((i) => players[i].stats[stat] === best);
+    if (tied.length === 1) return tied[0];
+    const most = Math.max(...tied.map((i) => players[i].coins));
+    const rich = tied.filter((i) => players[i].coins === most);
+    return rich.length === 1 ? rich[0] : null;
+  }
+
+  /* Fewest forward hops from `from` to every space (R14). Plain
+     breadth-first walk over each space's `next` list. */
+  function hopsFrom(spaces, from) {
+    const d = spaces.map(() => Infinity);
+    d[from] = 0;
+    const q = [from];
+    while (q.length) {
+      const i = q.shift();
+      for (const n of spaces[i].next) if (d[n] === Infinity) { d[n] = d[i] + 1; q.push(n); }
+    }
+    return d;
+  }
+  // Every reason the trophy landing on `to` breaks R14 for a buyer on `from`.
+  function relocationProblems(board, from, to) {
+    const why = [];
+    const d = hopsFrom(board.spaces, from);
+    const s = board.spaces[to];
+    if (!(d[to] >= MIN_TROPHY_AHEAD) || d[to] === Infinity) why.push(`only ${d[to]} hops ahead`);
+    if (s.type === "start" || s.type === "shop") why.push(`on ${s.type}`);
+    const scAhead = board.spaces[from].shortcut || d[board.forkIndex] < MIN_TROPHY_AHEAD;
+    if (scAhead && s.shortcut) why.push("on the shortcut, which is directly ahead");
+    return why;
+  }
 
   const rec = {
     turn: 0,
@@ -174,13 +244,28 @@ function installTurboPartyChecks() {
       return landOn.apply(this, arguments);
     };
 
-    // --- trophyStop: R4 purchase maths, R5 double buys.
+    // --- placeTrophy: R14 at the start of the match (buyer = start line).
+    const placeTrophy = P.placeTrophy;
+    P.placeTrophy = function (index) {
+      if (this.trophyIndex === undefined && this.spaces && this.spaces.length) {
+        const why = relocationProblems(this, 0, index);
+        check("R14", !why.length, `first trophy spot ${index}: ${why.join(", ")}`);
+      }
+      return placeTrophy.apply(this, arguments);
+    };
+
+    // --- trophyStop: R4 purchase maths, R5 double buys, R14 relocation.
     const trophyStop = P.trophyStop;
     P.trophyStop = async function (player) {
       const coins = player.coins, trophies = player.trophies, cost = TP.TROPHY_COST;
+      const alreadyBought = this.trophyBoughtThisTurn === true;
+      const from = player.space;
       await trophyStop.apply(this, arguments);
       let result;
       if (player.trophies > trophies) {
+        check("R5", !alreadyBought, `${player.name}: bought again after the once-per-turn flag was set`);
+        const why = relocationProblems(this, from, this.trophyIndex);
+        check("R14", !why.length, `${player.name} bought on ${from}, trophy moved to ${this.trophyIndex}: ${why.join(", ")}`);
         result = "bought";
         check("R4", coins >= cost, `${player.name}: bought trophy with only ${coins} coins`);
         check("R4", player.trophies === trophies + 1 && player.coins === coins - cost,
@@ -189,7 +274,7 @@ function installTurboPartyChecks() {
         check("R5", sameTurn === 0, `${player.name}: bought a 2nd board trophy in turn ${rec.turn}`);
         rec.buys.push({ player: player.name, turn: rec.turn, coinsAfter: player.coins });
       } else {
-        result = coins < cost ? "poor" : "declined";
+        result = alreadyBought ? "once-per-turn" : coins < cost ? "poor" : "declined";
         check("R4", player.coins === coins, `${player.name}: trophy visit without a buy changed coins ${coins}→${player.coins}`);
       }
       rec.trophyVisits.push({ player: player.name, turn: rec.turn, coins, result });
@@ -240,20 +325,35 @@ function installTurboPartyChecks() {
   function patchGame(Game) {
     const P = Game.prototype;
 
-    // --- minigameRound: R12 payouts.
+    // --- Game.payouts (static): remember the last ranking it was given,
+    //     so the round check below knows the real finishing order.
+    if (typeof Game.payouts === "function") {
+      const payouts = Game.payouts;
+      Game.payouts = function (ranking) {
+        rec.lastRanking = JSON.parse(JSON.stringify(ranking));
+        return payouts.apply(this, arguments);
+      };
+    }
+
+    // --- minigameRound: R12 payouts, compared with our own rule.
     const round = P.minigameRound;
     P.minigameRound = async function () {
       const before = snapPlayers(this.players);
+      rec.lastRanking = null;
       await round.apply(this, arguments);
       const after = snapPlayers(this.players);
-      let winners = 0;
+      const ranking = rec.lastRanking;
+      if (!check("R12", !!ranking, "minigame round finished without calling Game.payouts")) return;
+      const exp = expectedPayouts(ranking);
+      rec.rounds = rec.rounds || [];
+      rec.rounds.push({ turn: rec.turn, ranking, allTie: ranking.length === 1 });
       after.forEach((p, i) => {
-        check("R12", p.coins >= before[i].coins, `${p.name}: lost coins in a minigame round ${before[i].coins}→${p.coins}`);
-        const w = p.stats.minigameWins - before[i].stats.minigameWins;
-        check("R12", w === 0 || w === 1, `${p.name}: minigameWins +${w} in one round`);
-        winners += w;
+        const gain = p.coins - before[i].coins;
+        const win = p.stats.minigameWins - before[i].stats.minigameWins;
+        const e = exp[i] || { gain: 0, win: false };
+        check("R12", gain === e.gain && win === (e.win ? 1 : 0) && p.stats.coinsEarned - before[i].stats.coinsEarned === e.gain,
+          `${p.name}: ranking ${JSON.stringify(ranking)} → got +${gain} coins/${win} win, rule says +${e.gain}/${e.win ? 1 : 0}`);
       });
-      check("R12", winners >= 1, `minigame round gave no win to anyone`);
     };
 
     // --- finale: R13 bonus trophies. Snapshot before; the test reads the
@@ -275,9 +375,8 @@ function installTurboPartyChecks() {
     const expected = b.map(() => 0);
     if (rec.bonusesOn !== false) {
       for (const stat of BONUS_STATS) {
-        const best = Math.max(...b.map((p) => p.stats[stat]));
-        if (best <= 0) continue;
-        b.forEach((p, i) => { if (p.stats[stat] === best) expected[i]++; });
+        const w = expectedBonusWinner(b, stat);
+        if (w !== null) expected[w]++;
       }
     }
     rec.afterBonus.forEach((p, i) => {
@@ -295,12 +394,12 @@ function installTurboPartyChecks() {
     const g = window.TP && TP.game;
     if (g && g.players) {
       g.players.forEach((p, i) => {
-        if (!(Number.isInteger(p.coins) && p.coins >= 0)) check("R1", false, `${p.name}: coins = ${p.coins}`);
-        if (p.items.length > MAX_ITEMS || p.items.some((id) => !TP.ITEMS[id])) check("R3", false, `${p.name}: items = ${JSON.stringify(p.items)}`);
+        check("R1", Number.isInteger(p.coins) && p.coins >= 0, `${p.name}: coins = ${p.coins}`);
+        check("R3", p.items.length <= MAX_ITEMS && p.items.every((id) => TP.ITEMS[id]), `${p.name}: items = ${JSON.stringify(p.items)}`);
         if (last && last[i]) {
-          if (p.trophies < last[i].trophies) check("R2", false, `${p.name}: trophies ${last[i].trophies}→${p.trophies}`);
-          if (p.stats.coinsEarned < last[i].earned) check("R11", false, `${p.name}: coinsEarned went down`);
-          if (p.stats.minigameWins < last[i].wins) check("R11", false, `${p.name}: minigameWins went down`);
+          check("R2", p.trophies >= last[i].trophies, `${p.name}: trophies ${last[i].trophies}→${p.trophies}`);
+          check("R11", p.stats.coinsEarned >= last[i].earned, `${p.name}: coinsEarned went down`);
+          check("R11", p.stats.minigameWins >= last[i].wins, `${p.name}: minigameWins went down`);
         }
       });
       rec.checksRun.frames = (rec.checksRun.frames || 0) + 1;
@@ -309,6 +408,9 @@ function installTurboPartyChecks() {
     requestAnimationFrame(everyFrame);
   }
   requestAnimationFrame(everyFrame);
+
+  // Direct-test helpers for the human/unit tool (not sent back to Node).
+  window.__tpHelpers = { expectedPayouts, expectedBonusWinner, relocationProblems, hopsFrom, check };
 
   /* ---------------- How the hooks get in ----------------
      This runs before any game script. util.js does
@@ -337,6 +439,7 @@ const RULE_NAMES = {
   R4: "trophy buy maths", R5: "no double buy", R6: "fork/shortcut movement",
   R7: "lap bonus +5", R8: "shop maths", R9: "item effects", R10: "hops = dice",
   R11: "stats", R12: "minigame payout", R13: "bonus trophies",
+  R14: "trophy relocation",
 };
 
 // One-line-per-rule summary: how many checks ran and how many failed.
