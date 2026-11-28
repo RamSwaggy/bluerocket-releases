@@ -123,6 +123,39 @@ Any change to `../shared/` must keep Turbo Party passing: `node tools/turbo-part
 4. Boss merges, then asks the Director to move the hub card off "Coming soon", and Reece plays
    `boost-runner/index.html` (1 human + 3 bots).
 
+## Round 2 roadmap: genre gap check (Reece, 2026-11-28)
+
+Reece asked for the same gap check as the other modes. Reference genre: side-scrolling shared-screen multiplayer racers, where everyone races on one screen and falling off its edge is a KO. **Use genre conventions only. Never copy any game's names, characters, levels, items, art or music.** The logic, bots, look and menu all exist, but Boost Runner **isn't playable on the hub yet**, and DESIGN.md left pickups, wall rides, grapples, more themes and training out of v1.
+
+### Gaps compared with the genre
+
+| Area | Boost Runner now | Genre standard | Gap |
+|---|---|---|---|
+| Playable | "Coming soon"; JOB 3 balance WIP; small HUD and card bugs | On the hub | **Blocker** |
+| Movement depth | Jump, boost, Hit-dash, boost pads | A swing or grapple to anchor points, wall jumps or rides, slides, speed carried through slopes; mastering movement *is* the game | **Big** |
+| Pickups | None | Item boxes with about 6–10 items (a projectile, a dropped obstacle, a speed burst, a shield, a "freeze the leader"), weighted toward players behind | **Big**: this is the main source of chaos and comebacks |
+| Courses | 6 chunk types, chained by seed, 1 theme | Dozens of hand-built tracks or many chunk types, several themes, branching routes (safe or fast) | Big |
+| Squeeze and endgame | The camera squeeze decides 79% of KOs | Sudden death shrinks the screen; most KOs come from mistakes and rival play, not the timer | Medium (JOB 3) |
+| Interaction | Bump and Hit-dash | Bumps, items, traps triggered by the leader, and stealing the lead | Medium |
+| Modes | Rounds, first to N | Time trial with a ghost, a practice or chunk trainer, a tournament, teams | Medium |
+| Presentation | Night-shift test range, effects, music | A leader crown, KO bursts, near-miss flashes, a round-end replay or podium, announcer, character cosmetics | Medium |
+| Level editor | None | Common in the genre | Later |
+
+### Plan (one builder, in this order; each phase ends merged and verified)
+
+- **Phase 0: playable.** Finish JOB 3 from `team/boost-runner-gameplay` 1d0a5bb to its targets (in the resume notes). Fix the grey-panel carry-over and check the round-win card at speed 1. Cover a scripted keyboard-1 human path. Make every menu pass `tools/menunav-qc.js`, and add the Controls button (`data-open-controls`). Then message the Director: **"Boost Runner: ready for hub"**.
+- **Phase 1: movement depth.** An original tether or grapple to anchor points (swing and release with momentum), wall jumps, and a low slide under bars. New chunks that need them, and bots that use them.
+- **Phase 2: pickups.** Item boxes and about 6 items (aimed back, dropped forward, self buff, leader-only hazard), weighted toward players behind; bots use them; balance runs.
+- **Phase 3: courses.** 6 → 20+ chunk types, 2 more themes, branching safe and fast routes, and shortcuts that need the new moves.
+- **Phase 4: modes and presentation.** Time trial with a ghost, a chunk trainer, a leader crown, KO bursts, near-miss flashes, round-end podium, announcer callouts.
+- **Phase 5: later.** A tournament, teams, and a simple level editor.
+
+Each phase: smoke + balance + chunk tests pass, `credits-check` passes, screenshots, then message the Director "Boost Runner phase N: ready to merge". Shared changes go through the Director.
+
+**Round 2 staffing (2026-11-28):** one builder session (Rocket Rumble · Boost Runner · Builder) does gameplay, art, UI and
+QC, works on `team/boost-runner` only, and reports to the Director (`session_01GHNBrpeLU9EhxDWu9Qk78E`) at the end
+of each phase. `team/boost-runner-gameplay` 1d0a5bb and the release branch (`claude/eager-tesla-vdhyd9`) are merged in.
+
 ## Decisions (from Reece)
 
 - 2026-11-27: One of four rocket-car games, alongside Turbo Party, Deflect Duel and the other
