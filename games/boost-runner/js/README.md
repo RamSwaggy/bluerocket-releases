@@ -71,7 +71,7 @@ game.dispose();                  // removes car meshes from the scene
 | Field | Meaning |
 |---|---|
 | `game.state` | `"countdown"` (3 s, cars frozen) → `"race"` → `"round_end"` (2 s) → next round's `"countdown"`, or `"match_end"` |
-| `game.roundNumber` | 1, 2, 3, ... |
+| `game.roundNumber` | 1, 2, 3, ... (`game.round` is the current `Round` object; `game.snapshot().round` is the number) |
 | `game.time` | seconds since this round's countdown started |
 | `game.raceTime` | seconds since "GO" (0 during the countdown) |
 | `game.countdown` | seconds left in the countdown (3 → 0), for "3-2-1-GO" |
@@ -104,7 +104,7 @@ game.dispose();                  // removes car meshes from the scene
 | `car.dashing` | seconds left of the Hit-dash burst (for a trail effect) |
 | `car.chunkIndex` | which placed chunk it's in (`game.course.chunks[i]`) |
 | `car.isBot` | played by a bot |
-| `car.mesh` | the shared car model. Gameplay sets its position and rotation every step; `manualBodyPose` is on, and `mesh.userData.body.rotation.z` carries the tilt. |
+| `car.mesh` | the shared car model. Gameplay sets its position and rotation every step; `manualBodyPose` is on, and `mesh.userData.body.rotation.x` carries the tilt (`-angle`: in the model's own frame +x tips the nose down). Gameplay hides it (`visible = false`) on a KO, so draw the explosion from the `ko` event. |
 
 Mesh pose: `mesh.position = (x, y, 0)`, `mesh.rotation.y = +π/2` (the shared model's nose is +Z,
 so this points it along +x), and the body's tilt shows `angle`. Art can add to the mesh but
@@ -190,7 +190,7 @@ where no solid surface covers that x.
 | `pad` | `seat`, `x`, `y` | boost-pad flash |
 | `bump` | `a`, `b` (seats), `victim`, `attacker`, `impact`, `x`, `y` | sparks, sound |
 | `danger` | `seat`, `on` (bool) | start/stop the danger ring and beep |
-| `ko` | `seat`, `cause` (`"behind"`/`"fell"`), `x`, `y` | 80 ms freeze, shake, explosion, grey panel |
+| `ko` | `seat`, `cause` (`"behind"`/`"fell"`), `x`, `y`, `chunk` (index), `id` (chunk id) | 80 ms freeze, shake, explosion, grey panel |
 | `round_end` | `round`, `winner` (seat or `null` = draw), `koOrder`, `wins` | slow-mo, "BLUE TAKES THE ROUND" |
 | `match_end` | `winner`, `wins` | podium |
 
@@ -200,12 +200,14 @@ Gameplay reads the shared controls itself; main.js only calls `TP.Input.poll()` 
 
 - Drive (screen right / left): `ctrl.steer`, plus `ctrl.throttle` on gamepads only.
 - Air tilt: `ctrl.pitch` (+1 = nose up).
-- Jump / double jump: `ctrl.jump`. Boost: `ctrl.boost`. Hit-dash: `ctrl.hit`.
+- Jump / double jump: `ctrl.jump`. Boost: `ctrl.boost`. Hit-dash: `ctrl.hit` (costs 20 boost meter, see `CAR_RULES.dashBoostCost`; it does nothing below that, so the HUD can grey the dash icon when `car.boost < 20`).
 
 ## Testing hooks (`window.BR`)
 
 `BR.game` (the current game), `BR.events`, `BR.input.script(seat, [{t, steer, pitch, jump, boost, hit}, ...])`
 (scripted controls for a seat; each entry holds from round time `t` until the next one),
-`BR.Round` (QC can drive a single round directly), `BR.flags` (parsed URL flags) and
-`BR.runFor(seconds)` (step the game synchronously). URL flags: `?demo`, `&rounds=N`, `&speed=X`,
+`BR.Round` (QC can drive a single round directly), `BR.flags` (parsed URL flags),
+`BR.runFor(seconds)` / `BR.runMatch(maxSeconds)` (step the game synchronously) and `BR.summary()`
+(winner, wins, rounds, per-chunk clear counts). `sim.html?demo&seed=1&speed=20` runs a bot match with
+nothing drawn; add `&sync` to run it in one go; add `&difficulty=easy|normal|hard`. URL flags: `?demo`, `&rounds=N`, `&speed=X`,
 `&bots=2..4`, `&seed=S`, `&chunk=<id>`, `&norender`. See `br.js` for details.

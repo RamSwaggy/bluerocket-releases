@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Boost Runner — logic sim</title>
+<!--
+  A bare page that runs Boost Runner's game logic with nothing drawn.
+  For Gameplay's own testing and for QC. Examples:
+    sim.html?demo&seed=1&speed=20          full match, 4 bots, 20× speed (real-time loop)
+    sim.html?demo&seed=1&sync              full match as fast as possible, in one go
+    sim.html?demo&chunk=oneway&rounds=1    loop one chunk
+  When the match ends: window.BR.done = true and window.BR.result = BR.summary().
+  Progress lines are printed to the page and to the console ("[BR] ...").
+-->
+<style>
+  body { background: #0f1220; color: #d7e3ff; font: 13px/1.4 ui-monospace, Consolas, monospace; margin: 16px; }
+  #status { color: #34d399; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div id="status">loading…</div>
+<pre id="log"></pre>
+
+<script src="../shared/vendor/three.min.js"></script>
+<script src="../shared/js/util.js"></script>
+<script src="../shared/js/input.js"></script>
+<script src="../shared/js/car.js"></script>
+<script src="js/course.js"></script>
+<script src="js/runner-car.js"></script>
+<script src="js/view.js"></script>
+<script src="js/bots.js"></script>
+<script src="js/round.js"></script>
+<script src="js/br.js"></script>
+<script>
+(function () {
+  "use strict";
+  const logEl = document.getElementById("log");
+  const statusEl = document.getElementById("status");
+  function log(line) {
+    console.log("[BR] " + line);
+    logEl.textContent += line + "\n";
+  }
+
+  const q = new URLSearchParams(location.search);
+  if (!BR.flags.demo && !q.has("sync")) {
+    statusEl.textContent = "Add ?demo (and &seed=, &speed=, &sync) to run a bot match.";
+    return;
+  }
+
+  const scene = new THREE.Scene(); // car meshes go here; nothing is rendered
+  const game = BR.createGame({ scene });
+  const J = BR.jumpNumbers();
+  log(`seed ${game.seed}, ${game.seats.length} bots, first to ${game.winsToTake}` + (game.chunk ? `, chunk ${game.chunk}` : ""));
+  log(`jump: air ${J.airTime.toFixed(2)} s, apex ${J.apex.toFixed(2)}, reach ${J.jumpAtMax.toFixed(1)} @17 / ${J.jumpAtBoost.toFixed(1)} @27, double ${J.doubleAtMax.toFixed(1)} @17`);
+
+  const names = game.seats.map((s) => s.name);
+  game.on((ev) => {
+    if (ev.type === "ko") log(`  r${ev.round} ${ev.t.toFixed(1)}s KO ${names[ev.seat]} (${ev.cause}) at x=${ev.x.toFixed(0)}`);
+    if (ev.type === "round_end") {
+      const w = ev.winner === null ? "DRAW" : names[ev.winner] + " takes the round";
+      log(`round ${ev.round}: ${w} after ${ev.t.toFixed(1)}s — wins ${ev.wins.join("-")}`);
+    }
+    if (ev.type === "match_end") finish();
+  });
+
+  let done = false;
+  function finish() {
+    if (done) return;
+    done = true;
+    const s = BR.summary();
+    BR.result = s;
+    BR.done = true;
+    log(`MATCH: ${s.winnerName} wins ${s.wins.join("-")} in ${s.rounds.length} rounds`);
+    const stats = Object.entries(s.chunkStats).map(([id, st]) => `${id} ${st.clearedByBot}/${st.entered}`).join(", ");
+    log(`chunks cleared by bots (cleared/entered): ${stats}`);
+    log(s.neverCleared.length ? `NEVER CLEARED: ${s.neverCleared.join(", ")}` : "every chunk cleared by at least one bot");
+    statusEl.textContent = "done";
+  }
+
+  if (q.has("sync")) {
+    const t0 = performance.now();
+    BR.runMatch(3600);
+    log(`(ran in ${((performance.now() - t0) / 1000).toFixed(1)} s real time)`);
+    finish();
+    return;
+  }
+  statusEl.textContent = "running…";
+  const stop = BR.loop(() => {
+    if (done) stop();
+    else statusEl.textContent = `round ${game.roundNumber} ${game.state} t=${game.raceTime.toFixed(1)}s wins ${game.wins.join("-")}`;
+  });
+})();
+</script>
+</body>
+</html>
