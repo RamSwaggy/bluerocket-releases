@@ -56,6 +56,7 @@ node tools/turbo-party-minigame.js all 5     # each minigame ×5, winners/length
 node tools/turbo-party-balance.js 20 6       # 20 six-turn bot matches → trophy balance report (~18 min)
 node tools/turbo-party-human.js              # scripted Keyboard-1 player: hub, shop, items, fork, trophy + 14 rule checks (~4 min)
 node tools/turbo-party-minigame.js all 10 [seed]  # seeded, replayable; flags ties, cap hits, console errors
+node tools/credits-check.js turbo-party      # every third-party asset has a CREDITS.md line (pass the mode name!)
 ```
 
 In the browser: open `index.html`. URL options: `?demo` (4 bots), `&turns=N`, `&speed=N`,
