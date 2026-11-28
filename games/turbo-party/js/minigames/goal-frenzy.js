@@ -3,6 +3,12 @@
    A square arena with a goal on every side; each player guards one.
    Knock the ball into a rival's goal: +1 for you (whoever touched it
    last), -1 for the goal's owner. Own goals just cost you the point.
+
+   Golden goal: if two or more players are tied for 1st when the 60
+   seconds are up, play goes on for up to OVERTIME more seconds and ends
+   the moment a goal breaks that tie. (A goal that leaves the top still
+   tied, e.g. one trailing player scoring on another, doesn't end it.)
+   If nobody breaks the tie in time, the tie stands.
    ===================================================================== */
 (function () {
   "use strict";
@@ -12,6 +18,7 @@
   const GOAL_HALF = 6;   // goal mouth is 12 wide
   const BALL_R = 1.5;
   const CAR_HIT_R = 1.4; // car's "bumper sphere" for ball contact
+  const OVERTIME = 15;   // max seconds of golden-goal overtime
 
   // Which side each player defends. n = direction from the goal INTO the arena.
   const SIDES = [
@@ -29,8 +36,19 @@
       this.score = this.players.map(() => 0);
       this.lastTouch = null;
       this.ballPause = 0; // seconds the ball stays frozen after a goal
+      this.overtime = false;  // in golden-goal overtime?
+      this.tieBroken = false; // set when an overtime goal breaks the tie
       this.resetBall();
     }
+
+    // True if two or more players share the top score.
+    topTied() {
+      const best = Math.max(...this.score);
+      return this.score.filter((x) => x === best).length > 1;
+    }
+
+    // The round ends early only when an overtime goal breaks the tie.
+    isOver() { return this.overtime && this.tieBroken; }
 
     build() {
       this.buildBoxArena(HALF, 0x1f6f4a, 0x2a3566, GOAL_HALF);
@@ -99,6 +117,17 @@
 
     tick(dt) {
       const b = this.ball;
+
+      // Time's up with a tie for 1st? Golden-goal overtime. (The arena
+      // counts timeLeft down just before tick and ends the round right
+      // after it, so topping the clock up here keeps play going.)
+      if (!this.overtime && this.timeLeft <= 0 && this.topTied()) {
+        this.overtime = true;
+        this.timeLeft = OVERTIME;
+        TP.UI.toast("Tied for 1st — GOLDEN GOAL! Next goal that breaks the tie wins");
+        TP.sfx.play("go");
+      }
+
       if (this.ballPause > 0) {
         this.ballPause -= dt;
         if (this.ballPause <= 0) this.resetBall();
@@ -210,6 +239,7 @@
       this.ball.pos.set(0, -50, 0);
       this.ball.vel.set(0, 0, 0);
       this.ballPause = 1.4;
+      if (this.overtime && !this.topTied()) this.tieBroken = true;
     }
 
     animate() {
@@ -285,6 +315,6 @@
     id: "goal-frenzy",
     name: "Goal Frenzy",
     cls: GoalFrenzy,
-    blurb: "Four goals, one ball, 60 seconds. Guard the goal in your colour and smash the ball into everyone else's. Score: +1. Get scored on: -1.",
+    blurb: "Four goals, one ball, 60 seconds. Guard the goal in your colour and smash the ball into everyone else's. Score: +1. Get scored on: -1. Tied for 1st at the end? Golden goal!",
   });
 })();
