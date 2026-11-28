@@ -26,6 +26,10 @@
     #game { position: fixed; inset: 0; display: block; }
     .layer { position: fixed; pointer-events: none; }
 
+    /* ---------- Full-screen colour flash (KOs, smashes). Fades by itself. ---------- */
+    #flash { inset: 0; opacity: 0; transition: opacity .35s ease-out; }
+    #flash.now { transition: none; }
+
     /* ---------- Top HUD: player chips with lives, ball speed in the middle ---------- */
     #hud {
       top: 12px; left: 12px; right: 12px;
@@ -44,7 +48,9 @@
       text-align: center; min-width: 120px;
     }
     #speed .label { font-size: 11px; color: var(--muted); letter-spacing: .15em; }
-    #speed .val { font-size: 30px; font-weight: 900; line-height: 1.05; }
+    #speed .val { font-size: 30px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; transition: transform .08s; }
+    /* While the number climbs, the box swells a little. */
+    #speed.rolling .val { transform: scale(1.12); }
 
     /* ---------- Big centre text ---------- */
     #center-msg {
@@ -111,6 +117,28 @@
     }
     .btn.alt { background: #2a2f5e; color: var(--text); }
     .btn:hover { filter: brightness(1.08); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+    /* Secondary button that is really a link ("← All modes"). Same colours as Turbo Party's. */
+    .btn.hub { background: #26305a; color: var(--text); text-decoration: none; display: inline-block; }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+    /* On the menu card the button row sticks to the bottom of the card, so
+       Start is always on screen even when the card has to scroll. */
+    .btn-row.sticky {
+      position: sticky; bottom: -26px; z-index: 1;
+      margin: 12px -28px -26px; padding: 12px 28px 16px;
+      background: linear-gradient(to bottom, rgba(18,23,50,0.85), var(--panel-solid) 30%);
+      border-top: 1px solid var(--line);
+    }
+    /* Two-way toggle (lives 3 / 5): pill buttons, the picked one lit up. */
+    .seg { display: inline-flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+    .seg button {
+      font: inherit; font-size: 15px; font-weight: 800; padding: 6px 16px; cursor: pointer;
+      border: none; background: #0e1230; color: var(--muted);
+    }
+    .seg button.on { background: var(--accent); color: #2a0022; }
+    .slot.off { opacity: .55; }
+    .result-row.win { box-shadow: 0 0 0 2px var(--accent2) inset; }
+    .result-row .stat { color: var(--muted); font-size: 15px; white-space: nowrap; }
     .controls-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
     .controls-table td { padding: 5px 6px; border-top: 1px solid var(--line); color: var(--muted); }
     .controls-table td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
@@ -123,6 +151,28 @@
     .muted { color: var(--muted); }
     .error { color: #f87171; min-height: 1.2em; margin: 4px 0 0; }
 
+    /* Short screens (laptops at 720p, small windows): tighten the cards so
+       the whole menu fits at 720 tall, and still works (scrolling, with
+       Start pinned) at 600. */
+    @media (max-height: 780px) {
+      .card { padding: 18px 24px; }
+      .card h1 { font-size: 36px; }
+      .card p { margin: 4px 0 8px; line-height: 1.35; font-size: 15px; }
+      .slots { gap: 8px; margin: 8px 0; }
+      .slot { padding: 7px 10px; gap: 4px; }
+      .slot input, .slot select { padding: 4px 8px; font-size: 14px; }
+      .row { margin: 6px 0; }
+      .controls-table { font-size: 13px; }
+      .controls-table td { padding: 3px 6px; }
+      .error { margin: 2px 0 0; }
+      .btn { font-size: 18px; padding: 10px 22px; }
+      .btn-row.sticky { margin: 8px -24px -18px; padding: 10px 24px 12px; bottom: -18px; }
+    }
+    @media (max-height: 640px) {
+      .card h1 { font-size: 30px; }
+      .card .blurb { display: none; }   /* the story line goes first when space is tight */
+    }
+
     @media (max-width: 640px) {
       .slots { grid-template-columns: 1fr; }
       #center-msg { font-size: 46px; }
@@ -132,6 +182,7 @@
 <body>
   <canvas id="game"></canvas>
 
+  <div id="flash" class="layer"></div>
   <div id="hud" class="layer"></div>
   <div id="center-msg" class="layer"></div>
   <div id="toast" class="layer"></div>
@@ -144,9 +195,14 @@
   <script src="../shared/js/sfx.js"></script>
   <script src="../shared/js/input.js"></script>
   <script src="../shared/js/car.js"></script>
+  <script src="../shared/js/fx.js"></script>
+  <script src="../shared/js/rumble.js"></script>
+  <script src="../shared/js/menunav.js"></script>
 
   <!-- This mode. -->
   <script src="js/hud.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/arena.js"></script>
   <script src="js/duel.js"></script>
   <script src="js/main.js"></script>
 </body>

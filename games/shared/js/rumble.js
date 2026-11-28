@@ -40,7 +40,7 @@ window.TP = window.TP || {};
       id: "deflect-duel",
       name: "Deflect Duel",
       tag: "Ball-deflection arena",
-      status: "dev",
+      status: "play",
       players: [2, 4],
       color: "#ff4fd8",
       blurb: "One ball that gets faster with every hit. It takes the colour of whoever touched it last, and it KOs anyone else.",

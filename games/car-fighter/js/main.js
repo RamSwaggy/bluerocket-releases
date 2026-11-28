@@ -144,7 +144,7 @@
     };
 
     const card = showCard(`
-      <a class="back" href="${TP.Rumble.HUB_URL}">← All modes</a>
+      <a class="back" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
       <h1><span class="a">CAR</span> <span class="b">FIGHTER</span></h1>
       <p class="tagline">Scrapyard Floodlight League. One on one on the turntable: rams, swipes,
         flips and boost dashes. Best of 3 rounds, 60 seconds each.</p>
@@ -159,6 +159,7 @@
         <label class="toggle"><input type="checkbox" id="calm" ${TP.FightView.settings.reduceFlashing ? "checked" : ""}> Reduce flashing</label>
         <span class="muted" id="padinfo"></span>
         <span class="muted">Press <kbd>M</kbd> to mute</span>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
         <button class="btn" id="next" data-nav-primary>Choose cars →</button>
       </div>`);
 
@@ -336,11 +337,13 @@
           </div>`).join("")}
       </div>
       <div class="actions">
-        <a class="back" href="${TP.Rumble.HUB_URL}">← All modes</a>
+        <a class="back" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
         <button class="btn ghost" id="menu">Menu</button>
         <button class="btn" id="rematch" data-nav-primary>${demo ? "Watch again" : "Rematch"}</button>
       </div>`, "results");
-    card.querySelector("#rematch").addEventListener("click", () => {
+    const rematch = card.querySelector("#rematch");
+    rematch.focus({ preventScroll: true });
+    rematch.addEventListener("click", () => {
       // A demo was started from the URL, so the simplest clean rerun is a reload.
       if (demo || !lastConfig) { location.reload(); return; }
       startMatch(lastConfig);
