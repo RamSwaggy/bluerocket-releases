@@ -110,6 +110,63 @@ ignores it. Heavy (keyboard 1 `R`, keyboard 2 `,`, gamepad `Y`) was added for Ca
 - **New effects, sounds or car bodies:** build them in your mode's folder first. Once they're
   stable, tell the Director which ones are worth moving into `shared/`.
 
+## Rocket moveset (shared, opt-in)
+
+The shared car can also do jumps, flips and aerials. The moveset is **off unless a mode
+turns it on**. With it off, the car is bit-for-bit the classic car (checked by
+`tools/moveset-test.js`).
+
+- **Turn it on:** `TP.modeTuning({ ... }, { moveset: "rocket" })` for every car using that
+  tuning, or `car.moveset = "rocket"` for a single car. Keep calling `car.update(dt, ctrl, world, tuning)`.
+- **Moves:**
+  - Driving and the first jump are the classic car, unchanged.
+  - A second jump within 1.25 s with no direction held is a **double jump**.
+  - A second jump with a direction held is a **dodge flip** that way. Pitch + (W / stick up) is
+    a front flip, steer is a side flip. It adds +8 u/s forward, +7 backward or +6 sideways, with
+    a 360° spin over 0.6 s.
+  - In the air, Drive keys / stick Y **pitch** the car (+ = nose up) and Steer **yaws** it, with
+    strong damping.
+  - **Boost in the air** pushes along the nose in 3D, so pitch up and boost to fly. Gravity still applies.
+  - **Landing:** wheels within 45° of the ground give a clean landing with speed kept. Anything
+    worse is a 0.8 s **tumble** that costs speed and gives no control.
+- **State modes can read:**
+  - `car.flipping`: true during a flip. Treat a flip contact as a hard hit.
+  - `car.flipStarted`: true only on the step a flip begins. You can also set a `car.onFlip = (car) => ...` callback.
+  - `car.flipT`: seconds into the flip.
+  - `car.airborne`, and `car.canAirJump` (the second jump or flip is available right now).
+  - `car.flipDir`: world-space unit push direction.
+  - `car.flipProgress`.
+  - `car.quat`, `car.nose()`, `car.roof()`, `car.angVel`.
+  - `car.airTime`, `car.airJumpUsed`, `car.doubleJumped`.
+  - `car.tumbling`, `car.lastLanding` `{clean, speed}`, `car.hitCeiling`.
+- **Flip reset (Reece's decision):** when a car's wheels touch something that isn't the ground,
+  such as the ball, it gets its air move back with a fresh 1.25 s window. That's one second jump,
+  used as a double jump or a flip. In the mode's ball code:
+  `const hit = TP.Car.sphereContact(car, ball.pos, ball.radius); if (hit && hit.wheels) car.resetAirMoves();`
+  - "Wheels" means the underside faces the ball within 30° and the touch is inside the wheelbase,
+    not the nose, tail or a corner.
+  - `TP.Car.isWheelContact(car, normal, point)` does the same test for any other contact.
+- **World extras (optional):**
+  - `world.ceilingHeight`.
+  - `world.wallPlanes: [{nx, nz, d}]`. The normal points into the arena, and inside is
+    `nx*x + nz*z >= d`. The car bounces off these.
+  - There's no wall driving yet. The plan for ramps and wall driving (`world.surfaceAt()` returning a
+    surface normal) is written up in `car.js` above `_applyWorldLimits`.
+- **Bots:**
+  - `TP.ai.flipAt(car, x, z)`: jump and flip toward a point.
+  - `TP.ai.aerialTo(car, x, y, z, opts)`: fly to a 3D point.
+  - `TP.ai.aimNose`.
+  - `TP.ai.planJump(height)`: returns single, double or aerial, plus timing.
+  - `TP.ai.jumpApex`.
+  - `TP.ai.interceptPoint(car, ballPos, ballVel, opts)`.
+
+  Each returns a normal control object.
+- **The numbers** live in one block, `TP.ROCKET_MOVES` in `car.js`, and are part of the
+  **one car feel**: the same in every mode, and changed only by the Director.
+- Don't set `car.manualBodyPose` with the moveset on: the body is posed from `car.quat`.
+- **Try it:** open `tools/fixtures/moveset-test.html` and drive with keyboard 1. `2` turns on a bot demo.
+  **Test it:** run `node tools/moveset-test.js` (headless Node, about 1 s) after any change to `car.js`.
+
 ## Shared player setup
 
 Players are set up once in the hub and saved with `TP.Rumble.saveSetup()`. Every mode's menu
@@ -124,7 +181,7 @@ needs every seat filled plays it as a bot.
 | `vendor/three.min.js` | Three.js r160 (classic script, so games run from `file://`) |
 | `js/util.js` | Maths helpers, the `TP.sched` async scheduler, shared lighting |
 | `js/input.js` | Keyboards and gamepads → one controller shape, including the Hit button |
-| `js/car.js` | The rocket car: model, arcade physics, bumps, bot steering helpers |
+| `js/car.js` | The rocket car: model, arcade physics, the opt-in rocket moveset, bumps, bot steering helpers |
 | `js/fx.js` | Particles: sparks, confetti, explosions |
 | `js/sfx.js` | Synthesised sound effects and background music |
 | `js/rumble.js` | Rocket Rumble glue: the mode list for the hub, shared player setup, hub link |
@@ -145,6 +202,7 @@ Run these from the `games` folder. Playwright is pre-installed in cloud sessions
 |---|---|
 | `node tools/turbo-party-smoke.js 3 8 240` | Full Turbo Party match with 4 bots (3 turns, 8× speed). PASS/FAIL plus final standings. |
 | `node tools/turbo-party-minigame.js all 5` | Each minigame 5 times, fast-forwarded: winners, lengths, errors. |
+| `node tools/moveset-test.js` | Shared car: checks every rocket-moveset move with numbers, and that the moveset-off car is bit-identical. Plain Node, no browser. |
 
 Each new game should get its own `tools/<game>-smoke.js` as soon as it can run.
 That job belongs to QC.
