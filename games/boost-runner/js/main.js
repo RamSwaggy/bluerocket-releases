@@ -23,15 +23,14 @@
   "use strict";
 
   const params = new URLSearchParams(location.search);
-  const NORENDER = params.has("norender");
+  const NORENDER = !!(window.BR && BR.flags && BR.flags.norender);
   const BG = 0x070b1a; // letterbox bars, same as the page background
 
   /* ---------- The one place that creates a game ----------
-     Gameplay's BR.createGame when it's loaded; until then the temporary
-     stub (stub-logic.js) that fakes the same contract. */
+     Gameplay's BR.createGame (js/br.js). It also makes the new game
+     BR.game, which QC's tests read. */
   function createGame(opts) {
-    if (window.BR && typeof window.BR.createGame === "function") return window.BR.createGame(opts);
-    return TP.BRStub.createGame(opts);
+    return window.BR.createGame(opts);
   }
 
   /* ---------- Renderer, look, camera, effects ---------- */
