@@ -9,6 +9,7 @@ allowed (see "Free assets and tools only" in `TEAMS.md`).
 | What | Path | Source | Author | Licence |
 |---|---|---|---|---|
 | Three.js r160 | `shared/vendor/three.min.js` | https://threejs.org | three.js authors | MIT (`shared/vendor/THREE-LICENSE`) |
+| Three.js r160 add-ons (GLTFLoader, SkeletonUtils) | `shared/vendor/three-addons.min.js` | https://threejs.org | three.js authors | MIT (`shared/vendor/THREE-LICENSE`) |
 
 ## Models, textures, sounds, music
 
