@@ -13,7 +13,8 @@
    What it checks (each one prints PASS/FAIL):
      1. the match reaches phase "matchEnd" before maxSeconds (real time)
      2. scores are never negative and never add up to more than 100 %
-     3. every bot gets at least one `fill` event in every round
+     3. every bot gets at least one real `fill` event (not small:true)
+        in every round
      4. at least one `pop` happens somewhere in the match
      5. scores keep changing: no stretch of 10+ game seconds in "play"
         where the score bar doesn't move at all, and the round clock
@@ -50,7 +51,7 @@ const HANG_WALL_S = 10;     // check 5: round clock may not stop this long
   r.perRound.forEach((pr, i) => {
     const fills = [...pr.fills.entries()].sort((a, b) => a[0] - b[0]).map(([p, c]) => `p${p}:${c}`).join(" ") || "none";
     const mr = r.mon.rounds[i];
-    console.log(`Round ${i + 1}: fills ${fills}, best fill +${pr.bestFill.toFixed(1)}%, pops ${pr.pops}` +
+    console.log(`Round ${i + 1}: fills ${fills} (+${pr.small} small), best fill +${pr.bestFill.toFixed(1)}%, pops ${pr.pops} (${pr.minorPops} minor)` +
       (mr ? `, longest score freeze ${mr.maxFlat.toFixed(1)}s (from ${mr.flatAt}s)` : ""));
   });
   const endEvt = r.log.find((e) => e.name === "matchEnd");

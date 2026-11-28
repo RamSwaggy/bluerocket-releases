@@ -10,7 +10,7 @@
 
    One fresh page per match (same as a player reloading). Each match uses
    the same step monitor as mode-5-smoke.js. Prints one line per match,
-   then a summary. Exit code 0 = every match finished with no errors,
+   then a summary (including fill-size and pop-size histograms). Exit code 0 = every match finished with no errors,
    no out-of-bounds car and no score freeze; stuck cars are reported but
    don't fail the run (judge them by the numbers).
    ===================================================================== */
@@ -32,6 +32,9 @@ const maxSeconds = 60 + rounds * (time + 15) * 2;   // generous real-time limit 
   const pctBySeat = [[], [], [], []]; // final round % per seat, every round
   let bestFill = 0, bestFillWhere = "";
   const popsPerRound = [];
+  const fillSizes = [];               // cells of every fill event, all matches
+  const smallFills = [];              // fills flagged small:true by the game (if it does that)
+  const popSizes = [];                // cells of every pop event
   const fillsPerRound = [];
   const stuck = [];
   let failures = 0;
@@ -48,10 +51,14 @@ const maxSeconds = 60 + rounds * (time + 15) * 2;   // generous real-time limit 
     if (end) { if (end.data.winner >= 0) seatWins[end.data.winner]++; else draws++; }
     r.perRound.forEach((pr, i) => {
       popsPerRound.push(pr.pops);
-      fillsPerRound.push([...pr.fills.values()].reduce((a, b) => a + b, 0));
+      fillsPerRound.push([...pr.fills.values()].reduce((a, b) => a + b, 0));   // real fills only (small ones excluded)
       if (pr.bestFill > bestFill) { bestFill = pr.bestFill; bestFillWhere = `match ${n} round ${i + 1}`; }
     });
     r.mon.stuck.forEach((s) => stuck.push({ match: n, ...s }));
+    for (const e of r.log) {
+      if (e.name === "fill" && e.data) (e.data.small ? smallFills : fillSizes).push(Number(e.data.cells) || 0);
+      if (e.name === "pop" && e.data) popSizes.push({ cells: Number(e.data.cells) || 0, minor: !!e.data.minor });
+    }
     const maxFlat = Math.max(0, ...r.mon.rounds.map((x) => x.maxFlat));
     const bad = !r.finished || r.errors.length || r.mon.boundsCount || maxFlat >= 10 || r.maxHang >= 10 || r.scoreProblems.length;
     if (bad) failures++;
@@ -72,7 +79,15 @@ const maxSeconds = 60 + rounds * (time + 15) * 2;   // generous real-time limit 
   console.log(`Average final % by seat: ${pctBySeat.map((a) => avg(a).toFixed(1)).join(", ")}  (unpainted ${(100 - pctBySeat.reduce((s, a) => s + avg(a), 0)).toFixed(1)}%)`);
   console.log(`Best single fill: +${bestFill.toFixed(1)}% (${bestFillWhere})`);
   console.log(`Pops per round: avg ${avg(popsPerRound).toFixed(1)}, min ${Math.min(...popsPerRound)}, max ${Math.max(...popsPerRound)}`);
-  console.log(`Fills per round (all cars): avg ${avg(fillsPerRound).toFixed(1)}`);
+  console.log(`Real fills per round (all cars, small:true excluded): avg ${avg(fillsPerRound).toFixed(1)}`);
+  // Fill-size histogram: lots of 1-5 cell fills = FILL effects/sounds
+  // spamming for nothing; we want few, meaningful fills.
+  const hist = (arr, buckets) => buckets.map(([lo, hi]) => `${lo}${hi === Infinity ? "+" : "-" + hi}: ${arr.filter((x) => x >= lo && x <= hi).length}`).join("  ");
+  const B = [[1, 1], [2, 5], [6, 7], [8, 20], [21, 60], [61, 150], [151, 400], [401, Infinity]];
+  console.log(`Fill sizes in cells (${fillSizes.length} fill events): ${hist(fillSizes, B)}`);
+  if (smallFills.length) console.log(`  plus ${smallFills.length} fill events flagged small:true`);
+  const popB = [[1, 1], [2, 5], [6, 20], [21, Infinity]];
+  console.log(`Pop sizes in cells (${popSizes.length} pops, ${popSizes.filter((p) => p.minor).length} minor): ${hist(popSizes.map((p) => p.cells), popB)}`);
   console.log(`Stuck episodes (speed < 1 for > 3 s, not stunned): ${stuck.length}` + (stuck.length ? `, longest ${Math.max(...stuck.map((s) => s.seconds))}s` : ""));
   stuck.slice(0, 15).forEach((s) => console.log(`   match ${s.match} car ${s.car} round ${s.round} at ${s.at}s, pos (${s.x}, ${s.z}), ${s.seconds}s`));
   console.log(allErrors.length ? "Errors:\n   " + allErrors.slice(0, 20).join("\n   ") : "Errors: none");
