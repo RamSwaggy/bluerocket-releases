@@ -136,6 +136,7 @@
 
       <div class="row" style="margin-top:18px">
         <button class="btn" id="start" data-nav-primary>Start party</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
         <a class="btn" style="background:#26305a;color:var(--text);text-decoration:none" href="${TP.Rumble.HUB_URL}" data-nav-back>← All modes</a>
       </div>`);
 

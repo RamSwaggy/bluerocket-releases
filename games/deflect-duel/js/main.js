@@ -89,7 +89,12 @@
       updateHud();
       duel.camera.aspect = aspect;
       duel.camera.updateProjectionMatrix();
-      renderer.render(duel.scene, duel.camera); // 4) draw
+      // 4) The broadcast camera (Art's js/camera.js): a side-on view that
+      //    eases to fit every car and the ball's height, with shake,
+      //    punch-ins and the standoff push-in during long hit-freezes.
+      //    The real (unscaled) frame time keeps it smooth in ?demo speed-ups.
+      if (TP.DuelCamera) TP.DuelCamera.update(duel.camera, duel, dt / SPEED);
+      renderer.render(duel.scene, duel.camera); // 5) draw
     } else {
       renderer.clear();
     }
@@ -138,6 +143,16 @@
             ? `${data.owner ? data.owner.name : "?"} KO'd ${data.victim.name}!`
             : `${data.victim.name} is OUT!`,
           data.owner ? data.owner.css : "", 1.6);
+        break;
+      case "bunt":
+        // The thunk, ring and wheel glow come from Art's onBunt hook (arena.js).
+        // Only fall back to our own cue when that look isn't loaded.
+        if (!TP.DuelArena) { TP.sfx.play("swing"); TP.HUD.toast("BUNT", data.player.css, 0.7); }
+        break;
+      case "clash":
+        TP.sfx.play("hit", 1);
+        // The big flash and the "CLASH!" toast come from Art's onClash hook.
+        if (!TP.DuelArena) TP.HUD.toast("CLASH!", "#ffe14d", 0.9);
         break;
       case "stalemate":
         TP.HUD.toast("Nobody hit it: re-serve", "", 1.2);
@@ -290,6 +305,7 @@
       <p class="error" id="err"></p>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="start" data-nav-primary>Start duel</button>
+        <button class="btn alt" data-open-controls title="Rebind keys and buttons (pad: View)">🎮 Controls</button>
         <a class="btn alt" style="text-decoration:none" href="${Rumble.HUB_URL}" data-nav-back>← All modes</a>
       </div>`);
 

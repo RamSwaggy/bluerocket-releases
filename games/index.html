@@ -36,6 +36,7 @@
       text-shadow: 0 6px 0 rgba(0,0,0,.4), 0 0 40px rgba(255,90,60,.35);
     }
     h1 .a { color: var(--accent); }
+    .ctrlbtn { margin-top: 10px; background: #232c5c; color: #fff; border: 1px solid #34407a; border-radius: 10px; padding: 9px 14px; font: inherit; cursor: pointer; }
     h1 .b { color: var(--hot); }
     header p { color: var(--muted); margin: 10px 0 0; font-size: 17px; }
 
@@ -126,7 +127,7 @@
   </div>
 
   <div class="wrap">
-    <div class="topbar"><kbd>M</kbd> mute · Gamepad: <kbd>D-pad</kbd> move · <kbd>A</kbd> select</div>
+    <div class="topbar"><kbd>M</kbd> mute · Gamepad: <kbd>D-pad</kbd> move · <kbd>A</kbd> select / change · <kbd>Start</kbd> play · <kbd>View</kbd> controls</div>
     <header>
       <h1><span class="a">ROCKET</span> <span class="b">RUMBLE</span></h1>
       <p>One rocket car. A pile of ways to play.</p>
@@ -138,11 +139,9 @@
       <p class="sub">Set these once; every mode starts with them. Empty seats are filled by bots where a mode allows.</p>
       <div id="slots"></div>
       <div class="pads" id="pads"></div>
-      <table class="keys">
-        <tr><td>Keyboard 1</td><td>Drive <kbd>W</kbd><kbd>S</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Jump <kbd>Space</kbd> · Boost <kbd>Shift</kbd> · Hit <kbd>E</kbd> · Heavy <kbd>R</kbd></td></tr>
-        <tr><td>Keyboard 2</td><td>Drive <kbd>↑</kbd><kbd>↓</kbd> · Steer <kbd>←</kbd><kbd>→</kbd> · Jump <kbd>Enter</kbd> · Boost <kbd>R-Shift</kbd> · Hit <kbd>.</kbd> · Heavy <kbd>,</kbd></td></tr>
-        <tr><td>Gamepad</td><td>Gas <kbd>RT</kbd> · Reverse <kbd>LT</kbd> · Jump <kbd>A</kbd> · Boost <kbd>B</kbd> · Hit <kbd>X</kbd> · Heavy <kbd>Y</kbd></td></tr>
-      </table>
+      <!-- Filled from the current bindings (see renderKeys below). -->
+      <table class="keys" id="keys"></table>
+      <button class="ctrlbtn" data-open-controls>🎮 Controls (rebind keys and buttons)</button>
     </section>
 
     <!-- Right: pick a mode. -->
@@ -198,6 +197,18 @@
       TP.Rumble.saveSetup(setup.slots);
     });
     renderSlots();
+
+    // Controls summary, built from the player's current bindings so it
+    // stays right after rebinding (refreshes when the Controls screen closes).
+    function renderKeys() {
+      const k = (t) => `<kbd>${esc(t)}</kbd>`;
+      const row = (name, id, gas) => { const n = TP.keyNames(id);
+        return `<tr><td>${name}</td><td>${gas ? "Gas/Reverse" : "Drive"} ${k(n.drive)} · Steer ${k(n.steer)} · Jump ${k(n.confirm)} · Boost ${k(n.boost)} · Hit ${k(n.hit)} · Heavy ${k(n.heavy)}</td></tr>`; };
+      document.getElementById("keys").innerHTML = row("Keyboard 1", "kb1") + row("Keyboard 2", "kb2") + row("Gamepad", "pad0", true);
+    }
+    renderKeys();
+    addEventListener("rumble-controls-changed", renderKeys);
+    addEventListener("gamepadconnected", renderKeys);
 
     // Gamepad hint.
     const pads = document.getElementById("pads");

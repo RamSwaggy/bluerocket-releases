@@ -1,7 +1,8 @@
 # Deflect Duel: team project file
 
-**Read `../TEAMS.md` first** (team structure, branches, rules). This file is the Deflect Duel
-specifics. The boss keeps it up to date.
+**Read `../TEAMS.md` first** (team structure, branches, rules), then **`DESIGN.md`** (the current
+design, v2). This file is the Deflect Duel specifics. The boss keeps it up to date.
+
 
 ## What it is
 
@@ -75,19 +76,38 @@ From the `games` folder:
 
 ## Current state (as of 2026-11-28)
 
-- **First playable is merged** on `team/deflect-duel`:
-  - `js/duel.js`: rules, ball, hits, Smash, aim, ownership, KOs, respawn, hit-freeze, the 12 s
-    reset, pillars and bots.
-  - `js/main.js`: hub setup, menu, match flow, results and rematch, plus `?demo` and `?test`.
-  - `js/arena.js`: the neon arena.
-  - `js/hud.js`: menu and results cards, with gamepad and arrow-key navigation.
-  - The all-bot smoke test passes (4 and 2 players), and Turbo Party still passes.
-- **Key numbers** (all in `TP.DUEL_CFG`): ball serve 16, +2.5 per hit, top speed 56, Smash +8.
-  Cars top out at 17 (27 boosting).
-- **Next:**
-  - Art and UI job 2: ball glow and trail, swing ring, hit flash, KO effects, camera shake.
-  - QC job 2: scripted rule tests and a many-match balance run.
-  - Then a human playtest to tune the bots and speeds.
+**`team/deflect-duel` now holds v2** (see `DESIGN.md`). The hub's Play card still points at v1
+on the base branch until the Director verifies v2 and swaps it in.
+
+**Team:** efficiency mode. The boss builds alone; Gameplay, Art and UI, and QC are stopped.
+
+**v2 has:**
+- A 3D ball in a closed box with a ceiling. A neutral ball has gravity; an owned ball flies in
+  straight lines, then cools back to neutral.
+- Aimed strikes (up, straight or down, plus a sideways bend), clash, the wheels-touch bunt
+  (flip reset), and 3D KOs.
+- Speed escalation: ×1.22 + 2.5 per strike, up to 210. The hit-freeze grows up to 1.2 s, and a
+  Hit pressed during a freeze is remembered.
+- The rocket moveset: double jump, flips, air control and flying. Flip strikes; aerial strikes
+  aim with the car's nose.
+- Bots that fly to high balls, return high shots in the air, flip-strike, flip-dodge, Smash, and
+  react according to speed.
+- Art's broadcast camera and effects.
+
+**Tests (from `games/`):**
+- `node tools/deflect-duel-smoke.js 4 8 240`: a whole all-bot match.
+- `node tools/deflect-duel-rules.js`: 11 pass. The skipped tests are v2 plans not built yet.
+- `node tools/deflect-duel-fun.js 50 4 3`: the fun table. Last run:
+  - rallies: median 5–6 strikes
+  - median KO speed: about 29
+  - rallies reaching top speed: about 6%
+  - aerial strikes: about 31% (7–9% of all strikes are real flying aerials)
+  - per match: about 3 flip strikes, 1.6 clashes and 1 flip reset
+  - no stalemates, seats fair, nothing stuck
+
+**Still open:**
+- Human playtest feel. In particular, on a keyboard W both drives forward and aims a strike up.
+- The tunables in `TP.DUEL_CFG`.
 
 ## Decisions (from Reece)
 
@@ -110,3 +130,36 @@ From the `games` folder:
   ball stays flat at bumper height.
 - **First playable** = launch from the hub, pick 2–4 seats and 3/5 lives, play to a winner,
   results + rematch, an all-bot match finishes with no errors, QC's smoke test passes.
+- 2026-11-28 (Reece's direction, via the Director): **Design v2.** The game should feel and play
+  like car-soccer mechanics crossed with an arena ball-striking fighter. That means a truly 3D
+  ball (a neutral ball has gravity, an owned ball flies in straight lines), a ceiling, aimed
+  strikes (up, straight or down), bunts, clashes, flip strikes, the shared engine's new "rocket
+  moveset" (from the Core session), and a side-angle broadcast camera. See `DESIGN.md`. v1 stays
+  on the hub as Play while v2 is built. Genre conventions only, with no other game's names or
+  look.
+- 2026-11-28 (Reece, via the Director): "Bunting should be a flip reset (touching with 4 wheels)."
+  A bunt is no longer a button. When the car touches the ball with its underside (all four
+  wheels), the ball pops up gently and slows, the toucher keeps or takes ownership, there's no
+  hit-freeze, and the car gets its jump and flip back. Hit in the air with no direction is a
+  normal straight strike. `DESIGN.md` is updated.
+- 2026-11-28 (Reece, via the Director):
+  - **Keep the neutral-bump rule:** bumping a neutral ball makes you its owner at base speed.
+  - **Speeds should escalate the way the genre does.** Each strike multiplies the speed (about
+    ×1.12) plus a small step, up to a top speed around 200+. Hit-freeze grows up to about 1–1.5 s,
+    with a camera punch-in and a speed readout that climbs. Freeze time doesn't count toward the
+    stalemate timer. The ball's collision is swept, so it can't tunnel. Bots get speed-aware
+    reactions.
+  - **The bar is "just get them to a good playable level".** v2 replaces v1 on the hub only once
+    it's genuinely good to play (moveset, aerials, flip-strikes, bots using them, escalation, no
+    stalls). The Director verifies, then swaps it in.
+- 2026-11-28 (Director, Reece's call): **Efficiency mode.** The boss builds the rest of v2 alone,
+  keeps testing lean, and messages the new Director (`session_01GHNBrpeLU9EhxDWu9Qk78E`) only at
+  milestones or when blocked.
+- 2026-11-28 (boss, accepting Gameplay's Stage A calls):
+  - The ball radius is 0.75, so a timed jump clears a floor ball.
+  - A clash puts the ball back as it was before the first strike, with zero velocity.
+  - A hard bump on a neutral ball makes you its owner as a gravity ball, with a 0.3 s no-KO
+    grace.
+  - A cooling ball still KOs until it turns neutral.
+  - No Smash off a neutral ball.
+  - Strike aim uses the pitch axis (stick up/down or W/S), not the gas trigger.
