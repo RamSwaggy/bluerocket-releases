@@ -18,12 +18,12 @@
 
    How the human seat is set up: the saved Rocket Rumble setup is
    written into localStorage before the page loads (seat 1 = "kb1",
-   seats 2–4 = "bot"), then the page is opened with
-   ?demo&human=1&speed=1&rounds=1&time=90. `human=1` asks main.js to
-   skip the menu but keep seat 1 human (test hook requested from
-   Gameplay). If the page ignores it and shows the menu, the probe tries
-   to start the match itself (clicks a Start/Play button or presses
-   Space/Enter).
+   seats 2-4 = "bot"), then the page is opened WITHOUT ?demo and without
+   ?speed (real time, like a person playing): index.html?rounds=1&time=90.
+   main.js auto-starts from the saved setup while there's no menu. Once a
+   menu exists, the probe starts the match itself with
+   TP.M5.startMatch({ players, rounds, roundTime }) (falls back to a
+   Start/Play button, then Space/Enter).
 
    Assumption from DESIGN.md: event payload `player` / `victim` / `by`
    is the index into TP.M5.match.players (0 = seat 1).
@@ -52,7 +52,7 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
     } catch (e) { /* storage blocked: the game falls back to its default, which is also kb1 + bots */ }
   }, { key: SETUP_KEY });
 
-  await page.goto(pageUrl({ demo: true, human: 1, speed: 1, rounds: 1, time: 90 }));
+  await page.goto(pageUrl({ rounds: 1, time: 90 }));
 
   /* ---------- Keyboard helper ----------
      Keeps track of which keys are held so we only send real changes,
@@ -68,11 +68,20 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
   /* ---------- Get into a round ---------- */
   let inRound = await page.waitForFunction(() => (window.__m5log || []).some((e) => e.name === "roundStart"), null, { timeout: 15000 }).then(() => true, () => false);
   if (!inRound) {
-    // Menu fallback: click anything that looks like a start button, else press confirm keys.
-    console.log("No round after 15 s (hook ?human=1 not supported?). Trying to start from the menu...");
-    const btn = page.locator("button, [role=button], .btn").filter({ hasText: /start|play|go/i }).first();
-    if (await btn.count()) await btn.click().catch(() => {});
-    else { await page.keyboard.press("Enter"); await page.keyboard.press("Space"); }
+    // A menu is up (or something else). Start the match directly through
+    // main.js's API with our seats; failing that, try the menu itself.
+    console.log("No round after 15 s: starting the match via TP.M5.startMatch...");
+    const started = await page.evaluate(() => {
+      if (!(window.TP && TP.M5 && TP.M5.startMatch)) return false;
+      TP.M5.startMatch({ players: [{ name: "Probe", controller: "kb1" }, { name: "Orange", controller: "bot" },
+        { name: "Green", controller: "bot" }, { name: "Pink", controller: "bot" }], rounds: 1, roundTime: 90 });
+      return true;
+    });
+    if (!started) {
+      const btn = page.locator("button, [role=button], .btn").filter({ hasText: /start|play|go/i }).first();
+      if (await btn.count()) await btn.click().catch(() => {});
+      else { await page.keyboard.press("Enter"); await page.keyboard.press("Space"); }
+    }
     inRound = await page.waitForFunction(() => (window.__m5log || []).some((e) => e.name === "roundStart"), null, { timeout: 20000 }).then(() => true, () => false);
   }
 
@@ -105,6 +114,9 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
       const waypoints = [pt(SIDE, 0), pt(SIDE, SIDE), pt(0, SIDE), pt(0, 0), pt(-2, 0)];
       let fills = [];
       let maxDist = 0;
+      // Feel numbers: how quickly the car answers W, how long the loop takes.
+      const tKey = Date.now();
+      let tSpeed2 = null, tSpeed8 = null, topSpeed = 0;
       for (let attempt = 1; attempt <= 3 && !fills.length; attempt++) {
         const tStart = Date.now();
         let wi = 0;
@@ -112,6 +124,9 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
           s = await state();
           const c = me();
           maxDist = Math.max(maxDist, Math.hypot(c.x - p0.x, c.z - p0.z));
+          topSpeed = Math.max(topSpeed, c.speed || 0);
+          if (tSpeed2 === null && c.speed > 2) tSpeed2 = Date.now() - tKey;
+          if (tSpeed8 === null && c.speed > 8) tSpeed8 = Date.now() - tKey;
           const w = waypoints[wi];
           const dx = w.x - c.x, dz = w.z - c.z;
           if (Math.hypot(dx, dz) < 2.5) { wi++; continue; }
@@ -134,6 +149,9 @@ const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI)
         }
       }
       const log = await events();
+      const fillEvt = log.find((e) => e.name === "fill" && e.data && e.data.player === hi);
+      console.log(`  feel: speed > 2 after ${tSpeed2} ms, > 8 after ${tSpeed8} ms of holding W (real time; includes ~40 ms poll), top speed ${topSpeed.toFixed(1)}; ` +
+        `first fill ${fillEvt ? ((fillEvt.t - (log.find((e) => e.name === "roundStart") || fillEvt).t) / 1000).toFixed(1) + " s into the round, +" + fillEvt.data.pct + "% (" + fillEvt.data.cells + " cells)" : "never"}`);
       result("A1 human can drive out (wet trail starts)", log.some((e) => e.name === "trailStart" && e.data && e.data.player === hi) && maxDist > 5,
         `max ${maxDist.toFixed(1)} units from spawn; trailStart from human: ${log.filter((e) => e.name === "trailStart" && e.data && e.data.player === hi).length}`);
       result("A2 human loop back gives a fill", fills.length > 0,

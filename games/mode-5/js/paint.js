@@ -10,6 +10,13 @@
    Cell index c = j * GRID + i, where i counts along X and j along Z.
    Cell (0, 0) is the corner at x = -half, z = -half.
 
+   Teams (2v2): setTeams([0, 1, 0, 1]) makes teammates "friendly": their
+   dry turf counts as home for closing a loop and as wall for the flood
+   fill, your paint never covers theirs, and you can't pop each other.
+
+   For world.js: `n` is the same as N, and `dirty` is set true on every
+   change (clear it after drawing), alongside the per-row dirtyRows.
+
    The grid doesn't know about cars or time: match.js decides WHEN to
    paint, close a loop, dry or pop a trail, and this file does the cell
    work and keeps the counts right. The look side reads `owner`, `wet`
@@ -27,6 +34,8 @@ TP.M5 = TP.M5 || {};
   class PaintGrid {
     constructor(arena, size = TP.M5.CFG.GRID) {
       this.N = size;
+      this.n = size;          // the name world.js uses
+      this.teams = null;      // or [team of player 0, 1, 2, 3]
       const n = size * size;
       this.owner = new Uint8Array(n);
       this.wet = new Uint8Array(n);
@@ -35,6 +44,7 @@ TP.M5 = TP.M5 || {};
       // Scratch space for the flood fill, allocated once.
       this._seen = new Uint8Array(n);
       this._queue = new Int32Array(n);
+      this._mark = new Uint8Array(n);   // scratch for the bots' loop estimate
       this.reset(arena);
     }
 
@@ -63,7 +73,19 @@ TP.M5 = TP.M5 || {};
         }
       }
       this.dirtyRows.fill(1);
+      this.dirty = true;
       this.version = (this.version || 0) + 1;
+    }
+
+    /* Teams: pass [team of each player] (e.g. [0, 1, 0, 1]) or null. */
+    setTeams(teams) { this.teams = teams ? teams.slice() : null; }
+
+    /* Is owner code `code` (1..4, or 0) on player p's side: p's own
+       paint or a teammate's? */
+    friendly(code, p) {
+      if (!code) return false;
+      if (code === p + 1) return true;
+      return !!this.teams && this.teams[code - 1] === this.teams[p];
     }
 
     /* ---------- Coordinates ---------- */
@@ -83,12 +105,14 @@ TP.M5 = TP.M5 || {};
 
     // Is cell c this player's own DRY turf (painted by them, not a trail)?
     isOwnDry(c, p) { return c >= 0 && this.owner[c] === p + 1 && this.wet[c] === 0; }
+    // Is cell c "home" for p: dry turf of p or (in teams) a teammate?
+    isHome(c, p) { return c >= 0 && this.wet[c] === 0 && this.friendly(this.owner[c], p); }
     hasTrail(p) { return this.wetCount[p] > 0; }
 
     // Score: share of the paintable floor this player owns, 0..100.
     pct(p) { return this.paintable ? (this.counts[p] / this.paintable) * 100 : 0; }
 
-    clearDirty() { this.dirtyRows.fill(0); }
+    clearDirty() { this.dirtyRows.fill(0); this.dirty = false; }
 
     /* ---------- The one place cells change ----------
        Sets cell c to owner code o (0..4) and wet code w (0 or o), keeping
@@ -107,6 +131,7 @@ TP.M5 = TP.M5 || {};
       this.owner[c] = o;
       this.wet[c] = w;
       this.dirtyRows[(c / this.N) | 0] = 1;
+      this.dirty = true;
       this.version++;
       return true;
     }
@@ -146,6 +171,8 @@ TP.M5 = TP.M5 || {};
           const c = j * N + i;
           if (this.blocked[c]) continue;
           const oldO = this.owner[c], oldW = this.wet[c];
+          // A teammate's paint is left alone (it already counts for us).
+          if (oldO && oldO !== code && this.friendly(oldO, p)) continue;
           if (oldW && oldW !== code) hitWet |= 1 << (oldW - 1);
           // Own dry turf stays dry; everything else follows `wet`.
           const w = wet && !(oldO === code && oldW === 0) ? code : 0;
@@ -168,18 +195,24 @@ TP.M5 = TP.M5 || {};
        search (so a pillar doesn't act as part of your wall) but are never
        painted. Rival cells inside the loop are taken, trails included.
 
-       Returns { cells, cx, cz }: cells filled (not counting the trail
-       drying) and the world centre of the filled area (for effects).
+       In teams, a teammate's paint walls off the outside too.
+
+       Returns { cells, cx, cz, list }: cells filled (not counting the
+       trail drying), the world centre of the filled area, and the list of
+       filled cell indices (for the fill-sweep effect).
        ===================================================================== */
     closeLoop(p) {
       const code = p + 1;
       this.dryTrail(p);
 
       const N = this.N, owner = this.owner, seen = this._seen, q = this._queue;
-      seen.fill(0);
       let head = 0, tail = 0;
-      // Seed the search with every edge cell that isn't p's colour.
-      const seed = (c) => { if (!seen[c] && owner[c] !== code) { seen[c] = 1; q[tail++] = c; } };
+      // "Wall" = p's colour (or a teammate's). Mark it seen up front so
+      // the search treats it as solid.
+      if (this.teams) for (let c = 0; c < N * N; c++) seen[c] = this.friendly(owner[c], p) ? 1 : 0;
+      else for (let c = 0; c < N * N; c++) seen[c] = owner[c] === code ? 1 : 0;
+      // Seed the search with every edge cell that isn't wall.
+      const seed = (c) => { if (!seen[c]) { seen[c] = 2; q[tail++] = c; } };
       for (let k = 0; k < N; k++) {
         seed(k);                   // bottom row
         seed((N - 1) * N + k);     // top row
@@ -196,18 +229,21 @@ TP.M5 = TP.M5 || {};
         if (c < N * (N - 1)) seed(c + N);
       }
 
-      // Everything not reached (and not already p's, and paintable) fills.
+      // Everything not reached (seen still 0: not wall, not outside) and
+      // paintable fills.
       let cells = 0, sx = 0, sz = 0;
+      const list = [];
       for (let c = 0; c < N * N; c++) {
-        if (seen[c] || owner[c] === code || this.blocked[c]) continue;
+        if (seen[c] || this.blocked[c]) continue;
         this._set(c, code, 0);
+        list.push(c);
         cells++;
         sx += c % N;
         sz += (c / N) | 0;
       }
       return cells
-        ? { cells, cx: this.cellX(sx / cells), cz: this.cellZ(sz / cells) }
-        : { cells: 0, cx: 0, cz: 0 };
+        ? { cells, cx: this.cellX(sx / cells), cz: this.cellZ(sz / cells), list }
+        : { cells: 0, cx: 0, cz: 0, list };
     }
 
     /* The trail dries in place: still p's paint, just no longer wet.
@@ -236,6 +272,59 @@ TP.M5 = TP.M5 || {};
       return cells
         ? { cells, cx: this.cellX(sx / cells), cz: this.cellZ(sz / cells) }
         : { cells: 0, cx: 0, cz: 0 };
+    }
+
+    /* =====================================================================
+       estimateLoop — for bots: "if player p drove this path (a list of
+       world points) and then closed the loop, how much would it gain?"
+
+       It draws the path as a 3-cell-wide stroke on a scratch copy of the
+       board, runs the same edge flood fill closeLoop uses, and adds up
+       what the stroke plus the enclosed area would take: unpainted floor
+       counts 1 per cell, a rival's floor 1.4 (stealing hurts them too),
+       our own (or a teammate's) floor 0. Doesn't change the real board.
+       ===================================================================== */
+    estimateLoop(p, pts) {
+      const N = this.N, owner = this.owner, seen = this._seen, mark = this._mark, q = this._queue;
+      mark.fill(0);
+      // Rasterise each segment: step half a cell, mark a plus-shape.
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1], b = pts[k];
+        const fx0 = (a.x + this.half) / this.cs, fz0 = (a.z + this.half) / this.cs;
+        const fx1 = (b.x + this.half) / this.cs, fz1 = (b.z + this.half) / this.cs;
+        const steps = Math.max(1, Math.ceil(Math.hypot(fx1 - fx0, fz1 - fz0) * 2));
+        for (let s = 0; s <= steps; s++) {
+          const i = Math.floor(fx0 + (fx1 - fx0) * (s / steps)), j = Math.floor(fz0 + (fz1 - fz0) * (s / steps));
+          if (i < 0 || j < 0 || i >= N || j >= N) continue;
+          const c = j * N + i;
+          mark[c] = 1;
+          if (i > 0) mark[c - 1] = 1;
+          if (i < N - 1) mark[c + 1] = 1;
+          if (j > 0) mark[c - N] = 1;
+          if (j < N - 1) mark[c + N] = 1;
+        }
+      }
+      // Wall = our side's paint or the stroke; flood from the edges.
+      for (let c = 0; c < N * N; c++) seen[c] = mark[c] || this.friendly(owner[c], p) ? 1 : 0;
+      let head = 0, tail = 0;
+      const seed = (c) => { if (!seen[c]) { seen[c] = 2; q[tail++] = c; } };
+      for (let k = 0; k < N; k++) { seed(k); seed((N - 1) * N + k); seed(k * N); seed(k * N + N - 1); }
+      while (head < tail) {
+        const c = q[head++], i = c % N;
+        if (i > 0) seed(c - 1);
+        if (i < N - 1) seed(c + 1);
+        if (c >= N) seed(c - N);
+        if (c < N * (N - 1)) seed(c + N);
+      }
+      // Gain: stroke cells and enclosed cells that aren't already ours.
+      let gain = 0;
+      for (let c = 0; c < N * N; c++) {
+        if (seen[c] === 2 || this.blocked[c]) continue;
+        const o = owner[c];
+        if (this.friendly(o, p)) continue;
+        gain += o ? 1.4 : 1;
+      }
+      return gain;
     }
 
     /* Nearest cell to world (x, z) that passes test(c), searching outward

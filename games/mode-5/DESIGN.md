@@ -65,6 +65,8 @@ ahead of the car, so "paint dry while at home" never let it leave home).
 - End of round: freeze, the floor camera swoops overhead, bars animate to final %, winner banner,
   confetti. End of match: results screen with per-player stats (best fill, pops, % painted,
   distance), Rematch / Menu / ← All modes.
+- **Tie-break (boss decision, M2):** if the best-of ends with a tie on round wins, play a SUDDEN-DEATH
+  round between the tied players (others still play and can pop).
 - **Teams option (2v2)**: teammates share a colour family and a score; a teammate's turf counts as
   your turf for loop-closing. Gives replay variety. (Milestone 3.)
 
