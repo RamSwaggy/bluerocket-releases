@@ -40,7 +40,8 @@ window.TP = window.TP || {};
      throwVsBlocker chance to throw an opponent who has been blocking a lot
      juggleChance   chance to go for the launcher-juggle route
      specialChance  chance to use a full super bar when in range
-     Normal is the tuned M1 bot; Easy and Hard are first guesses for M2. */
+     All three are tuned with QC's sims (Rivet mirror, both seat orders):
+     Hard beats Normal about 75%, Normal beats Easy about 80% (DESIGN §6). */
   TP.BOT_LEVELS = {
     easy: {
       reactFrames: 27, blockChance: 0.15, sidestepChance: 0.02, punishChance: 0.1,
@@ -53,7 +54,7 @@ window.TP = window.TP || {};
       juggleChance: 0.4, specialChance: 0.6,
     },
     hard: {
-      reactFrames: 7, blockChance: 0.7, sidestepChance: 0.12, punishChance: 0.85,
+      reactFrames: 7, blockChance: 0.65, sidestepChance: 0.12, punishChance: 0.75,
       maxComboHits: 5, aggression: 0.5, spacing: 0.8, throwVsBlocker: 0.55,
       juggleChance: 0.75, specialChance: 0.8,
     },
@@ -116,9 +117,22 @@ window.TP = window.TP || {};
       }
     }
 
-    function pickRoute(me, F, dist) {
-      // Full super bar and close: use the signature move sometimes.
-      if (me.super >= 100 && dist < 4.5 && rng() < L.specialChance * 0.5) return ["super"];
+    // Should we spend a super bar on the signature move right now? Only in
+    // the car's own range, and not always: it saves meter unless it has
+    // two bars, or the hit would (nearly) finish the round.
+    function wantSuper(me, op, dist) {
+      if (me.super < 100) return false;
+      const H = habits(me);
+      const range = H.superRange || [0, 4.2];
+      if (dist < range[0] || dist > range[1]) return false;
+      if (me.super >= 200 || op.health <= 260) return rng() < L.specialChance;
+      return rng() < L.specialChance * 0.3;
+    }
+
+    const habits = (me) => (TP.fighterDef(me.fighter).bot || {});
+
+    function pickRoute(me, F, dist, op) {
+      if (op && wantSuper(me, op, dist)) return ["super"];
       // A turtle up close: throw them.
       if (oppBlocks >= 2 && dist < 3.7 && rng() < L.throwVsBlocker) { oppBlocks = 0; return ["throw"]; }
       // Pinned near a rail with the opponent close: Tailwhip shoves them off.
@@ -128,8 +142,11 @@ window.TP = window.TP || {};
         (!r.needBoost || me.boost >= 25) &&
         (!r.juggle || L.juggleChance > 0));
       let total = 0;
+      const bias = habits(me).routeBias || {};
       const weights = options.map((r) => {
-        const w = r.juggle ? r.weight * L.juggleChance * 2 : r.weight;
+        let w = r.juggle ? r.weight * L.juggleChance * 2 : r.weight;
+        // Per-car habit: e.g. Haulback likes routes ending in its armoured Ram.
+        if (bias.heavy && r.steps[r.steps.length - 1] === "heavy") w += bias.heavy;
         total += w;
         return w;
       });
@@ -144,7 +161,8 @@ window.TP = window.TP || {};
     function chooseIntent(dist, aggr, me) {
       const r = rng();
       if (dist > 8) {
-        intent = r < 0.65 ? "approach" : r < 0.75 && me.boost >= 40 ? "dash" : r < 0.85 ? "jumpin" : "hold";
+        const dash = 0.1 + (habits(me).dashBias || 0);
+        intent = r < 0.65 ? "approach" : r < 0.65 + dash && me.boost >= 40 ? "dash" : r < 0.85 ? "jumpin" : "hold";
       } else if (dist > 4.3) {
         if (r < aggr) intent = rng() < 0.2 ? "jumpin" : "approach";
         else if (r < aggr + L.spacing * 0.35) intent = "hold";
@@ -200,7 +218,9 @@ window.TP = window.TP || {};
 
       // Losing near the end of the round: press harder, guard less.
       const behind = S.timer < 15 && me.health / me.maxHealth < op.health / op.maxHealth;
-      const aggr = behind ? 0.95 : L.aggression;
+      const H = habits(me);
+      const aggr = behind ? 0.95 : Math.min(0.95, L.aggression + (H.aggressionBonus || 0));
+      const sidestepChance = L.sidestepChance + (H.sidestepBonus || 0);
       const blockChance = behind ? L.blockChance * 0.4 : L.blockChance;
 
       /* 1. Can't act. */
@@ -268,7 +288,7 @@ window.TP = window.TP || {};
         if (seen.serial !== defendedSerial) {
           defendedSerial = seen.serial;
           const r = rng();
-          defence = m.flags.throw ? null : r < blockChance ? "block" : r < blockChance + L.sidestepChance ? "sidestep" : null;
+          defence = m.flags.throw ? null : r < blockChance ? "block" : r < blockChance + sidestepChance ? "sidestep" : null;
         }
         const coming = seen.moveFrame < m.startup + m.active && dist < reach + 3;
         if (coming && defence === "block") { out.steer = -toward; return out; }
@@ -282,7 +302,7 @@ window.TP = window.TP || {};
         if (seen.moveFrame >= m.startup + m.active && framesLeft >= 8 && dist < 4.3 && seen.serial !== punishedSerial) {
           punishedSerial = seen.serial;
           if (rng() < L.punishChance) {
-            plan = { steps: pickRoute(me, F, dist), i: 0 };
+            plan = { steps: pickRoute(me, F, dist, op), i: 0 };
           }
         }
       }
@@ -291,10 +311,16 @@ window.TP = window.TP || {};
       if (!plan) {
         if (--intentFrames <= 0) chooseIntent(dist, aggr, me);
         const inRange = dist < 4.0;
+        // A signature that works from mid range (Skitter's Slipstream).
+        // (Checked every frame, so it only rolls 1 frame in 15 on average.)
+        if (!inRange && attackCooldown <= 0 && (H.superRange || [0])[0] > 0 && rng() < 0.07 && wantSuper(me, op, dist)) {
+          plan = { steps: ["super"], i: 0 };
+        }
         // In range: attack, but not every frame. `aggr` sets how keen it is.
         const keen = intent === "attack" ? 0.35 : intent === "approach" ? 0.2 : 0.03;
-        if (inRange && attackCooldown <= 0 && rng() < keen * (0.5 + aggr)) {
-          plan = { steps: pickRoute(me, F, dist), i: 0 };
+        if (plan) { /* chosen above */ }
+        else if (inRange && attackCooldown <= 0 && rng() < keen * (0.5 + aggr)) {
+          plan = { steps: pickRoute(me, F, dist, op), i: 0 };
         } else if (intent === "dash" && dist > 5 && dist < 11 && me.boost >= 25 && attackCooldown <= 0) {
           plan = { steps: ["dash"], i: 0 };
         } else if (intent === "jumpin" && dist > 3.5 && dist < 8.5 && me.vx * toward > 6) {

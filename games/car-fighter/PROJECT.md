@@ -58,6 +58,7 @@ node tools/car-fighter-smoke.js 8 180 12345   # [speed] [maxSeconds] [seed]: bot
 node tools/car-fighter-sim.js 50 1000         # [matches] [seed]: headless bot-vs-bot stats
                                               #   options: --p1= --p2= --bot= --bot2=
 node tools/car-fighter-sim.js frames 7        # frame-data check of every TP.MOVES row
+node tools/car-fighter-human.js               # real menu + kb1 key presses for every move type (~3 min, background)
 ```
 
 All three also take `--page=<path>` and `--extra="&opt=.."`.
@@ -66,7 +67,7 @@ The tools exist, but they can't pass until the M1 game code lands. In the browse
 `car-fighter/index.html?demo&speed=4&seed=1`. Any change that touches `../shared/` must also
 keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
 
-## Current state (as of 2026-11-27)
+## Current state (as of 2026-11-28)
 
 - `DESIGN.md` is signed off. The first M1 build jobs have gone to all three roles.
 - QC job 1 is merged (`aff8559`): `tools/car-fighter-smoke.js` and `tools/car-fighter-sim.js`
@@ -90,9 +91,18 @@ keep Turbo Party passing: `node tools/turbo-party-smoke.js 2 8 200`.
   - sim 200 (P1 45%, average round 26 s)
   - frames 11/11
 - **M2 started 2026-11-28.** Gameplay JOB 3: the cars, signatures and bots. Art JOB 3: bodies,
-  sfx and music, damage looks, combo counter, character select, MenuNav. The Director was told
-  M1 is ready for the hub card to go to Play.
-- Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
+  sfx and music, damage looks, combo counter, character select, MenuNav. **M1 is on the base branch**
+  (`claude/eager-tesla-vdhyd9` at `79161cb`), and the hub card says **Play**.
+- Gameplay JOB 3 (M2) is merged (`383d4e8`):
+  - all 3 cars and their signatures (Grinder, Quake Drop, Slipstream cross-up)
+  - Easy, Normal and Hard bots
+  - display info for character select
+  Smoke test with Haulback vs Skitter: PASS. All pairings are within 40–60%.
+- QC's frames tool needs updates for per-car tables, multi-hit moves and cross-ups (QC JOB 3).
+- QC JOB 2 is merged (`a2b5ecf`): `tools/car-fighter-human.js`. 10 of 11 PASS.
+  **Open bug (Gameplay):** the Tow Hook throw never comes out when E and R are pressed on
+  different frames, which is how a real person presses them. Instead you get Jab > Ram.
+- (old) Waiting on QC's scripted human-input check (JOB 2, re-sent after QC hit its usage limit).
   Then the boss tells the Director to switch the hub card to Play, and M2 starts.
 
 ## Decisions (from Reece)
