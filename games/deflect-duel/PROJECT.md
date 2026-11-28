@@ -40,12 +40,14 @@ characters, art, music or levels.
 
 ## Team
 
-| Session | Branch |
-|---|---|
-| Deflect Duel (boss) | `team/deflect-duel` |
-| Deflect Duel · Gameplay (systems and feel) | `team/deflect-duel-gameplay` |
-| Deflect Duel · Art and UI (look and screens) | `team/deflect-duel-art` |
-| Deflect Duel · QC (playtest and checks) | `team/deflect-duel-qc` |
+| Session | Session ID | Branch |
+|---|---|---|
+| Deflect Duel (boss) | `session_01GHNBrrDAhFP7gZXs4Ap9TK` | `team/deflect-duel` |
+| Deflect Duel · Gameplay (systems and feel) | `session_01GHNBrpQgRcR4wuJEviMDGG` | `team/deflect-duel-gameplay` |
+| Deflect Duel · Art and UI (look and screens) | `session_01GHNBrqgetkZbzAJt8h3dPM` | `team/deflect-duel-art` |
+| Deflect Duel · QC (playtest and checks) | `session_01GHNBrouPoebhNMp9PjrRtH` | `team/deflect-duel-qc` |
+
+Roles reply to the boss with `send_message` to the boss session ID above.
 
 ## Who owns what
 
@@ -54,8 +56,8 @@ characters, art, music or levels.
 | `js/duel.js` (to write) | ball physics, hitting, ownership, KOs, lives, respawn, hit-freeze timing, bots | arena look, ball glow and trail, swing ring, KO effects, camera shake |
 | `js/main.js` (to write) | match flow and config | menu, results and rematch screens |
 | `js/hud.js`, `index.html` | — | owns these |
-| `../shared/js/input.js`, `car.js` | owns | car model only |
-| `../shared/js/fx.js`, `sfx.js` | — | owns (hit/swing/KO sounds already exist) |
+| `js/arena.js` (to write) | — | arena meshes and lighting |
+| `../shared/` (all of it) | — (ask the boss, who asks the Director) | — (ask the boss, who asks the Director) |
 | `../tools/deflect-duel-*.js` | — (QC owns) | — (QC owns) |
 
 Suggested split for the first build: Gameplay writes `duel.js`'s rules with plain placeholder
@@ -64,17 +66,28 @@ match to the end) as soon as a match can finish.
 
 ## How to test
 
-Not playable yet. Once it is, QC adds `node tools/deflect-duel-smoke.js` here. Until then,
-check that Turbo Party still passes after any change to `../shared/`:
-`node tools/turbo-party-smoke.js 2 8 200`.
+From the `games` folder:
 
-## Current state (as of 2026-11-27)
+- `node tools/deflect-duel-smoke.js 4 8 180`: all-bot match (players, speed, timeout s,
+  optional lives). Checks the rules on every frame; prints PASS/FAIL. Fails cleanly with
+  "isn't playable yet" until `duel.js` and `main.js` exist.
+- `node tools/turbo-party-smoke.js 2 8 200`: must still pass after any shared change.
 
-- **Done:** `index.html` (layout, styles, script tags) and `js/hud.js` (player chips with
-  hearts, ball speed, centre text, toasts, cards). In the shared engine: the Hit button,
-  hit/swing/KO sounds, and the `pivot` car setting (turning while nearly stopped, so you can
-  aim; Deflect Duel should use about 0.8).
-- **To build:** `js/duel.js` and `js/main.js`. See `README.md` for the checklist.
+## Current state (as of 2026-11-28)
+
+- **First playable is merged** on `team/deflect-duel`:
+  - `js/duel.js`: rules, ball, hits, Smash, aim, ownership, KOs, respawn, hit-freeze, the 12 s
+    reset, pillars and bots.
+  - `js/main.js`: hub setup, menu, match flow, results and rematch, plus `?demo` and `?test`.
+  - `js/arena.js`: the neon arena.
+  - `js/hud.js`: menu and results cards, with gamepad and arrow-key navigation.
+  - The all-bot smoke test passes (4 and 2 players), and Turbo Party still passes.
+- **Key numbers** (all in `TP.DUEL_CFG`): ball serve 16, +2.5 per hit, top speed 56, Smash +8.
+  Cars top out at 17 (27 boosting).
+- **Next:**
+  - Art and UI job 2: ball glow and trail, swing ring, hit flash, KO effects, camera shake.
+  - QC job 2: scripted rule tests and a many-match balance run.
+  - Then a human playtest to tune the bots and speeds.
 
 ## Decisions (from Reece)
 
@@ -85,3 +98,15 @@ check that Turbo Party still passes after any change to `../shared/`:
   feel (only `TP.MODE_TUNABLE` settings may change, via `TP.modeTuning`), the shared controls,
   and the hub's saved player setup (`TP.Rumble.loadSetup()`), with a "← All modes" link back.
   The Director owns `shared/` and the hub.
+- 2026-11-27 (via the Director): **Free assets and tools only** (see `../TEAMS.md`). Every
+  third-party asset needs a line in `../CREDITS.md` before the boss merges it; assets made in
+  code are exempt.
+- 2026-11-27: **Reece approved the build plan** and said "Director can approve for me": from
+  now on the Director's approvals count as Reece's for this team. Answers (logged by the Director):
+  the ball never KOs its owner; double KO → last hitter wins; stalemate = 12 s reset only (no
+  speed decay); neutral serve anyone can take; aim bend about 25° (tune after first playtest);
+  two round pillars, on by default behind one config flag; `js/arena.js` belongs to Art and UI;
+  car tuning via `TP.modeTuning({ pivot: 0.8 })`; one bot difficulty for v1 (random skill per bot);
+  ball stays flat at bumper height.
+- **First playable** = launch from the hub, pick 2–4 seats and 3/5 lives, play to a winner,
+  results + rematch, an all-bot match finishes with no errors, QC's smoke test passes.
